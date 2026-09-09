@@ -18,6 +18,7 @@ import (
 // (the consumer), not in the store package, per PLAN.md §1's seam rule.
 // Methods return domain.ErrDuplicate on a unique-constraint collision.
 type Store interface {
+	MasterActive(ctx context.Context, masterID uuid.UUID) (bool, error)
 	EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]domain.FollowLink, error)
 	InstrumentLotSize(ctx context.Context, exchange, tradingsymbol string) (int, error)
 	InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error)
@@ -51,6 +52,17 @@ func New(store Store, dispatcher Dispatcher) *Engine {
 // redrive) — duplicate follower_orders are recognized and skipped, not
 // re-dispatched.
 func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) error {
+	active, err := e.store.MasterActive(ctx, fill.MasterID)
+	if err != nil {
+		return fmt.Errorf("check master active: %w", err)
+	}
+	if !active {
+		// Master manually stopped via the Dashboard — no-op, same as a
+		// duplicate-fill redelivery: safe to keep receiving fills, just
+		// nothing dispatches until Start is clicked again.
+		return nil
+	}
+
 	links, err := e.store.EnabledFollowLinks(ctx, fill.MasterID)
 	if err != nil {
 		return fmt.Errorf("load follow links: %w", err)
