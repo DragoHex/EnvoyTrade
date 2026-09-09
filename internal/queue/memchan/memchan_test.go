@@ -15,7 +15,7 @@ func fill(id int64) domain.MasterFill {
 }
 
 func TestPublishConsume_ReturnsSameEvent(t *testing.T) {
-	q := memchan.New(1)
+	q := memchan.New[domain.MasterFill](1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -43,7 +43,7 @@ func TestPublishConsume_ReturnsSameEvent(t *testing.T) {
 }
 
 func TestConsume_OrderPreserved(t *testing.T) {
-	q := memchan.New(3)
+	q := memchan.New[domain.MasterFill](3)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -84,7 +84,7 @@ func TestConsume_OrderPreserved(t *testing.T) {
 }
 
 func TestPublish_NonBlockingWhenFull(t *testing.T) {
-	q := memchan.New(1)
+	q := memchan.New[domain.MasterFill](1)
 	ctx := context.Background()
 
 	if err := q.Publish(ctx, fill(1)); err != nil {
@@ -105,7 +105,7 @@ func TestPublish_NonBlockingWhenFull(t *testing.T) {
 }
 
 func TestPublish_BufferedBeforeConsumerStarts(t *testing.T) {
-	q := memchan.New(2)
+	q := memchan.New[domain.MasterFill](2)
 	ctx := t.Context()
 
 	if err := q.Publish(ctx, fill(1)); err != nil {
@@ -140,6 +140,6 @@ func TestPublish_BufferedBeforeConsumerStarts(t *testing.T) {
 		}
 	}
 
-	var _ queue.Publisher = q
-	var _ queue.Consumer = q
+	var _ queue.Publisher[domain.MasterFill] = q
+	var _ queue.Consumer[domain.MasterFill] = q
 }
