@@ -11,30 +11,36 @@ describe('Dashboard', () => {
 
   it('renders one GroupCard per group, with that group detail', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
-      { masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
     ])
     vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
       masterId: 'm1',
       masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
       masterActive: true,
-      followers: [{ accountId: 'f1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
 
     render(() => <Dashboard />)
 
-    expect(await screen.findByText('ZX1234')).toBeInTheDocument()
+    expect(await screen.findByText(/ZX1234/)).toBeInTheDocument()
     expect(await screen.findByText('ZY5678')).toBeInTheDocument()
   })
 
   it('CopyToggle off calls patchAccount({enabled:false}) and refetches the group', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
-      { masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
     ])
     const detailSpy = vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
       masterId: 'm1',
       masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
       masterActive: true,
-      followers: [{ accountId: 'f1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
     const patchSpy = vi.spyOn(api, 'patchAccount').mockResolvedValue({ enabled: false })
 
@@ -49,13 +55,16 @@ describe('Dashboard', () => {
 
   it('Rebalance calls postAction and refetches the group', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
-      { masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
     ])
     const detailSpy = vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
       masterId: 'm1',
       masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
       masterActive: true,
-      followers: [{ accountId: 'f1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
     const actionSpy = vi.spyOn(api, 'postAction').mockResolvedValue({ type: 'rebalance', status: 'accepted' })
 
@@ -71,13 +80,16 @@ describe('Dashboard', () => {
 
   it('Square Off requires modal confirmation before calling postAction', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
-      { masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
     ])
     vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
       masterId: 'm1',
       masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
       masterActive: true,
-      followers: [{ accountId: 'f1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
     const actionSpy = vi.spyOn(api, 'postAction').mockResolvedValue({ type: 'square_off', status: 'accepted' })
 

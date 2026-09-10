@@ -74,6 +74,7 @@ export function AccountRow(props: {
           </button>
         </Show>
       </td>
+      <td>{props.follower.name || '—'}</td>
       <td>{props.follower.brokerAccountId}</td>
       <td>—</td>
       <td>—</td>

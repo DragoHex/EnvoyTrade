@@ -3,8 +3,8 @@ import { getGroupDetail, getGroups, patchAccount, postAction, type ActionType } 
 import { GroupCard } from '../components/GroupCard'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
 
-function GroupCardLoader(props: { masterId: string; status: 'ok' | 'error' }) {
-  const [detail, { refetch }] = createResource(() => props.masterId, getGroupDetail)
+function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
+  const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
 
   const onToggleCopy = async (accountId: string, next: boolean) => {
     await patchAccount(accountId, { enabled: next })
@@ -12,7 +12,8 @@ function GroupCardLoader(props: { masterId: string; status: 'ok' | 'error' }) {
   }
 
   const onToggleMasterActive = async (next: boolean) => {
-    await patchAccount(props.masterId, { active: next })
+    const masterId = detail()?.masterId || props.id
+    await patchAccount(masterId, { active: next })
     refetch()
   }
 
@@ -55,7 +56,7 @@ export function Dashboard() {
     <div class="page">
       <h1>Dashboard</h1>
       <Show when={groups()} fallback={<LoadingTimeout><GroupsSkeleton /></LoadingTimeout>}>
-        {(gs) => <For each={gs()}>{(g) => <GroupCardLoader masterId={g.masterId} status={g.status} />}</For>}
+        {(gs) => <For each={gs()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} />}</For>}
       </Show>
     </div>
   )

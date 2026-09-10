@@ -32,6 +32,9 @@ var accountAPISecretSchema string
 //go:embed migrations/0004_account_active.sql
 var accountActiveSchema string
 
+//go:embed migrations/0005_groups_and_names.sql
+var groupsAndNamesSchema string
+
 const uniqueViolation = "23505"
 const foreignKeyViolation = "23503"
 
@@ -79,7 +82,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, accountAPISecretSchema); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, accountActiveSchema)
+	if _, err := s.pool.Exec(ctx, accountActiveSchema); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, groupsAndNamesSchema)
 	return err
 }
 
@@ -89,9 +95,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 // that account's own Kite Connect app secret — every account (master and
 // each follower) has its own app, needed to verify that account's
 // postback checksums.
-func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, role string, broker string, brokerUserID string, apiSecret string) error {
+func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiSecret string) error {
 	err := s.queries.CreateAccount(ctx, sqlcgen.CreateAccountParams{
 		ID:           id,
+		Name:         name,
 		Role:         role,
 		Broker:       broker,
 		BrokerUserID: brokerUserID,
@@ -100,7 +107,21 @@ func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, role string, br
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if role == "master" {
+		groupName := name
+		if groupName == "" {
+			groupName = brokerUserID
+		}
+		_ = s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
+			ID:       id,
+			Name:     groupName,
+			MasterID: id,
+		})
+	}
+	return nil
 }
 
 // AccountByBrokerUserID resolves the account a postback's user_id
@@ -119,15 +140,34 @@ func (s *Store) AccountByBrokerUserID(ctx context.Context, brokerUserID string) 
 // domain.ErrDuplicate if the follower is already attached to a group
 // (follower_id is the follow_links primary key).
 func (s *Store) CreateFollowLink(ctx context.Context, link domain.FollowLink) error {
+	groupID := link.GroupID
+	if groupID == uuid.Nil {
+		if link.MasterID != uuid.Nil {
+			g, err := s.queries.GroupByMasterID(ctx, link.MasterID)
+			if err == nil {
+				groupID = g.ID
+			} else {
+				groupID = link.MasterID
+				_ = s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
+					ID:       groupID,
+					Name:     link.MasterID.String(),
+					MasterID: link.MasterID,
+				})
+			}
+		}
+	}
 	err := s.queries.CreateFollowLink(ctx, sqlcgen.CreateFollowLinkParams{
 		FollowerID:     link.FollowerID,
-		MasterID:       link.MasterID,
+		GroupID:        groupID,
 		CapitalRatio:   link.CapitalRatio,
 		MaxQtyPerOrder: nullableMaxQty(link.MaxQtyPerOrder),
 		Enabled:        link.Enabled,
 	})
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
+	}
+	if isForeignKeyViolation(err) {
+		return domain.ErrConflict
 	}
 	return err
 }
@@ -151,6 +191,7 @@ func (s *Store) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]d
 	for _, r := range rows {
 		links = append(links, domain.FollowLink{
 			FollowerID:     r.FollowerID,
+			GroupID:        r.GroupID,
 			MasterID:       r.MasterID,
 			CapitalRatio:   r.CapitalRatio,
 			MaxQtyPerOrder: int(r.MaxQtyPerOrder),
@@ -403,12 +444,18 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 	for _, r := range rows {
 		a := domain.Account{
 			ID:              r.ID,
+			Name:            r.Name,
 			Role:            r.Role,
 			Broker:          r.Broker,
 			BrokerAccountID: r.BrokerUserID,
 			Active:          r.Active,
 			Status:          r.Status,
 			Enabled:         r.Enabled,
+			GroupName:       r.GroupName,
+		}
+		if r.GroupID.Valid {
+			groupID := uuid.UUID(r.GroupID.Bytes)
+			a.GroupID = &groupID
 		}
 		if r.MasterID.Valid {
 			masterID := uuid.UUID(r.MasterID.Bytes)
@@ -493,6 +540,21 @@ func (s *Store) DeleteAccount(ctx context.Context, id uuid.UUID) error {
 // Returns domain.ErrNotFound if followerID has no follow_link row.
 func (s *Store) DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error {
 	rowsAffected, err := s.queries.DeleteFollowLink(ctx, followerID)
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// SetAccountName updates an account's name.
+func (s *Store) SetAccountName(ctx context.Context, id uuid.UUID, name string) error {
+	rowsAffected, err := s.queries.SetAccountName(ctx, sqlcgen.SetAccountNameParams{
+		ID:   id,
+		Name: name,
+	})
 	if err != nil {
 		return err
 	}

@@ -85,7 +85,7 @@ func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 func seedAccountWithSecret(t *testing.T, s *postgres.Store, role string, apiSecret string) (uuid.UUID, string) {
 	t.Helper()
 	id := uuid.New()
-	if err := s.CreateAccount(context.Background(), id, role, "zerodha", id.String(), apiSecret); err != nil {
+	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), apiSecret); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	return id, id.String()
@@ -652,7 +652,7 @@ func TestCreateAccount_DuplicateBrokerUserIDReturnsErrDuplicate(t *testing.T) {
 	ctx := context.Background()
 	_, brokerUserID := seedAccountWithSecret(t, s, "master", "secret")
 
-	err := s.CreateAccount(ctx, uuid.New(), "master", "zerodha", brokerUserID, "secret2")
+	err := s.CreateAccount(ctx, uuid.New(), "Another Master", "master", "zerodha", brokerUserID, "secret2")
 	if !errors.Is(err, domain.ErrDuplicate) {
 		t.Fatalf("CreateAccount duplicate broker_user_id: err = %v, want ErrDuplicate", err)
 	}

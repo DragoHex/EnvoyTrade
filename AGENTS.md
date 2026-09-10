@@ -22,6 +22,10 @@ go test -tags integration ./...
 
 # Single test
 go test -tags integration ./internal/engine/... -run TestHandleMasterFill_RedeliveryIsANoOp -v
+
+# Frontend tests & build
+pnpm -C frontend test --run
+pnpm -C frontend build
 ```
 
 Docker isn't available in this environment — use **Podman** instead. Testcontainers needs `DOCKER_HOST` pointed at the Podman socket:
@@ -98,7 +102,7 @@ listener.FollowerStatusConsumer.Handle (drains queue.Consumer[domain.OrderUpdate
 
 - `internal/store/postgres.NewPool` must be used instead of raw `pgxpool.New` — it registers the `shopspring/decimal` pgx codec (`decimalpgx.Register`) on every connection via `AfterConnect`. Without it, `numeric` columns won't scan into `decimal.Decimal` fields.
 - Nullable `numeric` columns (e.g. `average_price`) must be scanned into a `*decimal.Decimal` and copied out — scanning `NULL` directly into `decimal.Decimal` panics.
-- Migrations are plain SQL files under `internal/store/postgres/migrations/`, embedded via `//go:embed` and applied in order by `Store.Migrate` — every statement is `IF NOT EXISTS`/`duplicate_object`-guarded, so it's safe to call on every `cmd/server` startup as well as against a fresh database (tests, via testcontainers). `0003_account_api_secret.sql` adds `accounts.api_secret` — every account has its own Kite Connect app, needed to verify that account's postback checksums.
+- Migrations are plain SQL files under `internal/store/postgres/migrations/`, embedded via `//go:embed` and applied in order by `Store.Migrate` — every statement is `IF NOT EXISTS`/`duplicate_object`-guarded, so it's safe to call on every `cmd/server` startup as well as against a fresh database (tests, via testcontainers). `0003_account_api_secret.sql` adds `accounts.api_secret` — every account has its own Kite Connect app, needed to verify that account's postback checksums. `0005_groups_and_names.sql` splits groups into a dedicated `groups` table (`id`, `name`, `master_id` with `ON DELETE CASCADE`), links `follow_links` directly via `group_id`, and adds `name` to `accounts`.
 
 ### Test conventions
 
@@ -118,6 +122,10 @@ listener.FollowerStatusConsumer.Handle (drains queue.Consumer[domain.OrderUpdate
 - **Destructive/irreversible actions are gated behind a confirmation step.**
 - **A modal's dimmed backdrop and its content panel are visually and structurally distinct** — the backdrop dims the page, the panel stands out from it.
 - **Verify UI changes by actually looking at the rendered result**, not just by reading the code — a change that looks right in source can still render wrong.
+- **Show broker logo instead of plain text.** Use `<BrokerLogo broker={...} />` (`frontend/src/components/BrokerLogo.tsx`). An extensible `BROKER_REGISTRY` maps broker IDs (`kite`, `zerodha`) to official vector logos with accessible hover tooltip (`data-tooltip`). Unknown brokers fall back gracefully to a text badge.
+- **Never display UUIDs on the UI.** Display human-readable `name` when present, falling back to `brokerAccountId`, never raw database UUID.
+- **Distinct iconography for actions.** Use dedicated SVG icons with tooltips: pencil (`EditIcon`) for edit, person-with-minus (`UserMinusIcon`) for remove from group, trash bin (`TrashIcon`) for delete.
+- **Fixed table layout prevents shifts on state toggle.** Use `table-layout: fixed` and explicit column widths/classes so buttons toggling text (e.g. "Enable"/"Disable") or badge status never cause table column jitter.
 
 ## UI color palette
 

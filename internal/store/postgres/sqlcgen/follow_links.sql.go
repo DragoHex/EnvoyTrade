@@ -14,13 +14,13 @@ import (
 )
 
 const createFollowLink = `-- name: CreateFollowLink :exec
-INSERT INTO follow_links (follower_id, master_id, capital_ratio, max_qty_per_order, enabled)
+INSERT INTO follow_links (follower_id, group_id, capital_ratio, max_qty_per_order, enabled)
 VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateFollowLinkParams struct {
 	FollowerID     uuid.UUID
-	MasterID       uuid.UUID
+	GroupID        uuid.UUID
 	CapitalRatio   decimal.Decimal
 	MaxQtyPerOrder *int32
 	Enabled        bool
@@ -29,7 +29,7 @@ type CreateFollowLinkParams struct {
 func (q *Queries) CreateFollowLink(ctx context.Context, arg CreateFollowLinkParams) error {
 	_, err := q.db.Exec(ctx, createFollowLink,
 		arg.FollowerID,
-		arg.MasterID,
+		arg.GroupID,
 		arg.CapitalRatio,
 		arg.MaxQtyPerOrder,
 		arg.Enabled,
@@ -50,12 +50,15 @@ func (q *Queries) DeleteFollowLink(ctx context.Context, followerID uuid.UUID) (i
 }
 
 const enabledFollowLinks = `-- name: EnabledFollowLinks :many
-SELECT follower_id, master_id, capital_ratio, COALESCE(max_qty_per_order, 0) AS max_qty_per_order, enabled, effective_from
-FROM follow_links WHERE master_id = $1 AND enabled = true
+SELECT f.follower_id, g.id AS group_id, g.master_id, f.capital_ratio, COALESCE(f.max_qty_per_order, 0) AS max_qty_per_order, f.enabled, f.effective_from
+FROM follow_links f
+JOIN groups g ON g.id = f.group_id
+WHERE g.master_id = $1 AND f.enabled = true
 `
 
 type EnabledFollowLinksRow struct {
 	FollowerID     uuid.UUID
+	GroupID        uuid.UUID
 	MasterID       uuid.UUID
 	CapitalRatio   decimal.Decimal
 	MaxQtyPerOrder int32
@@ -74,6 +77,7 @@ func (q *Queries) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([
 		var i EnabledFollowLinksRow
 		if err := rows.Scan(
 			&i.FollowerID,
+			&i.GroupID,
 			&i.MasterID,
 			&i.CapitalRatio,
 			&i.MaxQtyPerOrder,
@@ -90,8 +94,22 @@ func (q *Queries) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([
 	return items, nil
 }
 
+const groupIDForFollower = `-- name: GroupIDForFollower :one
+SELECT group_id FROM follow_links WHERE follower_id = $1
+`
+
+func (q *Queries) GroupIDForFollower(ctx context.Context, followerID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, groupIDForFollower, followerID)
+	var group_id uuid.UUID
+	err := row.Scan(&group_id)
+	return group_id, err
+}
+
 const masterIDForFollower = `-- name: MasterIDForFollower :one
-SELECT master_id FROM follow_links WHERE follower_id = $1
+SELECT g.master_id
+FROM follow_links f
+JOIN groups g ON g.id = f.group_id
+WHERE f.follower_id = $1
 `
 
 func (q *Queries) MasterIDForFollower(ctx context.Context, followerID uuid.UUID) (uuid.UUID, error) {

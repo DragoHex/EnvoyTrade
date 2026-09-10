@@ -7,7 +7,10 @@ const STORAGE_KEY = 'theme'
 function initialTheme(): Theme {
   const stored = sessionStorage.getItem(STORAGE_KEY)
   if (stored === 'light' || stored === 'dark') return stored
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return 'light'
 }
 
 const [theme, setTheme] = createSignal<Theme>(initialTheme())

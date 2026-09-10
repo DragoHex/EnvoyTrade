@@ -20,6 +20,7 @@ type Account struct {
 	UpdatedAt    pgtype.Timestamptz
 	ApiSecret    string
 	Active       bool
+	Name         string
 }
 
 type FollowLink struct {
@@ -29,6 +30,7 @@ type FollowLink struct {
 	MaxQtyPerOrder *int32
 	Enabled        bool
 	EffectiveFrom  pgtype.Timestamptz
+	GroupID        uuid.UUID
 }
 
 type FollowerOrder struct {
@@ -48,6 +50,14 @@ type FollowerOrder struct {
 	LastError      *string
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type Group struct {
+	ID        uuid.UUID
+	Name      string
+	MasterID  uuid.UUID
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
 }
 
 type Instrument struct {

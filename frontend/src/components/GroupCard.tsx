@@ -12,11 +12,12 @@ export function GroupCard(props: {
   return (
     <section data-testid="group-card">
       <h2>
-        {props.detail.masterAccountId} <StatusDot status={props.status} />
+        {props.detail.name || props.detail.masterAccountId} <StatusDot status={props.status} />
       </h2>
       <AccountTable
         master={{
           masterId: props.detail.masterId,
+          name: props.detail.masterName || props.detail.name || '',
           brokerAccountId: props.detail.masterAccountId,
           status: props.status,
           active: props.detail.masterActive,

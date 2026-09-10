@@ -16,8 +16,11 @@ func NewRouter(store Store, actionEngine Engine) *http.ServeMux {
 	h := &handlers{store: store, engine: actionEngine}
 
 	mux.HandleFunc("GET /api/v1/groups", h.getGroups)
-	mux.HandleFunc("GET /api/v1/groups/{masterId}", h.getGroupDetail)
-	mux.HandleFunc("POST /api/v1/groups/{masterId}/followers", h.postGroupFollower)
+	mux.HandleFunc("POST /api/v1/groups", h.postGroup)
+	mux.HandleFunc("GET /api/v1/groups/{id}", h.getGroupDetail)
+	mux.HandleFunc("PATCH /api/v1/groups/{id}", h.patchGroup)
+	mux.HandleFunc("DELETE /api/v1/groups/{id}", h.deleteGroup)
+	mux.HandleFunc("POST /api/v1/groups/{id}/followers", h.postGroupFollower)
 	mux.HandleFunc("GET /api/v1/accounts", h.getAccounts)
 	mux.HandleFunc("POST /api/v1/accounts", h.postAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{id}", h.patchAccount)

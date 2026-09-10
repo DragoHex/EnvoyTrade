@@ -5,12 +5,30 @@ import { AccountDetailDrawer } from './AccountDetailDrawer'
 import type { Account } from '../api'
 
 const master: Account = {
-  id: 'm1', role: 'master', broker: 'kite', brokerAccountId: 'ZX1234', masterId: null,
-  capitalRatio: null, maxQtyPerOrder: null, enabled: true, active: true, status: 'ok',
+  id: 'm1',
+  name: 'Master Account',
+  role: 'master',
+  broker: 'kite',
+  brokerAccountId: 'ZX1234',
+  masterId: null,
+  capitalRatio: null,
+  maxQtyPerOrder: null,
+  enabled: true,
+  active: true,
+  status: 'ok',
 }
 const follower: Account = {
-  id: 'f1', role: 'follower', broker: 'kite', brokerAccountId: 'ZY5678', masterId: 'm1',
-  capitalRatio: '0.5', maxQtyPerOrder: 100, enabled: true, active: true, status: 'ok',
+  id: 'f1',
+  name: 'Follower Account',
+  role: 'follower',
+  broker: 'kite',
+  brokerAccountId: 'ZY5678',
+  masterId: 'm1',
+  capitalRatio: '0.5',
+  maxQtyPerOrder: 100,
+  enabled: true,
+  active: true,
+  status: 'ok',
 }
 
 describe('AccountDetailDrawer', () => {

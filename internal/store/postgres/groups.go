@@ -21,8 +21,8 @@ func statusFromAccountStatus(accountStatus string) string {
 	return "error"
 }
 
-// Groups lists every master account with a follower-count and status
-// rollup, for the Dashboard's GroupList (docs/APIs/groups.md).
+// Groups lists every group with follower-count and status rollup,
+// for the Dashboard's GroupList (docs/APIs/groups.md).
 func (s *Store) Groups(ctx context.Context) ([]domain.GroupSummary, error) {
 	rows, err := s.queries.Groups(ctx)
 	if err != nil {
@@ -30,9 +30,16 @@ func (s *Store) Groups(ctx context.Context) ([]domain.GroupSummary, error) {
 	}
 	groups := make([]domain.GroupSummary, 0, len(rows))
 	for _, r := range rows {
+		name := r.Name
+		if name == "" {
+			name = r.MasterBrokerUserID
+		}
 		groups = append(groups, domain.GroupSummary{
-			MasterID:        r.ID,
-			MasterAccountID: r.BrokerUserID,
+			ID:              r.ID,
+			Name:            name,
+			MasterID:        r.MasterID,
+			MasterAccountID: r.MasterBrokerUserID,
+			MasterName:      r.MasterName,
 			Broker:          r.Broker,
 			FollowerCount:   int(r.FollowerCount),
 			Status:          statusFromAccountStatus(r.Status),
@@ -42,11 +49,10 @@ func (s *Store) Groups(ctx context.Context) ([]domain.GroupSummary, error) {
 	return groups, nil
 }
 
-// GroupDetail returns one master and its followers, for the Dashboard's
-// GroupCard (docs/APIs/groups.md). Returns domain.ErrNotFound if masterID
-// doesn't exist or isn't role=master.
-func (s *Store) GroupDetail(ctx context.Context, masterID uuid.UUID) (domain.GroupDetail, error) {
-	master, err := s.queries.GroupMasterInfo(ctx, masterID)
+// GroupDetail returns one group's master info plus its member follower rows.
+// Accepts either group ID or master account ID.
+func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDetail, error) {
+	info, err := s.queries.GroupInfo(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.GroupDetail{}, domain.ErrNotFound
 	}
@@ -54,19 +60,28 @@ func (s *Store) GroupDetail(ctx context.Context, masterID uuid.UUID) (domain.Gro
 		return domain.GroupDetail{}, err
 	}
 
-	detail := domain.GroupDetail{
-		MasterID:        masterID,
-		MasterAccountID: master.BrokerUserID,
-		MasterActive:    master.Active,
+	name := info.Name
+	if name == "" {
+		name = info.MasterBrokerUserID
 	}
 
-	rows, err := s.queries.GroupFollowerRows(ctx, masterID)
+	detail := domain.GroupDetail{
+		GroupID:         info.ID,
+		GroupName:       name,
+		MasterID:        info.MasterID,
+		MasterAccountID: info.MasterBrokerUserID,
+		MasterName:      info.MasterName,
+		MasterActive:    info.MasterActive,
+	}
+
+	rows, err := s.queries.GroupFollowerRows(ctx, info.ID)
 	if err != nil {
 		return domain.GroupDetail{}, err
 	}
 	for _, r := range rows {
 		detail.Followers = append(detail.Followers, domain.GroupFollower{
 			AccountID:       r.ID,
+			Name:            r.Name,
 			BrokerAccountID: r.BrokerUserID,
 			Enabled:         r.Enabled,
 			Status:          statusFromAccountStatus(r.Status),
@@ -75,9 +90,98 @@ func (s *Store) GroupDetail(ctx context.Context, masterID uuid.UUID) (domain.Gro
 	return detail, nil
 }
 
-// SetFollowLinkEnabled toggles a follower's copy-trading state — the
-// Dashboard's CopyToggle/Stop Copy button (docs/APIs/accounts.md's PATCH
-// /accounts/{id}). Returns domain.ErrNotFound if followerID has no
+// CreateGroup creates a new group.
+func (s *Store) CreateGroup(ctx context.Context, id uuid.UUID, name string, masterID uuid.UUID) error {
+	err := s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
+		ID:       id,
+		Name:     name,
+		MasterID: masterID,
+	})
+	if isUniqueViolation(err) {
+		return domain.ErrDuplicate
+	}
+	if isForeignKeyViolation(err) {
+		return domain.ErrNotFound
+	}
+	return err
+}
+
+// UpdateGroup updates group name and/or master ID.
+func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name *string, masterID *uuid.UUID) error {
+	if name != nil {
+		affected, err := s.queries.UpdateGroupName(ctx, sqlcgen.UpdateGroupNameParams{
+			ID:   id,
+			Name: *name,
+		})
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return domain.ErrNotFound
+		}
+	}
+	if masterID != nil {
+		affected, err := s.queries.UpdateGroupMaster(ctx, sqlcgen.UpdateGroupMasterParams{
+			ID:       id,
+			MasterID: *masterID,
+		})
+		if err != nil {
+			if isForeignKeyViolation(err) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		if affected == 0 {
+			return domain.ErrNotFound
+		}
+	}
+	return nil
+}
+
+// DeleteGroup removes a group. Returns domain.ErrConflict if followers are attached.
+func (s *Store) DeleteGroup(ctx context.Context, id uuid.UUID) error {
+	affected, err := s.queries.DeleteGroup(ctx, id)
+	if isForeignKeyViolation(err) {
+		return domain.ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// GroupIDForFollower resolves the group a follower is attached to.
+func (s *Store) GroupIDForFollower(ctx context.Context, followerID uuid.UUID) (uuid.UUID, error) {
+	groupID, err := s.queries.GroupIDForFollower(ctx, followerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.UUID{}, domain.ErrNotFound
+	}
+	return groupID, err
+}
+
+// GroupByMasterID resolves the group whose master is masterID.
+func (s *Store) GroupByMasterID(ctx context.Context, masterID uuid.UUID) (domain.Group, error) {
+	g, err := s.queries.GroupByMasterID(ctx, masterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Group{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Group{}, err
+	}
+	return domain.Group{
+		ID:        g.ID,
+		Name:      g.Name,
+		MasterID:  g.MasterID,
+		CreatedAt: g.CreatedAt.Time,
+		UpdatedAt: g.UpdatedAt.Time,
+	}, nil
+}
+
+// SetFollowLinkEnabled toggles a follower's enabled flag — the Dashboard's
+// "Copy" toggle. Returns domain.ErrNotFound if followerID has no
 // follow_link row.
 func (s *Store) SetFollowLinkEnabled(ctx context.Context, followerID uuid.UUID, enabled bool) error {
 	rowsAffected, err := s.queries.SetFollowLinkEnabled(ctx, sqlcgen.SetFollowLinkEnabledParams{
@@ -93,12 +197,10 @@ func (s *Store) SetFollowLinkEnabled(ctx context.Context, followerID uuid.UUID, 
 	return nil
 }
 
-// ResolveMasterID resolves the master an action-target account should
-// fan out from: if id is itself a master, it's returned unchanged; else
-// it's looked up as a follower via the 1-master-per-follower follow_link
-// (follower_id is the follow_links primary key). This lets Rebalance
-// work identically from a follower row or the master row. Returns
-// domain.ErrNotFound if id is neither a master nor a linked follower.
+// ResolveMasterID finds the master account associated with an account:
+// returns the account's own ID if it is already a master, or looks up its
+// master via follow_links if it is a follower. Returns domain.ErrNotFound
+// if the account does not exist or is a follower not linked to any group.
 func (s *Store) ResolveMasterID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
 	role, err := s.queries.AccountRole(ctx, id)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -115,11 +217,9 @@ func (s *Store) ResolveMasterID(ctx context.Context, id uuid.UUID) (uuid.UUID, e
 	return masterID, err
 }
 
-// SetAccountActive toggles whether an account (master or follower) is
-// active — the Dashboard master row's Stop/Start button (docs/APIs/
-// accounts.md's PATCH /accounts/{id} "active" field). When false on a
-// master, the engine skips fan-out entirely (see engine.Store.MasterActive).
-// Returns domain.ErrNotFound if id has no accounts row.
+// SetAccountActive toggles a master account's active flag — the
+// Dashboard's "Stop Master" / "Start Master" toggle. Returns
+// domain.ErrNotFound if id has no accounts row.
 func (s *Store) SetAccountActive(ctx context.Context, id uuid.UUID, active bool) error {
 	rowsAffected, err := s.queries.SetAccountActive(ctx, sqlcgen.SetAccountActiveParams{
 		ID:     id,
@@ -134,8 +234,9 @@ func (s *Store) SetAccountActive(ctx context.Context, id uuid.UUID, active bool)
 	return nil
 }
 
-// MasterActive reports whether a master account is active — the engine's
-// fan-out gate. Returns domain.ErrNotFound if masterID isn't a master.
+// MasterActive reports whether the given master account is currently
+// active (copying enabled). Returns domain.ErrNotFound if masterID is not
+// a master account.
 func (s *Store) MasterActive(ctx context.Context, masterID uuid.UUID) (bool, error) {
 	active, err := s.queries.MasterActive(ctx, masterID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -144,10 +245,10 @@ func (s *Store) MasterActive(ctx context.Context, masterID uuid.UUID) (bool, err
 	return active, err
 }
 
-// LatestMasterFill returns the most recent (by order_timestamp) master
-// fill for a master account — what the Rebalance action re-dispatches
-// (docs/APIs/actions.md). Returns domain.ErrNotFound if the master has no
-// fills yet.
+// LatestMasterFill returns the most recent master fill recorded for
+// masterID — used by POST /accounts/{id}/actions to find the current
+// trade to square off or rebalance against. Returns domain.ErrNotFound if
+// the master has no recorded fills.
 func (s *Store) LatestMasterFill(ctx context.Context, masterID uuid.UUID) (domain.MasterFill, error) {
 	row, err := s.queries.LatestMasterFill(ctx, masterID)
 	if errors.Is(err, pgx.ErrNoRows) {

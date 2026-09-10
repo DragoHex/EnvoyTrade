@@ -42,22 +42,27 @@ func (q *Queries) AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 }
 
 const accounts = `-- name: Accounts :many
-SELECT a.id, a.role, a.broker, a.broker_user_id, a.active, a.status,
-       f.master_id, f.capital_ratio, f.max_qty_per_order,
+SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.active, a.status,
+       g.id AS group_id, g.name AS group_name, g.master_id,
+       f.capital_ratio, f.max_qty_per_order,
        COALESCE(f.enabled, true) AS enabled
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
+LEFT JOIN groups g ON g.id = f.group_id
 WHERE $1::uuid[] IS NULL OR a.id = ANY($1::uuid[])
-ORDER BY a.role, a.broker_user_id
+ORDER BY a.role, a.name, a.broker_user_id
 `
 
 type AccountsRow struct {
 	ID             uuid.UUID
+	Name           string
 	Role           string
 	Broker         string
 	BrokerUserID   string
 	Active         bool
 	Status         string
+	GroupID        pgtype.UUID
+	GroupName      *string
 	MasterID       pgtype.UUID
 	CapitalRatio   decimal.NullDecimal
 	MaxQtyPerOrder *int32
@@ -75,11 +80,14 @@ func (q *Queries) Accounts(ctx context.Context, ids []uuid.UUID) ([]AccountsRow,
 		var i AccountsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.Name,
 			&i.Role,
 			&i.Broker,
 			&i.BrokerUserID,
 			&i.Active,
 			&i.Status,
+			&i.GroupID,
+			&i.GroupName,
 			&i.MasterID,
 			&i.CapitalRatio,
 			&i.MaxQtyPerOrder,
@@ -96,11 +104,12 @@ func (q *Queries) Accounts(ctx context.Context, ids []uuid.UUID) ([]AccountsRow,
 }
 
 const createAccount = `-- name: CreateAccount :exec
-INSERT INTO accounts (id, role, broker, broker_user_id, api_secret) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_secret) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type CreateAccountParams struct {
 	ID           uuid.UUID
+	Name         string
 	Role         string
 	Broker       string
 	BrokerUserID string
@@ -110,6 +119,7 @@ type CreateAccountParams struct {
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) error {
 	_, err := q.db.Exec(ctx, createAccount,
 		arg.ID,
+		arg.Name,
 		arg.Role,
 		arg.Broker,
 		arg.BrokerUserID,
@@ -152,6 +162,23 @@ type SetAccountActiveParams struct {
 
 func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActiveParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setAccountActive, arg.ID, arg.Active)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountName = `-- name: SetAccountName :execrows
+UPDATE accounts SET name = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAccountNameParams struct {
+	ID   uuid.UUID
+	Name string
+}
+
+func (q *Queries) SetAccountName(ctx context.Context, arg SetAccountNameParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountName, arg.ID, arg.Name)
 	if err != nil {
 		return 0, err
 	}

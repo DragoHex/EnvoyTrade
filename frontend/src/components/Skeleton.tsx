@@ -35,3 +35,13 @@ export function GroupsSkeleton() {
     </>
   )
 }
+
+export function TableSkeleton() {
+  return (
+    <section class="skeleton-card" aria-hidden="true">
+      <div class="skeleton-table">
+        <For each={[0, 1, 2, 3, 4]}>{() => <div class="skeleton-bar skeleton-row" />}</For>
+      </div>
+    </section>
+  )
+}

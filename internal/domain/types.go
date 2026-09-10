@@ -43,11 +43,12 @@ type MasterFill struct {
 	DispatchedAt    *time.Time
 }
 
-// FollowLink is the 1-master-per-follower relationship: a follower has at
-// most one master, structurally enforced wherever this is persisted
+// FollowLink is the 1-group-per-follower relationship: a follower belongs to
+// at most one group, structurally enforced wherever this is persisted
 // (follower_id as primary key — PLAN.md §2).
 type FollowLink struct {
 	FollowerID     uuid.UUID
+	GroupID        uuid.UUID
 	MasterID       uuid.UUID
 	CapitalRatio   decimal.Decimal
 	MaxQtyPerOrder int
@@ -113,15 +114,27 @@ var ErrConflict = errors.New("domain: conflict")
 // regardless of group membership (docs/APIs/accounts.md).
 type Account struct {
 	ID              uuid.UUID
+	Name            string
 	Role            string
 	Broker          string
 	BrokerAccountID string
 	Active          bool
 	Status          string
+	GroupID         *uuid.UUID
+	GroupName       *string
 	MasterID        *uuid.UUID
 	CapitalRatio    *decimal.Decimal
 	MaxQtyPerOrder  *int
 	Enabled         bool
+}
+
+// Group models a trading group with a designated master account.
+type Group struct {
+	ID        uuid.UUID
+	Name      string
+	MasterID  uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Instrument is one row of the instrument master (PLAN.md §2): the
@@ -173,11 +186,13 @@ type Job struct {
 }
 
 // GroupSummary is one row of the Dashboard's group list: a master account
-// plus a rollup of its followers. There is no stored "group" entity — this
-// is reconstructed from accounts + follow_links (docs/APIs/groups.md).
+// plus a rollup of its followers.
 type GroupSummary struct {
+	ID              uuid.UUID
+	Name            string
 	MasterID        uuid.UUID
 	MasterAccountID string
+	MasterName      string
 	Broker          string
 	FollowerCount   int
 	Status          string
@@ -189,15 +204,19 @@ type GroupSummary struct {
 // (gokiteconnect's GetMargins/GetPositions) not wired yet (docs/APIs/groups.md).
 type GroupFollower struct {
 	AccountID       uuid.UUID
+	Name            string
 	BrokerAccountID string
 	Enabled         bool
 	Status          string
 }
 
-// GroupDetail is the full Dashboard GroupCard payload for one master.
+// GroupDetail is the full Dashboard GroupCard payload for one group.
 type GroupDetail struct {
+	GroupID         uuid.UUID
+	GroupName       string
 	MasterID        uuid.UUID
 	MasterAccountID string
+	MasterName      string
 	MasterActive    bool
 	Followers       []GroupFollower
 }

@@ -184,3 +184,41 @@ func TestPostGroupFollower_AlreadyAttached_Returns409(t *testing.T) {
 		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestPostGroup_Succeeds(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"name": "Alpha Group", "masterId": master.String()})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["name"] != "Alpha Group" || got["masterId"] != master.String() {
+		t.Errorf("got = %+v", got)
+	}
+}
+
+func TestPatchGroup_SwapMaster_Succeeds(t *testing.T) {
+	newMaster := uuid.New()
+	groupID := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{newMaster: "master"}}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"masterId": newMaster.String(), "name": "Renamed Group"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/groups/"+groupID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}

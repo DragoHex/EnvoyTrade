@@ -3,7 +3,7 @@ import { AccountRow } from './AccountRow'
 import type { ActionType, GroupFollower } from '../api'
 
 export function AccountTable(props: {
-  master: { masterId: string; brokerAccountId: string; status: 'ok' | 'error'; active: boolean }
+  master: { masterId: string; name?: string; brokerAccountId: string; status: 'ok' | 'error'; active: boolean }
   followers: GroupFollower[]
   onToggleCopy: (accountId: string, next: boolean) => void
   onToggleMasterActive: (next: boolean) => void
@@ -14,6 +14,7 @@ export function AccountTable(props: {
       <thead>
         <tr>
           <th></th>
+          <th>Name</th>
           <th>Account ID</th>
           <th>Net Qty</th>
           <th>Positions (O/C)</th>
@@ -29,6 +30,7 @@ export function AccountTable(props: {
         <AccountRow
           follower={{
             accountId: props.master.masterId,
+            name: props.master.name ?? '',
             brokerAccountId: `${props.master.brokerAccountId} (Master)`,
             enabled: props.master.active,
             status: props.master.status,

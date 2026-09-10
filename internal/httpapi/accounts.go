@@ -22,7 +22,8 @@ type AccountsStore interface {
 	SetAccountActive(ctx context.Context, id uuid.UUID, active bool) error
 	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
-	CreateAccount(ctx context.Context, id uuid.UUID, role, broker, brokerUserID, apiSecret string) error
+	CreateAccount(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiSecret string) error
+	SetAccountName(ctx context.Context, id uuid.UUID, name string) error
 	CreateFollowLink(ctx context.Context, link domain.FollowLink) error
 	UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, capitalRatio decimal.Decimal, maxQtyPerOrder *int) error
 	SetAccountStatus(ctx context.Context, id uuid.UUID, status string) error
@@ -32,9 +33,12 @@ type AccountsStore interface {
 
 type accountResponse struct {
 	ID              string  `json:"id"`
+	Name            string  `json:"name"`
 	Role            string  `json:"role"`
 	Broker          string  `json:"broker"`
 	BrokerAccountID string  `json:"brokerAccountId"`
+	GroupID         *string `json:"groupId"`
+	GroupName       *string `json:"groupName"`
 	MasterID        *string `json:"masterId"`
 	CapitalRatio    *string `json:"capitalRatio"`
 	MaxQtyPerOrder  *int    `json:"maxQtyPerOrder"`
@@ -46,6 +50,7 @@ type accountResponse struct {
 func toAccountResponse(a domain.Account) accountResponse {
 	resp := accountResponse{
 		ID:              a.ID.String(),
+		Name:            a.Name,
 		Role:            a.Role,
 		Broker:          a.Broker,
 		BrokerAccountID: a.BrokerAccountID,
@@ -53,6 +58,11 @@ func toAccountResponse(a domain.Account) accountResponse {
 		Enabled:         a.Enabled,
 		Active:          a.Active,
 		Status:          a.Status,
+		GroupName:       a.GroupName,
+	}
+	if a.GroupID != nil {
+		s := a.GroupID.String()
+		resp.GroupID = &s
 	}
 	if a.MasterID != nil {
 		s := a.MasterID.String()
@@ -95,12 +105,14 @@ func (h *handlers) getAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 type postAccountRequest struct {
+	Name            string  `json:"name"`
 	Role            string  `json:"role"`
 	Broker          string  `json:"broker"`
 	BrokerAccountID string  `json:"brokerAccountId"`
 	ApiSecret       string  `json:"apiSecret"`
 	CapitalRatio    *string `json:"capitalRatio"`
 	MaxQtyPerOrder  *int    `json:"maxQtyPerOrder"`
+	GroupID         *string `json:"groupId"`
 	MasterID        *string `json:"masterId"`
 	// ApiKey is accepted and ignored — accounts has no api_key column yet
 	// (docs/APIs/accounts.md's documented backend gap).
@@ -126,12 +138,16 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "brokerAccountId is required")
 		return
 	}
+	if req.Name == "" {
+		req.Name = req.BrokerAccountID
+	}
 
 	var capitalRatio decimal.Decimal
 	var masterID uuid.UUID
+	var groupID uuid.UUID
 	if req.Role == "follower" {
-		if req.CapitalRatio == nil || req.MaxQtyPerOrder == nil || req.MasterID == nil {
-			writeError(w, http.StatusBadRequest, "capitalRatio, maxQtyPerOrder, and masterId are required for a follower account")
+		if req.CapitalRatio == nil || req.MaxQtyPerOrder == nil || (req.MasterID == nil && req.GroupID == nil) {
+			writeError(w, http.StatusBadRequest, "capitalRatio, maxQtyPerOrder, and masterId or groupId are required for a follower account")
 			return
 		}
 		var err error
@@ -140,24 +156,33 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid capitalRatio")
 			return
 		}
-		masterID, err = uuid.Parse(*req.MasterID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid masterId")
-			return
+		if req.GroupID != nil && *req.GroupID != "" {
+			groupID, err = uuid.Parse(*req.GroupID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid groupId")
+				return
+			}
 		}
-		role, err := h.store.AccountRole(r.Context(), masterID)
-		if errors.Is(err, domain.ErrNotFound) || (err == nil && role != "master") {
-			writeError(w, http.StatusBadRequest, "invalid masterId")
-			return
-		}
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, "failed to validate masterId")
-			return
+		if req.MasterID != nil && *req.MasterID != "" {
+			masterID, err = uuid.Parse(*req.MasterID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid masterId")
+				return
+			}
+			role, err := h.store.AccountRole(r.Context(), masterID)
+			if errors.Is(err, domain.ErrNotFound) || (err == nil && role != "master") {
+				writeError(w, http.StatusBadRequest, "invalid masterId")
+				return
+			}
+			if err != nil && !errors.Is(err, domain.ErrNotFound) {
+				writeError(w, http.StatusInternalServerError, "failed to validate masterId")
+				return
+			}
 		}
 	}
 
 	id := uuid.New()
-	err := h.store.CreateAccount(r.Context(), id, req.Role, req.Broker, req.BrokerAccountID, req.ApiSecret)
+	err := h.store.CreateAccount(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiSecret)
 	if errors.Is(err, domain.ErrDuplicate) {
 		writeError(w, http.StatusConflict, "an account with this brokerAccountId already exists")
 		return
@@ -169,6 +194,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 
 	resp := accountResponse{
 		ID:              id.String(),
+		Name:            req.Name,
 		Role:            req.Role,
 		Broker:          req.Broker,
 		BrokerAccountID: req.BrokerAccountID,
@@ -181,16 +207,27 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		if req.MaxQtyPerOrder != nil {
 			maxQty = *req.MaxQtyPerOrder
 		}
-		if err := h.store.CreateFollowLink(r.Context(), domain.FollowLink{
-			FollowerID: id, MasterID: masterID, CapitalRatio: capitalRatio,
-			MaxQtyPerOrder: maxQty, Enabled: true,
-		}); err != nil {
+		link := domain.FollowLink{
+			FollowerID:     id,
+			GroupID:        groupID,
+			MasterID:       masterID,
+			CapitalRatio:   capitalRatio,
+			MaxQtyPerOrder: maxQty,
+			Enabled:        true,
+		}
+		if err := h.store.CreateFollowLink(r.Context(), link); err != nil {
 			writeError(w, http.StatusInternalServerError, "account created but failed to attach to group")
 			return
 		}
-		masterIDStr := masterID.String()
+		if masterID != uuid.Nil {
+			masterIDStr := masterID.String()
+			resp.MasterID = &masterIDStr
+		}
+		if groupID != uuid.Nil {
+			groupIDStr := groupID.String()
+			resp.GroupID = &groupIDStr
+		}
 		capitalRatioStr := capitalRatio.String()
-		resp.MasterID = &masterIDStr
 		resp.CapitalRatio = &capitalRatioStr
 		resp.MaxQtyPerOrder = req.MaxQtyPerOrder
 	}
@@ -198,6 +235,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchAccountRequest struct {
+	Name           *string `json:"name"`
 	Enabled        *bool   `json:"enabled"`
 	Active         *bool   `json:"active"`
 	CapitalRatio   *string `json:"capitalRatio"`
@@ -233,6 +271,11 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case req.Name != nil:
+		if writePatchStoreError(w, h.store.SetAccountName(r.Context(), id, *req.Name)) {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"name": *req.Name})
 	case req.Active != nil:
 		if writePatchStoreError(w, h.store.SetAccountActive(r.Context(), id, *req.Active)) {
 			return
@@ -251,7 +294,7 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": *req.Status})
 	default:
-		writeError(w, http.StatusBadRequest, "\"enabled\", \"active\", \"capitalRatio\", \"maxQtyPerOrder\", or \"status\" is required")
+		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"capitalRatio\", \"maxQtyPerOrder\", or \"status\" is required")
 	}
 }
 

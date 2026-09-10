@@ -84,7 +84,7 @@ func newTestStore(t *testing.T) *postgres.Store {
 func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	if err := s.CreateAccount(context.Background(), id, role, "zerodha", id.String(), "test-secret"); err != nil {
+	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-secret"); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	return id

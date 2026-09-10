@@ -6,6 +6,7 @@ import type { GroupFollower } from '../api'
 
 const follower: GroupFollower = {
   accountId: 'f1',
+  name: 'Follower Account',
   brokerAccountId: 'ZY5678',
   enabled: true,
   status: 'ok',

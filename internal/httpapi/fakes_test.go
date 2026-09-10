@@ -59,6 +59,7 @@ type stubStore struct {
 
 type createAccountCall struct {
 	ID           uuid.UUID
+	Name         string
 	Role         string
 	Broker       string
 	BrokerUserID string
@@ -90,8 +91,32 @@ func (s *stubStore) Groups(context.Context) ([]domain.GroupSummary, error) {
 	return s.groups, s.groupsErr
 }
 
-func (s *stubStore) GroupDetail(context.Context, uuid.UUID) (domain.GroupDetail, error) {
-	return s.detail, s.detailErr
+func (s *stubStore) GroupDetail(_ context.Context, id uuid.UUID) (domain.GroupDetail, error) {
+	if s.detailErr != nil {
+		return domain.GroupDetail{}, s.detailErr
+	}
+	if s.detail.GroupID == uuid.Nil && s.detail.MasterID == uuid.Nil {
+		return domain.GroupDetail{
+			GroupID:         id,
+			GroupName:       "Group " + id.String()[:8],
+			MasterID:        id,
+			MasterAccountID: "ZX1234",
+			MasterActive:    true,
+		}, nil
+	}
+	return s.detail, nil
+}
+
+func (s *stubStore) CreateGroup(_ context.Context, id uuid.UUID, name string, masterID uuid.UUID) error {
+	return nil
+}
+
+func (s *stubStore) UpdateGroup(_ context.Context, id uuid.UUID, name *string, masterID *uuid.UUID) error {
+	return nil
+}
+
+func (s *stubStore) DeleteGroup(_ context.Context, id uuid.UUID) error {
+	return nil
 }
 
 func (s *stubStore) SetFollowLinkEnabled(_ context.Context, followerID uuid.UUID, enabled bool) error {
@@ -144,9 +169,13 @@ func (s *stubStore) AccountRole(_ context.Context, id uuid.UUID) (string, error)
 	return role, nil
 }
 
-func (s *stubStore) CreateAccount(_ context.Context, id uuid.UUID, role, broker, brokerUserID, apiSecret string) error {
-	s.createAccountArgs = append(s.createAccountArgs, createAccountCall{id, role, broker, brokerUserID, apiSecret})
+func (s *stubStore) CreateAccount(_ context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiSecret string) error {
+	s.createAccountArgs = append(s.createAccountArgs, createAccountCall{id, name, role, broker, brokerUserID, apiSecret})
 	return s.createAccountErr
+}
+
+func (s *stubStore) SetAccountName(_ context.Context, id uuid.UUID, name string) error {
+	return nil
 }
 
 func (s *stubStore) CreateFollowLink(_ context.Context, link domain.FollowLink) error {

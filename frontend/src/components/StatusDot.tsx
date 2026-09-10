@@ -1,4 +1,5 @@
-export function StatusDot(props: { status: 'ok' | 'error' }) {
+export function StatusDot(props: { status: 'ok' | 'error' | string }) {
+  const isHealthy = () => props.status === 'ok' || props.status === 'active'
   return (
     <span
       data-testid="status-dot"
@@ -8,7 +9,7 @@ export function StatusDot(props: { status: 'ok' | 'error' }) {
         width: '0.6em',
         height: '0.6em',
         'border-radius': '50%',
-        background: props.status === 'ok' ? 'var(--color-accent)' : '#e5484d',
+        background: isHealthy() ? 'var(--color-accent)' : '#e5484d',
       }}
     />
   )
