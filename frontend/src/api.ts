@@ -183,3 +183,94 @@ export function postAction(id: string, type: ActionType): Promise<{ type: string
     body: JSON.stringify({ type }),
   }).then((r) => json(r))
 }
+
+export interface AccountSummaryMetrics {
+  netQty: number
+  openPositionsCount?: number
+  openCount?: number
+  closedPositionsCount?: number
+  closedCount?: number
+  pendingOrdersCount?: number
+  pendingMetric?: number
+  totalMtm: number | string
+  realizedPnl: number | string
+  accountValue: number | string
+  status: string
+}
+
+export interface TabCounts {
+  openPositions: number
+  closedPositions: number
+  holdings: number
+  openOrders: number
+  closedOrders: number
+  rejectedOrders: number
+}
+
+export interface PaginationInfo {
+  tab: string
+  page: number
+  limit: number
+  totalCount: number
+  totalPages: number
+}
+
+export interface PositionItem {
+  product: string
+  instrument: string
+  qty: number
+  avgPrice: string
+  ltp: number | string
+  mtm: number | string
+  action?: string
+}
+
+export interface HoldingItem {
+  instrument: string
+  sellableQuantity: number
+  buyAveragePrice: number | string
+  ltp: number | string
+  pnl: number | string
+  action?: string
+}
+
+export interface OrderDetailItem {
+  id?: string
+  product?: string
+  time?: string
+  instrument: string
+  quantity: number
+  price?: number | string
+  triggerPrice?: number | string
+  limitPrice?: number | string
+  type: string
+  status?: string
+  reason?: string
+  action?: string
+}
+
+export interface AccountOrdersResponse {
+  summary: AccountSummaryMetrics
+  counts?: TabCounts
+  pagination?: PaginationInfo
+  openPositions: PositionItem[]
+  closedPositions: PositionItem[]
+  holdings: HoldingItem[]
+  openOrders: OrderDetailItem[]
+  closedOrders: OrderDetailItem[]
+  rejectedOrders: OrderDetailItem[]
+}
+
+export function getAccountOrders(
+  accountId: string,
+  tab?: string,
+  page?: number,
+  limit?: number,
+): Promise<AccountOrdersResponse> {
+  const params = new URLSearchParams()
+  if (tab) params.set('tab', tab)
+  if (page !== undefined && page > 0) params.set('page', String(page))
+  if (limit !== undefined && limit > 0) params.set('limit', String(limit))
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return fetch(`${BASE}/accounts/${accountId}/orders${qs}`).then((r) => json(r))
+}

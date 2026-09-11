@@ -7,6 +7,7 @@ import { AccountsPage } from './pages/AccountsPage'
 import { GroupManagePage } from './pages/GroupManagePage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
 import './theme.css'
+import './order-details.css'
 
 function TopNav(props: { children?: JSX.Element }) {
   const { theme, toggleTheme } = useTheme()

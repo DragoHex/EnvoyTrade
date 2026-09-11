@@ -3,7 +3,8 @@ import { CopyToggle } from './CopyToggle'
 import { ConfirmActionModal } from './ConfirmActionModal'
 import { ResultToast, type ToastResult } from './ResultToast'
 import { StatusDot } from './StatusDot'
-import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, SyncIcon } from './icons'
+import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, SyncIcon, ChevronDownIcon } from './icons'
+import { AccountOrderDetails } from './AccountOrderDetails'
 import type { GroupFollower } from '../api'
 
 type DestructiveAction = 'square_off' | 'exit_open_orders' | null
@@ -22,6 +23,7 @@ export function AccountRow(props: {
   const [pending, setPending] = createSignal<DestructiveAction>(null)
   const [rebalancing, setRebalancing] = createSignal(false)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
+  const [expanded, setExpanded] = createSignal(false)
   let dismissTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => clearTimeout(dismissTimer))
 
@@ -50,80 +52,109 @@ export function AccountRow(props: {
   }
 
   return (
-    <tr
-      data-testid={props.isMaster ? 'master-row' : 'account-row'}
-      data-disabled={!!props.actionsDisabled}
-    >
-      <td>
-        <Show when={!props.isMaster}>
-          <CopyToggle
-            enabled={props.follower.enabled}
-            disabled={props.toggleDisabled}
-            onToggle={props.onToggleCopy}
-          />
-        </Show>
-        <Show when={props.isMaster}>
+    <>
+      <tr
+        data-testid={props.isMaster ? 'master-row' : 'account-row'}
+        data-disabled={!!props.actionsDisabled}
+        class={expanded() ? 'row-expanded' : ''}
+      >
+        <td>
+          <Show when={!props.isMaster}>
+            <CopyToggle
+              enabled={props.follower.enabled}
+              disabled={props.toggleDisabled}
+              onToggle={props.onToggleCopy}
+            />
+          </Show>
+          <Show when={props.isMaster}>
+            <button
+              type="button"
+              class="icon-button icon-button-danger"
+              aria-label={props.follower.enabled ? 'Stop Copy' : 'Start Copy'}
+              data-tooltip={props.follower.enabled ? 'Stop' : 'Start'}
+              onClick={() => props.onToggleCopy(!props.follower.enabled)}
+            >
+              {props.follower.enabled ? <BlockIcon /> : <PlayCircleIcon />}
+            </button>
+          </Show>
+        </td>
+        <td>{props.follower.name || '—'}</td>
+        <td>{props.follower.brokerAccountId}</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>
+          <StatusDot status={props.follower.status} />
+        </td>
+        <td>
+          <div class="row-actions-group">
+            <button
+              type="button"
+              class="icon-button icon-button-primary"
+              aria-label="Rebalance"
+              data-tooltip="Rebalance"
+              disabled={rebalancing() || props.actionsDisabled}
+              onClick={handleRebalance}
+            >
+              <SyncIcon spinning={rebalancing()} />
+            </button>
+            <button
+              type="button"
+              class="icon-button icon-button-danger"
+              aria-label="Square Off"
+              data-tooltip="Sq.off"
+              disabled={props.actionsDisabled}
+              onClick={() => setPending('square_off')}
+            >
+              <CropSquareIcon />
+            </button>
+            <button
+              type="button"
+              class="icon-button icon-button-danger"
+              aria-label="Exit Open Orders"
+              data-tooltip="Exit Open Orders"
+              disabled={props.actionsDisabled}
+              onClick={() => setPending('exit_open_orders')}
+            >
+              <LogoutIcon />
+            </button>
+          </div>
+        </td>
+        <td class="row-expand-cell">
           <button
             type="button"
-            class="icon-button icon-button-danger"
-            aria-label={props.follower.enabled ? 'Stop Copy' : 'Start Copy'}
-            data-tooltip={props.follower.enabled ? 'Stop' : 'Start'}
-            onClick={() => props.onToggleCopy(!props.follower.enabled)}
+            class={`row-expand-toggle-btn ${expanded() ? 'row-expand-open' : ''}`}
+            aria-label={expanded() ? 'Collapse details' : 'Expand details'}
+            data-tooltip={expanded() ? 'Hide details' : 'View details'}
+            onClick={() => setExpanded(!expanded())}
+            data-testid="expand-row-btn"
           >
-            {props.follower.enabled ? <BlockIcon /> : <PlayCircleIcon />}
+            <ChevronDownIcon class={`chevron-icon ${expanded() ? 'chevron-rotated' : ''}`} />
           </button>
-        </Show>
-      </td>
-      <td>{props.follower.name || '—'}</td>
-      <td>{props.follower.brokerAccountId}</td>
-      <td>—</td>
-      <td>—</td>
-      <td>—</td>
-      <td>—</td>
-      <td>—</td>
-      <td>—</td>
-      <td>
-        <StatusDot status={props.follower.status} />
-      </td>
-      <td>
-        <button
-          type="button"
-          class="icon-button icon-button-primary"
-          aria-label="Rebalance"
-          data-tooltip="Rebalance"
-          disabled={rebalancing() || props.actionsDisabled}
-          onClick={handleRebalance}
-        >
-          <SyncIcon spinning={rebalancing()} />
-        </button>
-        <button
-          type="button"
-          class="icon-button icon-button-danger"
-          aria-label="Square Off"
-          data-tooltip="Sq.off"
-          disabled={props.actionsDisabled}
-          onClick={() => setPending('square_off')}
-        >
-          <CropSquareIcon />
-        </button>
-        <button
-          type="button"
-          class="icon-button icon-button-danger"
-          aria-label="Exit Open Orders"
-          data-tooltip="Exit Open Orders"
-          disabled={props.actionsDisabled}
-          onClick={() => setPending('exit_open_orders')}
-        >
-          <LogoutIcon />
-        </button>
-      </td>
-      <ConfirmActionModal
-        open={pending() !== null}
-        label={pending() === 'square_off' ? 'Square Off' : 'Exit Open Orders'}
-        onConfirm={confirm}
-        onCancel={() => setPending(null)}
-      />
-      <ResultToast result={toast()} onDismiss={() => setToast(null)} />
-    </tr>
+        </td>
+        <ConfirmActionModal
+          open={pending() !== null}
+          label={pending() === 'square_off' ? 'Square Off' : 'Exit Open Orders'}
+          onConfirm={confirm}
+          onCancel={() => setPending(null)}
+        />
+        <ResultToast result={toast()} onDismiss={() => setToast(null)} />
+      </tr>
+
+      <Show when={expanded()}>
+        <tr class="account-details-expansion-row" data-testid="account-details-expansion-row">
+          <td colspan="12" class="account-details-expansion-cell">
+            <AccountOrderDetails
+              accountId={props.follower.accountId}
+              accountName={props.follower.name}
+              brokerAccountId={props.follower.brokerAccountId}
+            />
+          </td>
+        </tr>
+      </Show>
+    </>
   )
 }

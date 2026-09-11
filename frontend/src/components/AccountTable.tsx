@@ -24,6 +24,7 @@ export function AccountTable(props: {
           <th>Available Margin</th>
           <th>Status</th>
           <th></th>
+          <th class="th-expand-col"></th>
         </tr>
       </thead>
       <tbody>
