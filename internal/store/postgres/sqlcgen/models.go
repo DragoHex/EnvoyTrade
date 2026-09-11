@@ -23,6 +23,47 @@ type Account struct {
 	Name         string
 }
 
+type AccountHolding struct {
+	ID               int64
+	AccountID        uuid.UUID
+	Instrument       string
+	SellableQuantity int32
+	BuyAveragePrice  decimal.Decimal
+	Ltp              decimal.Decimal
+	Pnl              decimal.Decimal
+	Action           string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type AccountMargin struct {
+	AccountID    uuid.UUID
+	NetQty       int32
+	TotalMtm     decimal.Decimal
+	RealizedPnl  decimal.Decimal
+	AccountValue decimal.Decimal
+	Status       string
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type AccountPosition struct {
+	ID           int64
+	AccountID    uuid.UUID
+	Product      string
+	Instrument   string
+	Quantity     int32
+	BuyPrice     decimal.Decimal
+	SellPrice    decimal.Decimal
+	BuyQuantity  int32
+	SellQuantity int32
+	Ltp          decimal.Decimal
+	Mtm          decimal.Decimal
+	Pnl          decimal.Decimal
+	Action       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type FollowLink struct {
 	FollowerID     uuid.UUID
 	MasterID       uuid.UUID

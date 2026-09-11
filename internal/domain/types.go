@@ -233,3 +233,87 @@ type OrderEvent struct {
 	Payload         []byte
 	OccurredAt      time.Time
 }
+
+// AccountSummaryMetrics represents the persistent top summary header for an account.
+type AccountSummaryMetrics struct {
+	NetQty               int             `json:"netQty"`
+	OpenPositionsCount   int             `json:"openPositionsCount"`
+	ClosedPositionsCount int             `json:"closedPositionsCount"`
+	PendingOrdersCount   int             `json:"pendingOrdersCount"`
+	TotalMtm             decimal.Decimal `json:"totalMtm"`
+	RealizedPnl          decimal.Decimal `json:"realizedPnl"`
+	AccountValue         decimal.Decimal `json:"accountValue"`
+	Status               string          `json:"status"`
+}
+
+// PositionItem represents an open or closed position row.
+type PositionItem struct {
+	Product    string          `json:"product"`
+	Instrument string          `json:"instrument"`
+	Qty        int             `json:"qty"`
+	AvgPrice   string          `json:"avgPrice"`
+	Ltp        decimal.Decimal `json:"ltp"`
+	Mtm        decimal.Decimal `json:"mtm"`
+	Action     string          `json:"action,omitempty"`
+}
+
+// HoldingItem represents a portfolio holding row.
+type HoldingItem struct {
+	Instrument       string          `json:"instrument"`
+	SellableQuantity int             `json:"sellableQuantity"`
+	BuyAveragePrice  decimal.Decimal `json:"buyAveragePrice"`
+	Ltp              decimal.Decimal `json:"ltp"`
+	Pnl              decimal.Decimal `json:"pnl"`
+	Action           string          `json:"action"`
+}
+
+// OrderDetailItem represents an order row in Open, Closed, or Rejected order tabs.
+type OrderDetailItem struct {
+	ID           string           `json:"id,omitempty"`
+	Product      string           `json:"product,omitempty"`
+	Time         string           `json:"time"`
+	Instrument   string           `json:"instrument"`
+	Quantity     int              `json:"quantity"`
+	Price        *decimal.Decimal `json:"price,omitempty"`
+	TriggerPrice *decimal.Decimal `json:"triggerPrice,omitempty"`
+	LimitPrice   *decimal.Decimal `json:"limitPrice,omitempty"`
+	Type         string           `json:"type"` // "B" or "S"
+	Status       string           `json:"status,omitempty"`
+	Reason       string           `json:"reason,omitempty"`
+	Action       string           `json:"action,omitempty"`
+}
+
+// TabCounts stores the total counts for each of the 6 drawer tabs.
+type TabCounts struct {
+	OpenPositions   int `json:"openPositions"`
+	ClosedPositions int `json:"closedPositions"`
+	Holdings        int `json:"holdings"`
+	OpenOrders      int `json:"openOrders"`
+	ClosedOrders    int `json:"closedOrders"`
+	RejectedOrders  int `json:"rejectedOrders"`
+}
+
+// PaginationInfo describes pagination state for the active tab.
+type PaginationInfo struct {
+	Tab        string `json:"tab"`
+	Page       int    `json:"page"`
+	Limit      int    `json:"limit"`
+	TotalCount int    `json:"totalCount"`
+	TotalPages int    `json:"totalPages"`
+}
+
+// AccountOrdersDetail is the complete response for GET /api/v1/accounts/{id}/orders.
+type AccountOrdersDetail struct {
+	AccountID       uuid.UUID             `json:"accountId"`
+	Role            string                `json:"role"`
+	BrokerAccountID string                `json:"brokerAccountId"`
+	Summary         AccountSummaryMetrics `json:"summary"`
+	Counts          TabCounts             `json:"counts"`
+	Pagination      PaginationInfo        `json:"pagination"`
+	OpenPositions   []PositionItem        `json:"openPositions"`
+	ClosedPositions []PositionItem        `json:"closedPositions"`
+	Holdings        []HoldingItem         `json:"holdings"`
+	OpenOrders      []OrderDetailItem     `json:"openOrders"`
+	ClosedOrders    []OrderDetailItem     `json:"closedOrders"`
+	RejectedOrders  []OrderDetailItem     `json:"rejectedOrders"`
+}

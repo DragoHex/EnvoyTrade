@@ -9,8 +9,45 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 )
+
+const countClosedFollowerOrders = `-- name: CountClosedFollowerOrders :one
+SELECT COUNT(*) FROM follower_orders fo
+WHERE fo.follower_id = $1 AND fo.terminal_status = 'COMPLETE'
+`
+
+func (q *Queries) CountClosedFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countClosedFollowerOrders, followerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countOpenFollowerOrders = `-- name: CountOpenFollowerOrders :one
+SELECT COUNT(*) FROM follower_orders fo
+WHERE fo.follower_id = $1 AND fo.terminal_status IS NULL AND fo.intended_qty > 0
+`
+
+func (q *Queries) CountOpenFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenFollowerOrders, followerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRejectedFollowerOrders = `-- name: CountRejectedFollowerOrders :one
+SELECT COUNT(*) FROM follower_orders fo
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered') OR fo.intended_qty = 0)
+`
+
+func (q *Queries) CountRejectedFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countRejectedFollowerOrders, followerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const followerOrdersByMasterFill = `-- name: FollowerOrdersByMasterFill :many
 SELECT id, follower_id FROM follower_orders WHERE master_fill_id = $1 ORDER BY id ASC
@@ -100,6 +137,402 @@ func (q *Queries) InsertFollowerOrder(ctx context.Context, arg InsertFollowerOrd
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listClosedFollowerOrdersPaginated = `-- name: ListClosedFollowerOrdersPaginated :many
+SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
+       fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
+       fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
+       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
+FROM follower_orders fo
+JOIN master_fills mf ON fo.master_fill_id = mf.id
+WHERE fo.follower_id = $1 AND fo.terminal_status = 'COMPLETE'
+ORDER BY fo.created_at DESC, fo.id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListClosedFollowerOrdersPaginatedParams struct {
+	FollowerID uuid.UUID
+	Limit      int32
+	Offset     int32
+}
+
+type ListClosedFollowerOrdersPaginatedRow struct {
+	ID                   int64
+	MasterFillID         int64
+	FollowerID           uuid.UUID
+	IdempotencyTag       string
+	IntendedQty          int32
+	LotSize              int32
+	SizingReason         int32
+	PlacedQty            *int32
+	BrokerOrderID        *string
+	TerminalStatus       *string
+	FilledQty            int32
+	AveragePrice         decimal.NullDecimal
+	AttemptCount         int32
+	LastError            *string
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	Tradingsymbol        string
+	Exchange             string
+	TransactionType      string
+	Product              string
+	OrderType            string
+	MasterOrderTimestamp pgtype.Timestamptz
+	MasterRawPayload     []byte
+}
+
+func (q *Queries) ListClosedFollowerOrdersPaginated(ctx context.Context, arg ListClosedFollowerOrdersPaginatedParams) ([]ListClosedFollowerOrdersPaginatedRow, error) {
+	rows, err := q.db.Query(ctx, listClosedFollowerOrdersPaginated, arg.FollowerID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListClosedFollowerOrdersPaginatedRow
+	for rows.Next() {
+		var i ListClosedFollowerOrdersPaginatedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MasterFillID,
+			&i.FollowerID,
+			&i.IdempotencyTag,
+			&i.IntendedQty,
+			&i.LotSize,
+			&i.SizingReason,
+			&i.PlacedQty,
+			&i.BrokerOrderID,
+			&i.TerminalStatus,
+			&i.FilledQty,
+			&i.AveragePrice,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Tradingsymbol,
+			&i.Exchange,
+			&i.TransactionType,
+			&i.Product,
+			&i.OrderType,
+			&i.MasterOrderTimestamp,
+			&i.MasterRawPayload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFollowerOrdersWithMasterFillByAccount = `-- name: ListFollowerOrdersWithMasterFillByAccount :many
+SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
+       fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
+       fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
+       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
+FROM follower_orders fo
+JOIN master_fills mf ON fo.master_fill_id = mf.id
+WHERE fo.follower_id = $1
+ORDER BY fo.created_at DESC
+LIMIT 100
+`
+
+type ListFollowerOrdersWithMasterFillByAccountRow struct {
+	ID                   int64
+	MasterFillID         int64
+	FollowerID           uuid.UUID
+	IdempotencyTag       string
+	IntendedQty          int32
+	LotSize              int32
+	SizingReason         int32
+	PlacedQty            *int32
+	BrokerOrderID        *string
+	TerminalStatus       *string
+	FilledQty            int32
+	AveragePrice         decimal.NullDecimal
+	AttemptCount         int32
+	LastError            *string
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	Tradingsymbol        string
+	Exchange             string
+	TransactionType      string
+	Product              string
+	OrderType            string
+	MasterOrderTimestamp pgtype.Timestamptz
+	MasterRawPayload     []byte
+}
+
+func (q *Queries) ListFollowerOrdersWithMasterFillByAccount(ctx context.Context, followerID uuid.UUID) ([]ListFollowerOrdersWithMasterFillByAccountRow, error) {
+	rows, err := q.db.Query(ctx, listFollowerOrdersWithMasterFillByAccount, followerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFollowerOrdersWithMasterFillByAccountRow
+	for rows.Next() {
+		var i ListFollowerOrdersWithMasterFillByAccountRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MasterFillID,
+			&i.FollowerID,
+			&i.IdempotencyTag,
+			&i.IntendedQty,
+			&i.LotSize,
+			&i.SizingReason,
+			&i.PlacedQty,
+			&i.BrokerOrderID,
+			&i.TerminalStatus,
+			&i.FilledQty,
+			&i.AveragePrice,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Tradingsymbol,
+			&i.Exchange,
+			&i.TransactionType,
+			&i.Product,
+			&i.OrderType,
+			&i.MasterOrderTimestamp,
+			&i.MasterRawPayload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenFollowerOrdersPaginated = `-- name: ListOpenFollowerOrdersPaginated :many
+SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
+       fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
+       fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
+       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
+FROM follower_orders fo
+JOIN master_fills mf ON fo.master_fill_id = mf.id
+WHERE fo.follower_id = $1 AND fo.terminal_status IS NULL AND fo.intended_qty > 0
+ORDER BY fo.created_at DESC, fo.id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListOpenFollowerOrdersPaginatedParams struct {
+	FollowerID uuid.UUID
+	Limit      int32
+	Offset     int32
+}
+
+type ListOpenFollowerOrdersPaginatedRow struct {
+	ID                   int64
+	MasterFillID         int64
+	FollowerID           uuid.UUID
+	IdempotencyTag       string
+	IntendedQty          int32
+	LotSize              int32
+	SizingReason         int32
+	PlacedQty            *int32
+	BrokerOrderID        *string
+	TerminalStatus       *string
+	FilledQty            int32
+	AveragePrice         decimal.NullDecimal
+	AttemptCount         int32
+	LastError            *string
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	Tradingsymbol        string
+	Exchange             string
+	TransactionType      string
+	Product              string
+	OrderType            string
+	MasterOrderTimestamp pgtype.Timestamptz
+	MasterRawPayload     []byte
+}
+
+func (q *Queries) ListOpenFollowerOrdersPaginated(ctx context.Context, arg ListOpenFollowerOrdersPaginatedParams) ([]ListOpenFollowerOrdersPaginatedRow, error) {
+	rows, err := q.db.Query(ctx, listOpenFollowerOrdersPaginated, arg.FollowerID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenFollowerOrdersPaginatedRow
+	for rows.Next() {
+		var i ListOpenFollowerOrdersPaginatedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MasterFillID,
+			&i.FollowerID,
+			&i.IdempotencyTag,
+			&i.IntendedQty,
+			&i.LotSize,
+			&i.SizingReason,
+			&i.PlacedQty,
+			&i.BrokerOrderID,
+			&i.TerminalStatus,
+			&i.FilledQty,
+			&i.AveragePrice,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Tradingsymbol,
+			&i.Exchange,
+			&i.TransactionType,
+			&i.Product,
+			&i.OrderType,
+			&i.MasterOrderTimestamp,
+			&i.MasterRawPayload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRejectedFollowerOrdersPaginated = `-- name: ListRejectedFollowerOrdersPaginated :many
+SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
+       fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
+       fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
+       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
+FROM follower_orders fo
+JOIN master_fills mf ON fo.master_fill_id = mf.id
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered') OR fo.intended_qty = 0)
+ORDER BY fo.created_at DESC, fo.id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListRejectedFollowerOrdersPaginatedParams struct {
+	FollowerID uuid.UUID
+	Limit      int32
+	Offset     int32
+}
+
+type ListRejectedFollowerOrdersPaginatedRow struct {
+	ID                   int64
+	MasterFillID         int64
+	FollowerID           uuid.UUID
+	IdempotencyTag       string
+	IntendedQty          int32
+	LotSize              int32
+	SizingReason         int32
+	PlacedQty            *int32
+	BrokerOrderID        *string
+	TerminalStatus       *string
+	FilledQty            int32
+	AveragePrice         decimal.NullDecimal
+	AttemptCount         int32
+	LastError            *string
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	Tradingsymbol        string
+	Exchange             string
+	TransactionType      string
+	Product              string
+	OrderType            string
+	MasterOrderTimestamp pgtype.Timestamptz
+	MasterRawPayload     []byte
+}
+
+func (q *Queries) ListRejectedFollowerOrdersPaginated(ctx context.Context, arg ListRejectedFollowerOrdersPaginatedParams) ([]ListRejectedFollowerOrdersPaginatedRow, error) {
+	rows, err := q.db.Query(ctx, listRejectedFollowerOrdersPaginated, arg.FollowerID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRejectedFollowerOrdersPaginatedRow
+	for rows.Next() {
+		var i ListRejectedFollowerOrdersPaginatedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MasterFillID,
+			&i.FollowerID,
+			&i.IdempotencyTag,
+			&i.IntendedQty,
+			&i.LotSize,
+			&i.SizingReason,
+			&i.PlacedQty,
+			&i.BrokerOrderID,
+			&i.TerminalStatus,
+			&i.FilledQty,
+			&i.AveragePrice,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Tradingsymbol,
+			&i.Exchange,
+			&i.TransactionType,
+			&i.Product,
+			&i.OrderType,
+			&i.MasterOrderTimestamp,
+			&i.MasterRawPayload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pendingFollowerOrders = `-- name: PendingFollowerOrders :many
+SELECT id, master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
+       placed_qty, broker_order_id, terminal_status, filled_qty, average_price, attempt_count,
+       last_error, created_at, updated_at
+FROM follower_orders
+WHERE terminal_status IS NULL AND created_at < $1
+ORDER BY id ASC
+`
+
+func (q *Queries) PendingFollowerOrders(ctx context.Context, createdAt pgtype.Timestamptz) ([]FollowerOrder, error) {
+	rows, err := q.db.Query(ctx, pendingFollowerOrders, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FollowerOrder
+	for rows.Next() {
+		var i FollowerOrder
+		if err := rows.Scan(
+			&i.ID,
+			&i.MasterFillID,
+			&i.FollowerID,
+			&i.IdempotencyTag,
+			&i.IntendedQty,
+			&i.LotSize,
+			&i.SizingReason,
+			&i.PlacedQty,
+			&i.BrokerOrderID,
+			&i.TerminalStatus,
+			&i.FilledQty,
+			&i.AveragePrice,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateFollowerOrderFailed = `-- name: UpdateFollowerOrderFailed :exec

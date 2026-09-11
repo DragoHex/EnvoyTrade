@@ -8,6 +8,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"time"
 
 	"envoytrade/internal/domain"
 	"envoytrade/internal/store/postgres/sqlcgen"
@@ -16,6 +17,7 @@ import (
 	decimalpgx "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 )
@@ -34,6 +36,9 @@ var accountActiveSchema string
 
 //go:embed migrations/0005_groups_and_names.sql
 var groupsAndNamesSchema string
+
+//go:embed migrations/0006_positions_and_holdings.sql
+var positionsAndHoldingsSchema string
 
 const uniqueViolation = "23505"
 const foreignKeyViolation = "23503"
@@ -85,7 +90,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, accountActiveSchema); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, groupsAndNamesSchema)
+	if _, err := s.pool.Exec(ctx, groupsAndNamesSchema); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, positionsAndHoldingsSchema)
 	return err
 }
 
@@ -562,4 +570,17 @@ func (s *Store) SetAccountName(ctx context.Context, id uuid.UUID, name string) e
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+// PendingFollowerOrders returns follower orders still awaiting terminal status created before cutoff.
+func (s *Store) PendingFollowerOrders(ctx context.Context, cutoff time.Time) ([]domain.FollowerOrder, error) {
+	rows, err := s.queries.PendingFollowerOrders(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	orders := make([]domain.FollowerOrder, 0, len(rows))
+	for _, r := range rows {
+		orders = append(orders, toFollowerOrder(r))
+	}
+	return orders, nil
 }
