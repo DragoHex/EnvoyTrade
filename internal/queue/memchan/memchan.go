@@ -8,9 +8,6 @@ package memchan
 import (
 	"context"
 	"errors"
-
-	"envoytrade/internal/domain"
-	"envoytrade/internal/queue"
 )
 
 // ErrFull is returned by Publish when the buffer has no room. The caller
@@ -19,24 +16,19 @@ import (
 var ErrFull = errors.New("memchan: queue full")
 
 // Queue is a fixed-capacity, in-memory implementation of
-// queue.Publisher and queue.Consumer.
-type Queue struct {
-	ch chan domain.MasterFill
+// queue.Publisher[T] and queue.Consumer[T].
+type Queue[T any] struct {
+	ch chan T
 }
 
-var (
-	_ queue.Publisher = (*Queue)(nil)
-	_ queue.Consumer  = (*Queue)(nil)
-)
-
 // New creates a Queue with the given buffer capacity.
-func New(capacity int) *Queue {
-	return &Queue{ch: make(chan domain.MasterFill, capacity)}
+func New[T any](capacity int) *Queue[T] {
+	return &Queue[T]{ch: make(chan T, capacity)}
 }
 
 // Publish attempts a non-blocking send. If the buffer is full it returns
 // ErrFull immediately rather than waiting for space.
-func (q *Queue) Publish(ctx context.Context, ev domain.MasterFill) error {
+func (q *Queue[T]) Publish(ctx context.Context, ev T) error {
 	select {
 	case q.ch <- ev:
 		return nil
@@ -49,7 +41,7 @@ func (q *Queue) Publish(ctx context.Context, ev domain.MasterFill) error {
 // blocking until ctx is cancelled. memchan has no durability of its own,
 // so an error from fn simply drops that in-memory delivery — the caller
 // relies on the outbox drainer for redelivery, not on Consume retrying.
-func (q *Queue) Consume(ctx context.Context, fn func(context.Context, domain.MasterFill) error) error {
+func (q *Queue[T]) Consume(ctx context.Context, fn func(context.Context, T) error) error {
 	for {
 		select {
 		case <-ctx.Done():
