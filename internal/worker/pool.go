@@ -3,20 +3,15 @@
 // egress). A slow, hanging, or panicking follower can never affect
 // another's dispatch — that isolation is the point (PLAN.md §4.3).
 //
-// Rate limiting is enforced per-account to respect Kite's ~10 orders/sec
-// limit. Timeouts are retried with backoff up to a cap; margin/RMS
-// rejections are terminal on first attempt (Design Doc §6).
+// Retry, backoff, rate limiting, and circuit breaking (PLAN.md §4.4) are
+// a later milestone: this package places each order at most once and
+// records the outcome, success or terminal failure.
 package worker
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
-	"net"
-	"strings"
 	"sync"
-	"time"
 
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
@@ -37,33 +32,19 @@ type Store interface {
 // follower. It satisfies engine.Dispatcher structurally — engine never
 // imports this package, only the interface it declared.
 type Pool struct {
-	mu                sync.Mutex
-	workers           map[uuid.UUID]chan domain.Job
-	wg                sync.WaitGroup
-	done              chan struct{}
-	shutdown          sync.Once
-	RateLimitInterval time.Duration
-	MaxRetries        int
-	InitialBackoff    time.Duration
-	Logger            *slog.Logger
+	mu       sync.Mutex
+	workers  map[uuid.UUID]chan domain.Job
+	wg       sync.WaitGroup
+	done     chan struct{}
+	shutdown sync.Once
 }
 
 // NewPool creates an empty pool. Followers are added with Register.
 func NewPool() *Pool {
 	return &Pool{
-		workers:           make(map[uuid.UUID]chan domain.Job),
-		done:              make(chan struct{}),
-		RateLimitInterval: 100 * time.Millisecond,
-		MaxRetries:        3,
-		InitialBackoff:    50 * time.Millisecond,
+		workers: make(map[uuid.UUID]chan domain.Job),
+		done:    make(chan struct{}),
 	}
-}
-
-func (p *Pool) log() *slog.Logger {
-	if p.Logger != nil {
-		return p.Logger
-	}
-	return slog.Default()
 }
 
 // Register starts a follower's dedicated goroutine, listening on a
@@ -109,7 +90,6 @@ func (p *Pool) Shutdown() {
 
 func (p *Pool) run(ctx context.Context, in <-chan domain.Job, b broker.Broker, store Store) {
 	defer p.wg.Done()
-	var lastCall time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -117,49 +97,15 @@ func (p *Pool) run(ctx context.Context, in <-chan domain.Job, b broker.Broker, s
 		case <-p.done:
 			return
 		case job := <-in:
-			if p.RateLimitInterval > 0 && !lastCall.IsZero() {
-				elapsed := time.Since(lastCall)
-				if elapsed < p.RateLimitInterval {
-					select {
-					case <-time.After(p.RateLimitInterval - elapsed):
-					case <-ctx.Done():
-						return
-					case <-p.done:
-						return
-					}
-				}
-			}
-			lastCall = time.Now()
 			p.place(ctx, job, b, store)
 		}
 	}
 }
 
-func isTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded")
-}
-
 func (p *Pool) place(ctx context.Context, job domain.Job, b broker.Broker, store Store) {
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("panic placing order: %v", r)
-			p.log().Error("worker: placement panic recovered",
-				"follower_id", job.FollowerID,
-				"order_id", job.FollowerOrderID,
-				"error", err,
-			)
-			p.recordFailure(ctx, job, store, err)
+			p.recordFailure(ctx, job, store, fmt.Errorf("panic placing order: %v", r))
 		}
 	}()
 
@@ -173,85 +119,21 @@ func (p *Pool) place(ctx context.Context, job domain.Job, b broker.Broker, store
 		Tag:             job.IdempotencyTag,
 	}
 
-	maxAttempts := p.MaxRetries
-	if maxAttempts < 1 {
-		maxAttempts = 1
+	resp, err := b.PlaceOrder(ctx, "regular", params)
+	if err != nil {
+		p.recordFailure(ctx, job, store, err)
+		return
 	}
 
-	backoff := p.InitialBackoff
-	if backoff <= 0 {
-		backoff = 10 * time.Millisecond
-	}
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		resp, err := b.PlaceOrder(ctx, "regular", params)
-		if err == nil {
-			p.log().Info("worker: order placed successfully",
-				"follower_id", job.FollowerID,
-				"order_id", job.FollowerOrderID,
-				"broker_order_id", resp.OrderID,
-				"symbol", job.Tradingsymbol,
-				"qty", job.Quantity,
-				"attempt", attempt,
-			)
-
-			_ = store.UpdateFollowerOrderPlaced(ctx, job.FollowerOrderID, resp.OrderID, job.Quantity)
-			orderID := job.FollowerOrderID
-			_ = store.AppendOrderEvent(ctx, domain.OrderEvent{
-				FollowerOrderID: &orderID,
-				MasterFillID:    &job.MasterFillID,
-				AccountID:       job.FollowerID,
-				EventType:       "api_response",
-				Payload:         []byte(fmt.Sprintf(`{"broker_order_id":%q,"quantity":%d}`, resp.OrderID, job.Quantity)),
-			})
-			return
-		}
-
-		// Rejections (margin/RMS/input) are terminal on first attempt — no retry (Design Doc §6).
-		if !isTimeout(err) {
-			p.log().Error("worker: placement rejected by broker, terminal failure",
-				"follower_id", job.FollowerID,
-				"order_id", job.FollowerOrderID,
-				"symbol", job.Tradingsymbol,
-				"qty", job.Quantity,
-				"error", err,
-			)
-			p.recordFailure(ctx, job, store, err)
-			return
-		}
-
-		// If this was the last attempt, record the timeout failure.
-		if attempt == maxAttempts {
-			p.log().Error("worker: placement timeout retries exhausted",
-				"follower_id", job.FollowerID,
-				"order_id", job.FollowerOrderID,
-				"symbol", job.Tradingsymbol,
-				"attempts", attempt,
-				"error", err,
-			)
-			p.recordFailure(ctx, job, store, err)
-			return
-		}
-
-		p.log().Warn("worker: placement timeout, retrying with backoff",
-			"follower_id", job.FollowerID,
-			"order_id", job.FollowerOrderID,
-			"attempt", attempt,
-			"backoff_ms", backoff.Milliseconds(),
-			"error", err,
-		)
-
-		select {
-		case <-time.After(backoff):
-			backoff *= 2
-		case <-ctx.Done():
-			p.recordFailure(ctx, job, store, ctx.Err())
-			return
-		case <-p.done:
-			p.recordFailure(ctx, job, store, errors.New("pool shutdown"))
-			return
-		}
-	}
+	_ = store.UpdateFollowerOrderPlaced(ctx, job.FollowerOrderID, resp.OrderID, job.Quantity)
+	orderID := job.FollowerOrderID
+	_ = store.AppendOrderEvent(ctx, domain.OrderEvent{
+		FollowerOrderID: &orderID,
+		MasterFillID:    &job.MasterFillID,
+		AccountID:       job.FollowerID,
+		EventType:       "api_response",
+		Payload:         []byte(fmt.Sprintf(`{"broker_order_id":%q,"quantity":%d}`, resp.OrderID, job.Quantity)),
+	})
 }
 
 func (p *Pool) recordFailure(ctx context.Context, job domain.Job, store Store, cause error) {

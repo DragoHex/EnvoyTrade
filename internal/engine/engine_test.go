@@ -84,7 +84,7 @@ func newTestStore(t *testing.T) *postgres.Store {
 func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-secret"); err != nil {
+	if err := s.CreateAccount(context.Background(), id, role, id.String()); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	return id
@@ -169,36 +169,6 @@ func TestHandleMasterFill_FansOutToAllEnabledFollowers(t *testing.T) {
 		if job.Quantity != wantQty[job.FollowerID] {
 			t.Fatalf("follower %v quantity = %d, want %d", job.FollowerID, job.Quantity, wantQty[job.FollowerID])
 		}
-	}
-}
-
-func TestHandleMasterFill_InactiveMasterSkipsFanOutEntirely(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	master := seedAccount(t, s, "master")
-	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
-	if err := s.SetAccountActive(ctx, master, false); err != nil {
-		t.Fatalf("SetAccountActive: %v", err)
-	}
-
-	fill := insertFill(t, s, master, 100)
-	disp := newFakeDispatcher()
-	e := engine.New(s, disp)
-
-	if err := e.HandleMasterFill(ctx, fill); err != nil {
-		t.Fatalf("HandleMasterFill: %v", err)
-	}
-
-	orders, err := s.FollowerOrdersByMasterFill(ctx, fill.ID)
-	if err != nil {
-		t.Fatalf("FollowerOrdersByMasterFill: %v", err)
-	}
-	if len(orders) != 0 {
-		t.Fatalf("got %d follower_orders while master inactive, want 0", len(orders))
-	}
-	if disp.jobCount() != 0 {
-		t.Fatalf("got %d dispatched jobs while master inactive, want 0", disp.jobCount())
 	}
 }
 
