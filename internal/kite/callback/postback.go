@@ -61,6 +61,7 @@ func (h *Handler) log() *slog.Logger {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var p postbackPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		h.log().Warn("postback: malformed json body", "error", err)
 		http.Error(w, "malformed body", http.StatusBadRequest)
 		return
 	}
@@ -80,9 +81,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !IsTerminal(p.Status) {
+		h.log().Debug("postback: non-terminal status ignored", "order_id", p.OrderID, "status", p.Status)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+
+	h.log().Info("postback: received terminal order update",
+		"order_id", p.OrderID,
+		"user_id", p.UserID,
+		"role", role,
+		"status", p.Status,
+		"symbol", p.TradingSymbol,
+		"filled_quantity", p.FilledQuantity,
+	)
 
 	switch role {
 	case RoleMaster:

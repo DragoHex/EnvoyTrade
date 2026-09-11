@@ -47,10 +47,18 @@ func (c *MasterFillConsumer) log() *slog.Logger {
 // Handle persists fill and fans it out. Called directly by tests, or via
 // Run for a live queue.Consumer.
 func (c *MasterFillConsumer) Handle(ctx context.Context, fill domain.MasterFill) error {
+	c.log().Info("listener: consuming master fill",
+		"broker_order_id", fill.BrokerOrderID,
+		"master_id", fill.MasterID,
+		"symbol", fill.Tradingsymbol,
+		"qty", fill.FilledQuantity,
+	)
+
 	id, err := c.Store.InsertMasterFill(ctx, fill)
 	if errors.Is(err, domain.ErrDuplicate) {
 		// Already durable from an earlier delivery (WS + postback both
 		// fired, or a retry) — the original pass already fanned out.
+		c.log().Debug("listener: duplicate master fill, ignoring", "broker_order_id", fill.BrokerOrderID)
 		return nil
 	}
 	if err != nil {
@@ -98,6 +106,12 @@ func (c *FollowerStatusConsumer) log() *slog.Logger {
 // Handle applies upd. An unknown broker_order_id is dropped, not an
 // error — it can arrive before the worker's own placement write commits.
 func (c *FollowerStatusConsumer) Handle(ctx context.Context, upd domain.OrderUpdate) error {
+	c.log().Info("listener: consuming follower order update",
+		"broker_order_id", upd.BrokerOrderID,
+		"status", upd.Status,
+		"filled_quantity", upd.FilledQuantity,
+	)
+
 	id, err := c.Store.UpdateFollowerOrderStatus(ctx, upd.BrokerOrderID, upd.Status, upd.FilledQuantity, upd.AveragePrice)
 	if errors.Is(err, domain.ErrNotFound) {
 		c.log().Warn("listener: order update for unknown broker_order_id, dropping", "broker_order_id", upd.BrokerOrderID)

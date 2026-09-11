@@ -86,3 +86,48 @@ func TestMasterTicker_StopClosesConnAndStartReturnsCleanly(t *testing.T) {
 		t.Fatal("Start did not return after context cancellation")
 	}
 }
+
+type fakeConnectingConn struct {
+	fakeConn
+	onConnect func()
+}
+
+func (c *fakeConnectingConn) OnConnect(f func()) {
+	c.onConnect = f
+}
+
+func TestMasterTicker_ReconnectTriggersCatchUpHook(t *testing.T) {
+	conn := &fakeConnectingConn{fakeConn: fakeConn{serveDone: make(chan struct{})}}
+	pub := &fakePublisher[domain.MasterFill]{}
+	mt := callback.NewMasterTicker(conn, uuid.New(), pub, nil)
+
+	hookCalled := 0
+	mt.SetCatchUpHook(func(ctx context.Context) error {
+		hookCalled++
+		return nil
+	})
+
+	if conn.onConnect == nil {
+		t.Fatal("expected onConnect callback to be registered")
+	}
+
+	// First connect: initial connection, should not trigger catch-up hook
+	conn.onConnect()
+	if hookCalled != 0 {
+		t.Fatalf("hook called on initial connect: %d, want 0", hookCalled)
+	}
+
+	// Second connect: reconnect! Must trigger catch-up hook
+	conn.onConnect()
+	if hookCalled != 1 {
+		t.Fatalf("hook called on reconnect: %d, want 1", hookCalled)
+	}
+
+	// Manual TriggerCatchUp
+	if err := mt.TriggerCatchUp(context.Background()); err != nil {
+		t.Fatalf("TriggerCatchUp: %v", err)
+	}
+	if hookCalled != 2 {
+		t.Fatalf("hook called after manual trigger: %d, want 2", hookCalled)
+	}
+}
