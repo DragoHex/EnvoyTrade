@@ -5,9 +5,12 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TYPE account_role AS ENUM ('master', 'follower');
+DO $$ BEGIN
+  CREATE TYPE account_role AS ENUM ('master', 'follower');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   role            account_role NOT NULL,
   broker          text NOT NULL DEFAULT 'zerodha',
@@ -18,7 +21,7 @@ CREATE TABLE accounts (
   UNIQUE (broker, broker_user_id)
 );
 
-CREATE TABLE follow_links (
+CREATE TABLE IF NOT EXISTS follow_links (
   follower_id       uuid PRIMARY KEY REFERENCES accounts(id),
   master_id         uuid NOT NULL REFERENCES accounts(id),
   capital_ratio     numeric(10,6) NOT NULL CHECK (capital_ratio > 0),
@@ -28,7 +31,7 @@ CREATE TABLE follow_links (
   CHECK (follower_id <> master_id)
 );
 
-CREATE TABLE master_fills (
+CREATE TABLE IF NOT EXISTS master_fills (
   id               bigserial PRIMARY KEY,
   master_id        uuid NOT NULL REFERENCES accounts(id),
   broker_order_id  text NOT NULL,
@@ -49,7 +52,7 @@ CREATE TABLE master_fills (
   UNIQUE (master_id, broker_order_id, filled_quantity, status)
 );
 
-CREATE TABLE follower_orders (
+CREATE TABLE IF NOT EXISTS follower_orders (
   id              bigserial PRIMARY KEY,
   master_fill_id  bigint NOT NULL REFERENCES master_fills(id),
   follower_id     uuid NOT NULL REFERENCES accounts(id),
@@ -69,7 +72,7 @@ CREATE TABLE follower_orders (
   UNIQUE (master_fill_id, follower_id)
 );
 
-CREATE TABLE order_events (
+CREATE TABLE IF NOT EXISTS order_events (
   id                bigserial PRIMARY KEY,
   follower_order_id bigint REFERENCES follower_orders(id),
   master_fill_id    bigint REFERENCES master_fills(id),
@@ -82,5 +85,5 @@ CREATE TABLE order_events (
   payload           jsonb NOT NULL,
   occurred_at       timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ON order_events (account_id, occurred_at);
-CREATE INDEX ON order_events (follower_order_id, id);
+CREATE INDEX IF NOT EXISTS order_events_account_id_occurred_at_idx ON order_events (account_id, occurred_at);
+CREATE INDEX IF NOT EXISTS order_events_follower_order_id_id_idx ON order_events (follower_order_id, id);
