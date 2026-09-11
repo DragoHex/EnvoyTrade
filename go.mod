@@ -1,6 +1,6 @@
 module envoytrade
 
-go 1.27.1
+go 1.26.3
 
 replace github.com/zerodha/gokiteconnect/v4 => ./gokiteconnect
 

@@ -1,6 +1,0 @@
-- Add User name and password for first time login.
-- Add TOPT, this can be created from profile, Password & Security from Kite.
-- Once you get the API key after creating an app on kite developer portal. The secret key is updated on the copy platform.
-- Option to login and logout of accounts.
-- Impalance shows the account which couldn't place an order.
-- https://kite.zerodha.com/connect/login?v=3&api_key=<API_KEY>
