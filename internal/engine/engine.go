@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"envoytrade/internal/domain"
 
@@ -38,11 +39,19 @@ type Dispatcher interface {
 type Engine struct {
 	store      Store
 	dispatcher Dispatcher
+	Logger     *slog.Logger
 }
 
 // New wires an Engine to its store and dispatcher.
 func New(store Store, dispatcher Dispatcher) *Engine {
 	return &Engine{store: store, dispatcher: dispatcher}
+}
+
+func (e *Engine) log() *slog.Logger {
+	if e.Logger != nil {
+		return e.Logger
+	}
+	return slog.Default()
 }
 
 // HandleMasterFill is the engine's one job: size the fill for every
@@ -52,6 +61,13 @@ func New(store Store, dispatcher Dispatcher) *Engine {
 // redrive) — duplicate follower_orders are recognized and skipped, not
 // re-dispatched.
 func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) error {
+	e.log().Info("engine: processing master fill",
+		"master_id", fill.MasterID,
+		"broker_order_id", fill.BrokerOrderID,
+		"symbol", fill.Tradingsymbol,
+		"qty", fill.FilledQuantity,
+	)
+
 	active, err := e.store.MasterActive(ctx, fill.MasterID)
 	if err != nil {
 		return fmt.Errorf("check master active: %w", err)
@@ -60,6 +76,7 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 		// Master manually stopped via the Dashboard — no-op, same as a
 		// duplicate-fill redelivery: safe to keep receiving fills, just
 		// nothing dispatches until Start is clicked again.
+		e.log().Info("engine: master inactive, skipping fan-out", "master_id", fill.MasterID)
 		return nil
 	}
 
@@ -91,6 +108,14 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 	qty, reason := domain.SizeOrder(fill.FilledQuantity, link.CapitalRatio, lotSize, link.MaxQtyPerOrder)
 	tag := domain.IdempotencyTag(fill.ID, link.FollowerID)
 
+	e.log().Debug("engine: sized follower order",
+		"master_id", fill.MasterID,
+		"follower_id", link.FollowerID,
+		"intended_qty", qty,
+		"lot_size", lotSize,
+		"sizing_reason", reason,
+	)
+
 	orderID, err := e.store.InsertFollowerOrder(ctx, domain.FollowerOrder{
 		MasterFillID:   fill.ID,
 		FollowerID:     link.FollowerID,
@@ -104,6 +129,10 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 		// redelivery, not a new signal. The original pass already
 		// dispatched (or will, via the outbox drainer); doing it again
 		// here would risk a second live order.
+		e.log().Debug("engine: duplicate follower order, skipping redelivery",
+			"follower_id", link.FollowerID,
+			"fill_id", fill.ID,
+		)
 		return nil
 	}
 	if err != nil {
@@ -113,6 +142,11 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 	if qty == 0 {
 		// Below one lot (or a bad instrument/ratio): visible on the
 		// follower_order row, but there is nothing to place.
+		e.log().Info("engine: zero quantity follower order, skipping dispatch",
+			"follower_id", link.FollowerID,
+			"order_id", orderID,
+			"reason", reason,
+		)
 		return nil
 	}
 
@@ -129,8 +163,18 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 		Quantity:        qty,
 	}
 	if !e.dispatcher.Dispatch(link.FollowerID, job) {
+		e.log().Error("engine: follower worker channel full, dead-lettered",
+			"follower_id", link.FollowerID,
+			"order_id", orderID,
+		)
 		return e.store.UpdateFollowerOrderFailed(ctx, orderID, domain.TerminalDeadLettered,
 			"worker channel full: fan-out could not hand off in time")
 	}
+
+	e.log().Info("engine: follower order dispatched",
+		"follower_id", link.FollowerID,
+		"order_id", orderID,
+		"qty", qty,
+	)
 	return nil
 }
