@@ -18,6 +18,7 @@ prefer expanding an existing endpoint over adding a new one.
 |---|---|---|
 | [`groups.md`](./groups.md) | `GET /groups`, `GET /groups/{masterId}` | Dashboard page |
 | [`accounts.md`](./accounts.md) | `GET /accounts`, `POST /accounts`, `PATCH /accounts/{id}` | Accounts page, and the Dashboard `CopyToggle`/Stop-Copy (via the same `PATCH`) |
+| [`orders.md`](./orders.md) | `GET /accounts/{id}/orders` | Dashboard account expanded order, position, and holding drawer |
 | [`actions.md`](./actions.md) | `POST /accounts/{id}/actions` | Dashboard Rebalance / Square Off / Exit Open Orders buttons |
 | [`analytics.md`](./analytics.md) | `GET /analytics/pnl`, `GET /analytics/trades` | Analytics page |
 

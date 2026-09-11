@@ -6,7 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EnvoyTrade is a copy-trade platform on Zerodha Kite Connect: one master trading account, N follower accounts, strictly 1-master-per-follower. Single Go binary, single Postgres. `docs/PLAN.md` is the full V1 implementation plan (package layout, data model, Kite integration details, milestones); `docs/ARCHITECTURE.md` covers system/deployment diagrams. Read `docs/PLAN.md` before extending scope — it documents *why*, not just what.
 
-Two slices are built so far: the **fan-out mechanism** (master fill → sized, idempotent, isolated follower orders) and **order-callback ingestion** (Kite postback + WS ticker → queue → store/engine, both directions: master fill detection and follower status tracking). Everything else `docs/PLAN.md` describes — real Kite REST/session wiring, reconciliation, retry/circuit-breaker, kill switch, admin dashboard, metrics/tracing — is not implemented yet. There is no `main.go`; nothing is wired into a running process.
+The core V1 copy-trade pipeline is wired in `cmd/server/main.go`:
+- **Fan-out mechanism** (`internal/engine`): master fill → lot-sized, idempotent follower orders.
+- **Order-callback ingestion** (`internal/kite/callback`, `internal/listener`): Kite postback (`POST /broker-callback`) + WS ticker (`callback.MasterTicker`) → in-memory queue (`internal/queue/memchan`) → store/engine.
+- **Broker adapter & worker pool** (`internal/kite`, `internal/worker`): real `kite.Broker` (`*kiteconnect.Client` wrapper) with per-account static proxy egress (`RESTClientFor`), per-account rate-limiting (~10 orders/s), and timeout retries (up to 3 attempts). Margin/RMS rejections fail immediately.
+- **Reconciliation backstop** (`internal/recon`): periodic REST poller (30–60s) backfilling missed master fills, resolving stuck follower orders (>2 min), and raising drift alerts.
+- **Admin HTTP API** (`internal/httpapi`): dashboard groups, accounts, and rebalance actions.
+- **Structured logging** (`slog`): zero-dependency JSON/text logging across server lifecycle, HTTP middleware, engine, worker pool, listener, and recon. Defaults to `/var/log/envoytrade/app.log` (configurable via `LOG_FILE`, `LOG_FORMAT`, `LOG_LEVEL`, `LOG_TO_STDOUT`) with graceful fallback to `stdout` when unprivileged.
+
+Remaining future scope per `docs/PLAN.md`: interactive daily auth web flow / refresh-token daemon, multi-account session management, kill switch panic button, and full metrics/tracing.
 
 ## Commands
 
@@ -69,7 +77,7 @@ MasterFill (signal) → engine.HandleMasterFill
 - **Lot size always comes from the `instruments` table**, resolved by `(exchange, tradingsymbol)` — never from a value carried on the fill payload. This matters most for F&O: lot sizes vary per contract and change over a contract's life, so trusting the signal risks silently wrong quantities. A symbol missing from `instruments` (`domain.ErrNotFound`) resolves to lot size 0, which `SizeOrder` already reports as `ReasonBadInstrument` — visible on the `follower_order` row, not silently dropped.
 - **Every sizing outcome is visible, never silent.** `SizingReason` (`ReasonOK`, `ReasonBelowOneLot`, `ReasonCapped`, `ReasonBadInstrument`, `ReasonInvalidRatio`) is persisted alongside every `follower_order`, including zero-quantity ones — a skipped follower must be auditable, not invisible.
 - **Worker isolation is structural, not best-effort.** `internal/worker.Pool` runs one goroutine + one buffered channel per follower. `Dispatch` never blocks — a full channel returns `false` immediately so one slow/backed-up follower can never stall fan-out to others. A panic inside one follower's placement goroutine is recovered and recorded as a failure; it cannot take down another follower's goroutine. `Pool.Shutdown()` closes an internal `done` channel (not just `ctx`) so workers terminate deterministically even if the caller passed `context.Background()`.
-- **No retry, no circuit breaker, no kill switch in this slice** — a broker error is recorded as a terminal failure on first attempt. These are later milestones per `docs/PLAN.md` §4.4 and explicitly out of scope for the current code.
+- **Worker retry and rate-limiting**: `internal/worker.Pool` limits dispatch (~10 orders/s per account) and retries network timeouts with exponential backoff up to 3 attempts. Margin/RMS/input rejections fail terminally on first attempt (no retry to prevent duplicate executions). Circuit breaker and global kill switch remain later milestones.
 - **Money/ratio math is decimal-only**, via `shopspring/decimal`, never `float64` — `SizeOrder` is called out in comments as the highest-risk function in the system.
 
 ### Order-callback ingestion (postback + WS)

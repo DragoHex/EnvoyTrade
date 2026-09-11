@@ -55,6 +55,13 @@ type stubStore struct {
 
 	deleteFollowLinkErr  error
 	deleteFollowLinkArgs []uuid.UUID
+
+	ordersDetail      domain.AccountOrdersDetail
+	ordersDetailErr   error
+	ordersDetailIDs   []uuid.UUID
+	ordersDetailTab   string
+	ordersDetailPage  int
+	ordersDetailLimit int
 }
 
 type createAccountCall struct {
@@ -201,6 +208,20 @@ func (s *stubStore) DeleteAccount(_ context.Context, id uuid.UUID) error {
 func (s *stubStore) DeleteFollowLink(_ context.Context, followerID uuid.UUID) error {
 	s.deleteFollowLinkArgs = append(s.deleteFollowLinkArgs, followerID)
 	return s.deleteFollowLinkErr
+}
+
+func (s *stubStore) AccountOrders(_ context.Context, id uuid.UUID, tab string, page int, limit int) (domain.AccountOrdersDetail, error) {
+	s.ordersDetailIDs = append(s.ordersDetailIDs, id)
+	s.ordersDetailTab = tab
+	s.ordersDetailPage = page
+	s.ordersDetailLimit = limit
+	if s.ordersDetailErr != nil {
+		return domain.AccountOrdersDetail{}, s.ordersDetailErr
+	}
+	if s.ordersDetail.AccountID == uuid.Nil {
+		s.ordersDetail.AccountID = id
+	}
+	return s.ordersDetail, nil
 }
 
 // stubActionEngine is a hand-written fake satisfying httpapi.Engine.

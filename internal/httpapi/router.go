@@ -6,12 +6,42 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"time"
 )
 
+// Option configures optional router behaviors.
+type Option func(*routerConfig)
+
+type routerConfig struct {
+	postbackHandler http.Handler
+	logger          *slog.Logger
+}
+
+// WithPostbackHandler mounts a webhook handler at POST /broker-callback.
+func WithPostbackHandler(h http.Handler) Option {
+	return func(c *routerConfig) {
+		c.postbackHandler = h
+	}
+}
+
+// WithLogger configures structured request logging middleware.
+func WithLogger(logger *slog.Logger) Option {
+	return func(c *routerConfig) {
+		c.logger = logger
+	}
+}
+
 // NewRouter wires every Dashboard-page route onto a stdlib ServeMux using
-// Go 1.22+ method+path pattern routing.
-func NewRouter(store Store, actionEngine Engine) *http.ServeMux {
+// Go 1.22+ method+path pattern routing. If WithLogger option is supplied,
+// requests are wrapped with structured access logging.
+func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
+	var cfg routerConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	mux := http.NewServeMux()
 	h := &handlers{store: store, engine: actionEngine}
 
@@ -27,8 +57,62 @@ func NewRouter(store Store, actionEngine Engine) *http.ServeMux {
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}", h.deleteAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}/group", h.deleteAccountGroup)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/actions", h.postAction)
+	mux.HandleFunc("GET /api/v1/accounts/{id}/orders", h.getAccountOrders)
 
+	if cfg.postbackHandler != nil {
+		mux.Handle("POST /broker-callback", cfg.postbackHandler)
+	}
+
+	if cfg.logger != nil {
+		return loggingMiddleware(mux, cfg.logger)
+	}
 	return mux
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+	bytes      int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.statusCode = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.statusCode == 0 {
+		r.statusCode = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(b)
+	r.bytes += n
+	return n, err
+}
+
+func loggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		duration := time.Since(start)
+
+		attrs := []any{
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.statusCode,
+			"duration_ms", duration.Milliseconds(),
+			"bytes", rec.bytes,
+			"remote_ip", r.RemoteAddr,
+		}
+
+		if rec.statusCode >= 500 {
+			logger.Error("http request error", attrs...)
+		} else if rec.statusCode >= 400 {
+			logger.Warn("http request warning", attrs...)
+		} else {
+			logger.Info("http request completed", attrs...)
+		}
+	})
 }
 
 // Store is everything the handlers need from persistence — the union of
@@ -38,6 +122,7 @@ type Store interface {
 	GroupsStore
 	AccountsStore
 	ActionsStore
+	OrdersStore
 }
 
 type handlers struct {
