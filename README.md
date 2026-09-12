@@ -1,5 +1,3 @@
-[lean-ctx] no compression applied (mode=aggressive): output was not smaller than the file — returning full content (3095 tok)
-[lean-ctx] no compression applied (mode=aggressive): output was not smaller than the file — returning full content (2797 tok)
 # EnvoyTrade
 
 EnvoyTrade is a high-reliability, low-latency copy-trading platform built for Zerodha Kite Connect. It synchronizes trades from a designated master trading account to multiple follower accounts in real time using a strictly enforced 1-master-to-N-followers topology (at most one master per follower).
@@ -276,7 +274,3 @@ npm run build
 ```
 
 ---
-
-## License
-
-Proprietary and confidential. All rights reserved.
