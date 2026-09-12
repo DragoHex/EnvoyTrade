@@ -615,4 +615,102 @@ it('locks column header widths with fixed table layout so headers do not shift a
     const emptyCell = screen.getByText('No data').closest('td')
     expect(emptyCell).toHaveAttribute('colspan', '8')
   })
-})
+  it('stabilizes sub-tab selection: keeps tab headers mounted without reloading and only switches active highlight and internal component', async () => {
+    const mockData: api.AccountOrdersResponse = {
+      summary: {
+        netQty: 10,
+        openPositionsCount: 1,
+        closedPositionsCount: 1,
+        pendingOrdersCount: 0,
+        totalMtm: 100,
+        realizedPnl: 0,
+        accountValue: 10000,
+        status: 'online',
+      },
+      counts: {
+        openPositions: 1,
+        closedPositions: 1,
+        holdings: 1,
+        openOrders: 0,
+        closedOrders: 0,
+        rejectedOrders: 0,
+      },
+      pagination: {
+        tab: 'open_positions',
+        page: 1,
+        limit: 10,
+        totalCount: 1,
+        totalPages: 1,
+      },
+      openPositions: [
+        {
+          product: 'CNC',
+          instrument: 'CRUDEOIL17SEP26C10600',
+          qty: 10,
+          avgPrice: '100.00',
+          ltp: '110.00',
+          mtm: '100.00',
+        },
+      ],
+      closedPositions: [
+        {
+          product: 'CNC',
+          instrument: 'CRUDEOIL17SEP26P8200',
+          qty: 0,
+          avgPrice: '20.00',
+          ltp: '30.00',
+          mtm: '50.00',
+        },
+      ],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue(mockData)
+
+    render(() => <AccountOrderDetails accountId="acc-tab-stable-test" />)
+
+    // Initial tab: Open Position should be active
+    const openPosBtn = await screen.findByRole('tab', { name: /Open Position/i })
+    const closedPosBtn = screen.getByRole('tab', { name: /Closed Position/i })
+    const holdingBtn = screen.getByRole('tab', { name: /Holding/i })
+
+    expect(openPosBtn).toHaveClass('order-tab-active')
+    expect(openPosBtn).toHaveAttribute('aria-selected', 'true')
+    expect(closedPosBtn).not.toHaveClass('order-tab-active')
+    expect(closedPosBtn).toHaveAttribute('aria-selected', 'false')
+
+    // Initial internal component: Open Position table
+    expect(screen.getByText('CRUDEOIL17SEP26C10600')).toBeInTheDocument()
+
+    // Capture tab DOM node references before click to verify they are NOT remounted/reloaded
+    const originalOpenBtn = openPosBtn
+    const originalClosedBtn = closedPosBtn
+    const tabList = screen.getByRole('tablist')
+
+    // Click Closed Position tab
+    fireEvent.click(closedPosBtn)
+
+    // Verify tab list and buttons are the exact same DOM nodes (never remounted or reloaded)
+    expect(screen.getByRole('tablist')).toBe(tabList)
+    expect(screen.getByRole('tab', { name: /Open Position/i })).toBe(originalOpenBtn)
+    expect(screen.getByRole('tab', { name: /Closed Position/i })).toBe(originalClosedBtn)
+
+    // Active state shifted cleanly: Closed Position is now highlighted, Open Position is unhighlighted
+    expect(closedPosBtn).toHaveClass('order-tab-active')
+    expect(closedPosBtn).toHaveAttribute('aria-selected', 'true')
+    expect(openPosBtn).not.toHaveClass('order-tab-active')
+    expect(openPosBtn).toHaveAttribute('aria-selected', 'false')
+
+    // Only internal component switched to Closed Position
+    expect(await screen.findByText('CRUDEOIL17SEP26P8200')).toBeInTheDocument()
+    expect(screen.queryByText('CRUDEOIL17SEP26C10600')).not.toBeInTheDocument()
+
+    // Click Holding tab
+    fireEvent.click(holdingBtn)
+    expect(holdingBtn).toHaveClass('order-tab-active')
+    expect(closedPosBtn).not.toHaveClass('order-tab-active')
+  })
+});

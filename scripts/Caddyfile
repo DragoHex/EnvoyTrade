@@ -1,0 +1,18 @@
+# Caddyfile for EnvoyTrade on DuckDNS
+# Mandatory HTTPS with automated Let's Encrypt / ZeroSSL TLS certificates.
+# Automatically redirects all HTTP (port 80) traffic to HTTPS (port 443).
+
+{$DOMAIN:envoytrade.duckdns.org} {
+	reverse_proxy localhost:{$BACKEND_PORT:8080}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	log {
+		output file {$LOG_FILE:/tmp/caddy-envoytrade.log}
+		format json
+	}
+}
