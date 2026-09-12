@@ -65,28 +65,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 		rejectedOrdersCount, _ = s.queries.CountRejectedFollowerOrders(ctx, accountID)
 	}
 
-	// Fallback sample data if DB tables are empty (unseeded dev state)
-	var sampleOpen []domain.PositionItem
-	var sampleClosed []domain.PositionItem
-	if openPosCount == 0 && closedPosCount == 0 {
-		sampleOpen = sampleOpenPositions()
-		sampleClosed = sampleClosedPositions()
-		openPosCount = int64(len(sampleOpen))
-		closedPosCount = int64(len(sampleClosed))
-	}
-
-	var sampleHold []domain.HoldingItem
-	if holdingsCount == 0 {
-		sampleHold = sampleHoldings()
-		holdingsCount = int64(len(sampleHold))
-	}
-
-	var sampleClOrders []domain.OrderDetailItem
-	if openOrdersCount == 0 && closedOrdersCount == 0 && rejectedOrdersCount == 0 {
-		sampleClOrders = sampleClosedOrders()
-		closedOrdersCount = int64(len(sampleClOrders))
-	}
-
 	// Calculate pagination state for requested tab
 	var totalCount int
 	switch tab {
@@ -149,8 +127,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					Action:     r.Action,
 				})
 			}
-		} else if len(sampleOpen) > 0 {
-			detail.OpenPositions = sliceItems(sampleOpen, offset, limit)
 		}
 
 	case "closed_positions":
@@ -171,8 +147,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					Action:     r.Action,
 				})
 			}
-		} else if len(sampleClosed) > 0 {
-			detail.ClosedPositions = sliceItems(sampleClosed, offset, limit)
 		}
 
 	case "holdings":
@@ -192,8 +166,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					Action:           r.Action,
 				})
 			}
-		} else if len(sampleHold) > 0 {
-			detail.Holdings = sliceItems(sampleHold, offset, limit)
 		}
 
 	case "open_orders":
@@ -235,8 +207,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 				for _, f := range fills {
 					detail.ClosedOrders = append(detail.ClosedOrders, masterFillToOrderItem(f))
 				}
-			} else if len(sampleClOrders) > 0 {
-				detail.ClosedOrders = sliceItems(sampleClOrders, offset, limit)
 			}
 		} else {
 			orders, err := s.queries.ListClosedFollowerOrdersPaginated(ctx, sqlcgen.ListClosedFollowerOrdersPaginatedParams{
@@ -251,8 +221,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 						fo.PlacedQty, fo.TransactionType, fo.AveragePrice, fo.TerminalStatus, fo.LastError, fo.SizingReason,
 					))
 				}
-			} else if len(sampleClOrders) > 0 {
-				detail.ClosedOrders = sliceItems(sampleClOrders, offset, limit)
 			}
 		}
 
@@ -300,29 +268,18 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 		}
 	} else {
 		detail.Summary = domain.AccountSummaryMetrics{
-			NetQty:               -890,
+			NetQty:               0,
 			OpenPositionsCount:   int(openPosCount),
 			ClosedPositionsCount: int(closedPosCount),
 			PendingOrdersCount:   int(openOrdersCount),
-			TotalMtm:             decimal.NewFromFloat(380.00),
+			TotalMtm:             decimal.Zero,
 			RealizedPnl:          decimal.Zero,
-			AccountValue:         decimal.NewFromFloat(2163520.84),
-			Status:               "online",
+			AccountValue:         decimal.Zero,
+			Status:               "offline",
 		}
 	}
 
 	return detail, nil
-}
-
-func sliceItems[T any](items []T, offset, limit int) []T {
-	if offset >= len(items) {
-		return make([]T, 0)
-	}
-	end := offset + limit
-	if end > len(items) {
-		end = len(items)
-	}
-	return items[offset:end]
 }
 
 func masterFillToOrderItem(f sqlcgen.MasterFill) domain.OrderDetailItem {
@@ -422,60 +379,4 @@ func transactionTypeLetter(tx string) string {
 		return "B"
 	}
 	return "S"
-}
-
-func sampleOpenPositions() []domain.PositionItem {
-	return []domain.PositionItem{
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26C10600", Qty: -100, AvgPrice: "0.00/111.10", Ltp: decimal.NewFromFloat(114.4), Mtm: decimal.NewFromFloat(-330.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26C10700", Qty: -100, AvgPrice: "0.00/137.20", Ltp: decimal.NewFromFloat(101.6), Mtm: decimal.NewFromFloat(3560.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26C11000", Qty: -200, AvgPrice: "0.00/67.10", Ltp: decimal.NewFromFloat(71.0), Mtm: decimal.NewFromFloat(-780.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26P8400", Qty: -200, AvgPrice: "0.00/45.65", Ltp: decimal.NewFromFloat(43.0), Mtm: decimal.NewFromFloat(530.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26P8500", Qty: -100, AvgPrice: "0.00/53.20", Ltp: decimal.NewFromFloat(50.5), Mtm: decimal.NewFromFloat(270.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26P8600", Qty: -100, AvgPrice: "0.00/59.70", Ltp: decimal.NewFromFloat(60.6), Mtm: decimal.NewFromFloat(-90.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26P8700", Qty: -100, AvgPrice: "0.00/53.90", Ltp: decimal.NewFromFloat(73.3), Mtm: decimal.NewFromFloat(-1940.00), Action: "exit"},
-		{Product: "CNC", Instrument: "CRUDEOILM21SEP26", Qty: 10, AvgPrice: "9896.00/0.00", Ltp: decimal.NewFromFloat(9580.0), Mtm: decimal.NewFromFloat(-3160.00), Action: "exit"},
-	}
-}
-
-func sampleClosedPositions() []domain.PositionItem {
-	return []domain.PositionItem{
-		{Product: "CNC", Instrument: "CRUDEOIL17SEP26P8200", Qty: 0, AvgPrice: "23.00/40.20", Ltp: decimal.NewFromFloat(29.7), Mtm: decimal.NewFromFloat(1720.00)},
-		{Product: "CNC", Instrument: "CRUDEOIL21SEP26", Qty: 0, AvgPrice: "9885.00/9891.00", Ltp: decimal.NewFromFloat(9584.0), Mtm: decimal.NewFromFloat(600.00)},
-	}
-}
-
-func sampleHoldings() []domain.HoldingItem {
-	return []domain.HoldingItem{
-		{Instrument: "ASIANPAINT-EQ", SellableQuantity: 1, BuyAveragePrice: decimal.NewFromFloat(2369.20), Ltp: decimal.NewFromFloat(2469.2), Pnl: decimal.NewFromFloat(100.00), Action: "exit"},
-		{Instrument: "ATHERENERG", SellableQuantity: 100, BuyAveragePrice: decimal.NewFromFloat(891.10), Ltp: decimal.NewFromFloat(1656.0), Pnl: decimal.NewFromFloat(76490.00), Action: "exit"},
-		{Instrument: "BHARTIARTL-EQ", SellableQuantity: 1, BuyAveragePrice: decimal.NewFromFloat(756.01), Ltp: decimal.NewFromFloat(1842.5), Pnl: decimal.NewFromFloat(1086.49), Action: "exit"},
-		{Instrument: "DELHIVERY", SellableQuantity: 1, BuyAveragePrice: decimal.NewFromFloat(259.85), Ltp: decimal.NewFromFloat(438.5), Pnl: decimal.NewFromFloat(178.65), Action: "exit"},
-		{Instrument: "EXIDEIND-EQ", SellableQuantity: 100, BuyAveragePrice: decimal.NewFromFloat(331.80), Ltp: decimal.NewFromFloat(414.4), Pnl: decimal.NewFromFloat(8260.00), Action: "exit"},
-		{Instrument: "GOLDBEES", SellableQuantity: 200, BuyAveragePrice: decimal.NewFromFloat(122.80), Ltp: decimal.NewFromFloat(125.18), Pnl: decimal.NewFromFloat(476.00), Action: "exit"},
-		{Instrument: "HAL", SellableQuantity: 1, BuyAveragePrice: decimal.NewFromFloat(2574.31), Ltp: decimal.NewFromFloat(4921.7), Pnl: decimal.NewFromFloat(2347.39), Action: "exit"},
-		{Instrument: "HCLTECH-EQ", SellableQuantity: 0, BuyAveragePrice: decimal.NewFromFloat(1363.87), Ltp: decimal.NewFromFloat(1219.3), Pnl: decimal.NewFromFloat(-15567.00), Action: "exit"},
-		{Instrument: "HDFCBANK", SellableQuantity: 100, BuyAveragePrice: decimal.NewFromFloat(860.17), Ltp: decimal.NewFromFloat(703.85), Pnl: decimal.NewFromFloat(-15631.67), Action: "exit"},
-		{Instrument: "HINDZINC", SellableQuantity: 1, BuyAveragePrice: decimal.NewFromFloat(491.40), Ltp: decimal.NewFromFloat(577.5), Pnl: decimal.NewFromFloat(86.10), Action: "exit"},
-		{Instrument: "IEX-EQ", SellableQuantity: 1, BuyAveragePrice: decimal.NewFromFloat(131.50), Ltp: decimal.NewFromFloat(114.03), Pnl: decimal.NewFromFloat(-17.47), Action: "exit"},
-	}
-}
-
-func sampleClosedOrders() []domain.OrderDetailItem {
-	p1 := decimal.NewFromFloat(111.1)
-	p2 := decimal.NewFromFloat(137.2)
-	p3 := decimal.NewFromFloat(9891.0)
-	p4 := decimal.NewFromFloat(9896.0)
-	p5 := decimal.NewFromFloat(9885.0)
-	p6 := decimal.NewFromFloat(23.0)
-	p7 := decimal.NewFromFloat(53.9)
-
-	return []domain.OrderDetailItem{
-		{Product: "CNC", Time: "2026-09-11 14:24:05", Instrument: "CRUDEOIL17SEP26C10600", Quantity: 100, Price: &p1, Type: "S"},
-		{Product: "CNC", Time: "2026-09-11 11:18:42", Instrument: "CRUDEOIL17SEP26C10700", Quantity: 100, Price: &p2, Type: "S"},
-		{Product: "CNC", Time: "2026-09-11 09:22:37", Instrument: "CRUDEOIL21SEP26", Quantity: 100, Price: &p3, Type: "S"},
-		{Product: "CNC", Time: "2026-09-11 09:22:34", Instrument: "CRUDEOILM21SEP26", Quantity: 10, Price: &p4, Type: "B"},
-		{Product: "CNC", Time: "2026-09-11 09:19:01", Instrument: "CRUDEOIL21SEP26", Quantity: 100, Price: &p5, Type: "B"},
-		{Product: "CNC", Time: "2026-09-11 09:17:37", Instrument: "CRUDEOIL17SEP26P8200", Quantity: 100, Price: &p6, Type: "B"},
-		{Product: "CNC", Time: "2026-09-11 09:17:28", Instrument: "CRUDEOIL17SEP26P8700", Quantity: 100, Price: &p7, Type: "S"},
-	}
 }

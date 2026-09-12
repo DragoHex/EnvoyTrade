@@ -2,6 +2,7 @@ import { createResource, For, Show } from 'solid-js'
 import { getGroupDetail, getGroups, patchAccount, postAction, type ActionType } from '../api'
 import { GroupCard } from '../components/GroupCard'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
+import { EmptyState } from '../components/EmptyState'
 
 function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
@@ -56,7 +57,20 @@ export function Dashboard() {
     <div class="page">
       <h1>Dashboard</h1>
       <Show when={groups()} fallback={<LoadingTimeout><GroupsSkeleton /></LoadingTimeout>}>
-        {(gs) => <For each={gs()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} />}</For>}
+        {(gs) => (
+          <Show
+            when={gs().length > 0}
+            fallback={
+              <div class="dashboard-empty-card">
+                <EmptyState>
+                  No group added. Please go to <a href="/accounts" class="empty-state-link">accounts</a> to add groups
+                </EmptyState>
+              </div>
+            }
+          >
+            <For each={gs()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} />}</For>
+          </Show>
+        )}
       </Show>
     </div>
   )

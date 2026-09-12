@@ -2,10 +2,10 @@ import { createSignal, createResource, createMemo, Show, For } from 'solid-js'
 import { getAccountOrders } from '../api'
 import {
   ExitSquareIcon,
-  EmptyBoxIcon,
   ProhibitIcon,
   DoorExitIcon,
 } from './icons'
+import { EmptyState } from './EmptyState'
 
 export type OrderTabId =
   | 'open_positions'
@@ -72,14 +72,14 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
     const s = ordersData()?.summary
     if (!s) {
       return {
-        netQty: -890,
-        openCount: 8,
-        closedCount: 2,
+        netQty: 0,
+        openCount: 0,
+        closedCount: 0,
         pendingMetric: 0,
-        totalMtm: 380,
+        totalMtm: 0,
         realizedPnl: 0,
-        accountValue: 2163520.84,
-        status: 'online',
+        accountValue: 0,
+        status: 'offline',
       }
     }
     return {
@@ -760,17 +760,6 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
           </Show>
         </Show>
       </div>
-    </div>
-  )
-}
-
-function EmptyState(props: { message: string }) {
-  return (
-    <div class="order-empty-state" data-testid="order-empty-state">
-      <div class="empty-icon-wrapper">
-        <EmptyBoxIcon />
-      </div>
-      <div class="empty-text">{props.message}</div>
     </div>
   )
 }

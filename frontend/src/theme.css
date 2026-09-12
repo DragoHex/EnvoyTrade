@@ -6,6 +6,7 @@
   --color-accent: #04b488;
   --color-border: #f0f0f2;
   --color-text: #44475b;
+  --color-text-secondary: #71768e;
   --color-bg: #ffffff;
   --color-surface: #f5f5f7;
 }
@@ -14,6 +15,7 @@
   --color-accent: #06d896;
   --color-border: #2a2c34;
   --color-text: #f0f0f2;
+  --color-text-secondary: #9da3ae;
   --color-bg: #0f1117;
   --color-surface: #1a1c24;
 }
@@ -147,6 +149,25 @@ section[data-testid='group-card'] {
   border-radius: 8px;
   padding: 1rem 1.25rem;
   margin: 0 1.5rem 1.5rem;
+}
+
+.dashboard-empty-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin: 0 1.5rem 1.5rem;
+}
+
+.empty-state-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+  transition: opacity 0.15s ease;
+}
+
+.empty-state-link:hover {
+  opacity: 0.8;
 }
 
 table {
@@ -810,10 +831,15 @@ tr[data-testid='master-row'] td {
   width: 100%;
 }
 
-.groups-table th:last-child,
-.groups-table td:last-child {
-  text-align: center;
+.groups-table .col-status {
   width: 80px;
+  text-align: center;
+}
+
+.groups-table .col-actions {
+  width: 80px;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .action-btn-toggle {

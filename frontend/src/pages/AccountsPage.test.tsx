@@ -156,4 +156,59 @@ describe('AccountsPage', () => {
     expect(screen.getByRole('button', { name: 'Accounts' })).toHaveAttribute('aria-pressed', 'true')
     expect(window.location.search).toBe('?tab=accounts')
   })
+
+  it('clicking Edit button on a group opens EditGroupModal, and saving calls patchGroup and updates without navigating', async () => {
+    const group = { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 1, status: 'ok' as const }
+    vi.spyOn(api, 'getGroups').mockResolvedValue([group])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
+    const patchSpy = vi.spyOn(api, 'patchGroup').mockResolvedValue({ status: 'ok' })
+
+    renderPage()
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    const editBtn = screen.getByRole('button', { name: 'Edit' })
+    expect(editBtn).toHaveAttribute('data-tooltip', 'Edit Group')
+    expect(editBtn).toHaveAttribute('title', 'Edit Group')
+
+    await userEvent.click(editBtn)
+    expect(screen.getByRole('dialog', { name: 'Edit Group' })).toBeInTheDocument()
+    expect(screen.queryByText('group page')).not.toBeInTheDocument()
+
+    const nameInput = screen.getByPlaceholderText('e.g. Momentum Nifty')
+    expect(nameInput).toHaveValue('Alpha Group')
+
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'Renamed Alpha')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(patchSpy).toHaveBeenCalledWith('g1', { name: 'Renamed Alpha', masterId: 'm1' })
+    await waitFor(() => expect(screen.getByText('Group updated successfully.')).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'Edit Group' })).not.toBeInTheDocument()
+    expect(screen.queryByText('group page')).not.toBeInTheDocument()
+  })
+
+  it('clicking Delete button on a group opens confirmation modal, and confirming invokes deleteGroup without navigating', async () => {
+    const group = { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 0, status: 'ok' as const }
+    vi.spyOn(api, 'getGroups').mockResolvedValue([group])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
+    const deleteSpy = vi.spyOn(api, 'deleteGroup').mockResolvedValue(undefined)
+
+    renderPage()
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    const deleteBtn = screen.getByRole('button', { name: 'Delete' })
+    expect(deleteBtn).toHaveAttribute('data-tooltip', 'Delete Group')
+    expect(deleteBtn).toHaveAttribute('title', 'Delete Group')
+
+    await userEvent.click(deleteBtn)
+    expect(deleteSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Confirm Delete group' })).toBeInTheDocument()
+    expect(screen.queryByText('group page')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    expect(deleteSpy).toHaveBeenCalledWith('g1')
+    await waitFor(() => expect(screen.getByText('Group deleted successfully.')).toBeInTheDocument())
+    expect(screen.queryByText('Alpha Group')).not.toBeInTheDocument()
+    expect(screen.queryByText('group page')).not.toBeInTheDocument()
+  })
 })

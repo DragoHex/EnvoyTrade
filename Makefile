@@ -4,7 +4,7 @@ FRONTEND_PORT ?= 5173
 DB_CONTAINER ?= envoytrade-db
 DB_VOLUME ?= envoytrade-db-data
 
-.PHONY: build build-backend build-frontend run-backend run-frontend test test-integration install db-up db-down down sqlc-generate
+.PHONY: build build-backend build-frontend run-backend run-frontend test test-integration install db-up db-down db-seed db-flush seed flush down sqlc-generate
 
 build: build-backend build-frontend
 
@@ -19,6 +19,15 @@ db-up:
 
 db-down:
 	podman rm -f $(DB_CONTAINER)
+
+db-seed:
+	DATABASE_URL="$(DATABASE_URL)" CONTAINER_NAME="$(DB_CONTAINER)" ./scripts/seed_test_data.sh
+
+db-flush:
+	DATABASE_URL="$(DATABASE_URL)" CONTAINER_NAME="$(DB_CONTAINER)" ./scripts/flush_data.sh
+
+seed: db-seed
+flush: db-flush
 
 # down stops the backend/frontend dev servers (by port) and the db
 # container. run-backend/run-frontend run in the foreground, so this is
