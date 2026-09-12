@@ -9,23 +9,29 @@ import {
   deleteAccount,
   removeAccountFromGroup,
   createGroup,
+  patchGroup,
+  deleteGroup,
   type Account,
   type CreateAccountRequest,
+  type GroupSummary,
 } from '../api'
 import { AccountsTable } from '../components/AccountsTable'
 import { AccountDetailDrawer } from '../components/AccountDetailDrawer'
 import { CreateGroupModal } from '../components/CreateGroupModal'
+import { EditGroupModal } from '../components/EditGroupModal'
 import { ConfirmActionModal } from '../components/ConfirmActionModal'
 import { ResultToast, type ToastResult } from '../components/ResultToast'
 import { LoadingTimeout, TableSkeleton } from '../components/Skeleton'
 import { StatusDot } from '../components/StatusDot'
 import { BrokerLogo } from '../components/BrokerLogo'
+import { EditIcon, TrashIcon } from '../components/icons'
 
 const TOAST_DISMISS_MS = 4000
 
 type PendingAction =
   | { type: 'delete'; account: Account }
   | { type: 'remove_from_group'; account: Account }
+  | { type: 'delete_group'; group: GroupSummary }
   | null
 
 export function AccountsPage() {
@@ -39,10 +45,11 @@ export function AccountsPage() {
     )
   }
 
-  const [groups, { refetch: refetchGroups }] = createResource(getGroups)
+  const [groups, { refetch: refetchGroups, mutate: mutateGroups }] = createResource(getGroups)
   const [accounts, { mutate: mutateAccounts }] = createResource(() => getAccounts())
   const [drawerOpen, setDrawerOpen] = createSignal(false)
   const [createGroupOpen, setCreateGroupOpen] = createSignal(false)
+  const [editingGroup, setEditingGroup] = createSignal<GroupSummary | null>(null)
   const [editing, setEditing] = createSignal<Account | null>(null)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
   const [pendingAction, setPendingAction] = createSignal<PendingAction>(null)
@@ -72,6 +79,20 @@ export function AccountsPage() {
       mutateAccounts((prev) => (prev ? [...prev, created] : [created]))
     } catch (e) {
       showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Create failed.' })
+      throw e
+    }
+  }
+
+  const handleSaveGroup = async (name: string, masterId: string) => {
+    const g = editingGroup()
+    if (!g) return
+    try {
+      await patchGroup(g.id || g.masterId, { name, masterId })
+      showToast({ kind: 'success', message: 'Group updated successfully.' })
+      setEditingGroup(null)
+      refetchGroups()
+    } catch (e) {
+      showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to update group.' })
       throw e
     }
   }
@@ -139,6 +160,14 @@ export function AccountsPage() {
       } catch (e) {
         showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to remove from group.' })
       }
+    } else if (pending.type === 'delete_group') {
+      try {
+        await deleteGroup(pending.group.id || pending.group.masterId)
+        mutateGroups((prev) => prev?.filter((g) => (g.id || g.masterId) !== (pending.group.id || pending.group.masterId)))
+        showToast({ kind: 'success', message: 'Group deleted successfully.' })
+      } catch (e) {
+        showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to delete group.' })
+      }
     }
   }
 
@@ -195,7 +224,8 @@ export function AccountsPage() {
                     <th>Master Account</th>
                     <th>Broker</th>
                     <th>Follower Count</th>
-                    <th>Status</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-actions"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -216,10 +246,40 @@ export function AccountsPage() {
                           <BrokerLogo broker={g().broker} />
                         </td>
                         <td>{g().followerCount}</td>
-                        <td>
+                        <td class="col-status">
                           <span class="status-cell-centered" title={g().status}>
                             <StatusDot status={g().status} />
                           </span>
+                        </td>
+                        <td class="col-actions">
+                          <div class="table-actions">
+                            <button
+                              type="button"
+                              class="icon-button"
+                              aria-label="Edit"
+                              data-tooltip="Edit Group"
+                              title="Edit Group"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditingGroup(g())
+                              }}
+                            >
+                              <EditIcon />
+                            </button>
+                            <button
+                              type="button"
+                              class="icon-button icon-button-danger"
+                              aria-label="Delete"
+                              data-tooltip="Delete Group"
+                              title="Delete Group"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setPendingAction({ type: 'delete_group', group: g() })
+                              }}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )}
@@ -249,7 +309,7 @@ export function AccountsPage() {
 
       <ConfirmActionModal
         open={pendingAction() !== null}
-        label={pendingAction()?.type === 'delete' ? 'Delete' : 'Remove from group'}
+        label={pendingAction()?.type === 'delete' ? 'Delete' : pendingAction()?.type === 'delete_group' ? 'Delete group' : 'Remove from group'}
         onConfirm={confirmPendingAction}
         onCancel={() => setPendingAction(null)}
       />
@@ -259,6 +319,15 @@ export function AccountsPage() {
         masters={masters()}
         onClose={() => setCreateGroupOpen(false)}
         onCreate={handleCreateGroup}
+      />
+
+      <EditGroupModal
+        open={editingGroup() !== null}
+        initialName={editingGroup()?.name || ''}
+        currentMasterId={editingGroup()?.masterId || ''}
+        masters={masters()}
+        onClose={() => setEditingGroup(null)}
+        onSave={handleSaveGroup}
       />
 
       <AccountDetailDrawer

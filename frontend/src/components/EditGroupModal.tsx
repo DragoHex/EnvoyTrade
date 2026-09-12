@@ -52,16 +52,16 @@ export function EditGroupModal(props: {
           role="dialog"
           aria-label="Edit Group"
           class="confirm-modal"
-          style={{ width: '400px', padding: '1.5rem' }}
+          style={{ width: '380px', padding: '1.25rem' }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div class="drawer-header" style={{ "margin-bottom": "1rem" }}>
+          <div class="drawer-header" style={{ "margin-bottom": "0.75rem" }}>
             <h3 style={{ margin: 0 }}>Edit Group</h3>
             <button type="button" class="drawer-close" aria-label="Close" onClick={props.onClose}>
               ×
             </button>
           </div>
-          <form onSubmit={handleSubmit} class="drawer-form">
+          <form onSubmit={handleSubmit} class="drawer-form" style={{ padding: 0, gap: '0.75rem' }}>
             <label>
               Group Name
               <input
@@ -89,7 +89,7 @@ export function EditGroupModal(props: {
               </select>
             </label>
             <Show when={error()}>{(msg) => <p role="alert" style={{ color: "#e53e3e", margin: "0.5rem 0" }}>{msg()}</p>}</Show>
-            <div class="confirm-modal-actions" style={{ "margin-top": "1rem" }}>
+            <div class="confirm-modal-actions" style={{ "margin-top": "0.75rem" }}>
               <button type="button" class="confirm-modal-cancel" onClick={props.onClose}>
                 Cancel
               </button>

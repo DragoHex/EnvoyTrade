@@ -103,4 +103,16 @@ describe('Dashboard', () => {
     await userEvent.click(screen.getByText('Confirm'))
     expect(actionSpy).toHaveBeenCalledWith('f1', 'square_off')
   })
+
+  it('renders empty state message and link to accounts when no groups exist', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([])
+
+    render(() => <Dashboard />)
+
+    expect(await screen.findByText(/No group added\. Please go to/)).toBeInTheDocument()
+    const accountsLink = screen.getByRole('link', { name: 'accounts' })
+    expect(accountsLink).toBeInTheDocument()
+    expect(accountsLink).toHaveAttribute('href', '/accounts')
+    expect(screen.getByTestId('order-empty-state')).toBeInTheDocument()
+  })
 })
