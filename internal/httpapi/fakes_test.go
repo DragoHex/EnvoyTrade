@@ -15,6 +15,8 @@ import (
 type stubStore struct {
 	groups    []domain.GroupSummary
 	groupsErr error
+	createGroupErr error
+	updateGroupErr error
 
 	detail    domain.GroupDetail
 	detailErr error
@@ -50,6 +52,18 @@ type stubStore struct {
 	setStatusErr  error
 	setStatusArgs []setStatusCall
 
+	setIPAddressErr  error
+	setIPAddressArgs []setIPAddressCall
+
+	setAPIKeyErr  error
+	setAPIKeyArgs []setAPIKeyCall
+
+	setAPISecretErr  error
+	setAPISecretArgs []setAPISecretCall
+
+	setEncryptedCredentialsErr  error
+	setEncryptedCredentialsArgs []setEncryptedCredentialsCall
+
 	deleteAccountErr  error
 	deleteAccountArgs []uuid.UUID
 
@@ -65,12 +79,37 @@ type stubStore struct {
 }
 
 type createAccountCall struct {
-	ID           uuid.UUID
-	Name         string
-	Role         string
-	Broker       string
-	BrokerUserID string
-	ApiSecret    string
+	ID                  uuid.UUID
+	Name                string
+	Role                string
+	Broker              string
+	BrokerUserID        string
+	ApiKey              string
+	ApiSecret           string
+	IPAddress           string
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+}
+
+type setEncryptedCredentialsCall struct {
+	ID                  uuid.UUID
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+}
+
+type setIPAddressCall struct {
+	ID uuid.UUID
+	IP string
+}
+
+type setAPIKeyCall struct {
+	ID     uuid.UUID
+	ApiKey string
+}
+
+type setAPISecretCall struct {
+	ID        uuid.UUID
+	ApiSecret string
 }
 
 type updateFollowLinkTermsCall struct {
@@ -115,11 +154,11 @@ func (s *stubStore) GroupDetail(_ context.Context, id uuid.UUID) (domain.GroupDe
 }
 
 func (s *stubStore) CreateGroup(_ context.Context, id uuid.UUID, name string, masterID uuid.UUID) error {
-	return nil
+	return s.createGroupErr
 }
 
 func (s *stubStore) UpdateGroup(_ context.Context, id uuid.UUID, name *string, masterID *uuid.UUID) error {
-	return nil
+	return s.updateGroupErr
 }
 
 func (s *stubStore) DeleteGroup(_ context.Context, id uuid.UUID) error {
@@ -176,9 +215,34 @@ func (s *stubStore) AccountRole(_ context.Context, id uuid.UUID) (string, error)
 	return role, nil
 }
 
-func (s *stubStore) CreateAccount(_ context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiSecret string) error {
-	s.createAccountArgs = append(s.createAccountArgs, createAccountCall{id, name, role, broker, brokerUserID, apiSecret})
+func (s *stubStore) CreateAccount(_ context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress string) error {
+	s.createAccountArgs = append(s.createAccountArgs, createAccountCall{id, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, "", ""})
 	return s.createAccountErr
+}
+
+func (s *stubStore) CreateAccountWithCredentials(_ context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret string) error {
+	s.createAccountArgs = append(s.createAccountArgs, createAccountCall{id, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret})
+	return s.createAccountErr
+}
+
+func (s *stubStore) SetAccountEncryptedCredentials(_ context.Context, id uuid.UUID, encPassword, encTotpSecret string) error {
+	s.setEncryptedCredentialsArgs = append(s.setEncryptedCredentialsArgs, setEncryptedCredentialsCall{id, encPassword, encTotpSecret})
+	return s.setEncryptedCredentialsErr
+}
+
+func (s *stubStore) SetAccountIPAddress(_ context.Context, id uuid.UUID, ip string) error {
+	s.setIPAddressArgs = append(s.setIPAddressArgs, setIPAddressCall{id, ip})
+	return s.setIPAddressErr
+}
+
+func (s *stubStore) SetAccountAPIKey(_ context.Context, id uuid.UUID, apiKey string) error {
+	s.setAPIKeyArgs = append(s.setAPIKeyArgs, setAPIKeyCall{id, apiKey})
+	return s.setAPIKeyErr
+}
+
+func (s *stubStore) SetAccountAPISecret(_ context.Context, id uuid.UUID, apiSecret string) error {
+	s.setAPISecretArgs = append(s.setAPISecretArgs, setAPISecretCall{id, apiSecret})
+	return s.setAPISecretErr
 }
 
 func (s *stubStore) SetAccountName(_ context.Context, id uuid.UUID, name string) error {

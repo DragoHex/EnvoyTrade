@@ -77,6 +77,41 @@ describe('AccountsPage', () => {
     expect(screen.getByRole('dialog', { name: 'Add Account' })).toBeInTheDocument()
   })
 
+  it('separates master and follower accounts into separate sections with headings', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, follower])
+
+    renderPage('/accounts?tab=accounts')
+
+    const masterHeading = await screen.findByRole('heading', { level: 2, name: 'Master Accounts' })
+    const followerHeading = await screen.findByRole('heading', { level: 2, name: 'Follower Accounts' })
+    expect(masterHeading).toBeInTheDocument()
+    expect(followerHeading).toBeInTheDocument()
+
+    const masterSection = masterHeading.closest('section')
+    const followerSection = followerHeading.closest('section')
+    expect(masterSection).not.toBeNull()
+    expect(followerSection).not.toBeNull()
+
+    // Master account row appears in Master section
+    expect(masterSection).toHaveTextContent('ZX1234')
+    expect(masterSection).not.toHaveTextContent('ZY5678')
+
+    // Follower account row appears in Follower section
+    expect(followerSection).toHaveTextContent('ZY5678')
+    expect(followerSection).not.toHaveTextContent('ZX1234')
+  })
+
+  it('shows empty messages in respective sections when master or follower accounts are empty', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
+
+    renderPage('/accounts?tab=accounts')
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Master Accounts' })).toBeInTheDocument()
+    expect(screen.getByText('No follower accounts.')).toBeInTheDocument()
+  })
+
   it('toggling active on an account calls patchAccount with toggled value and updates targeted account', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([])
     const getAccountsSpy = vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
@@ -210,5 +245,46 @@ describe('AccountsPage', () => {
     await waitFor(() => expect(screen.getByText('Group deleted successfully.')).toBeInTheDocument())
     expect(screen.queryByText('Alpha Group')).not.toBeInTheDocument()
     expect(screen.queryByText('group page')).not.toBeInTheDocument()
+  })
+
+  it('CreateGroupModal filters out already assigned master accounts', async () => {
+    const unassignedMaster: api.Account = {
+      ...master,
+      id: 'm2',
+      brokerAccountId: 'ZX5678',
+      name: 'Unassigned Master',
+    }
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 0, status: 'ok' },
+    ])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, unassignedMaster])
+
+    renderPage()
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create Group' }))
+    expect(screen.getByRole('dialog', { name: 'Create Group' })).toBeInTheDocument()
+
+    const select = screen.getByLabelText('Master Account')
+    const options = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value)
+    expect(options).toContain('m2')
+    expect(options).not.toContain('m1')
+  })
+
+  it('EditGroupModal surfaces 409 error when master swap is blocked by open positions', async () => {
+    const group = { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 0, status: 'ok' as const }
+    vi.spyOn(api, 'getGroups').mockResolvedValue([group])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
+    vi.spyOn(api, 'patchGroup').mockRejectedValue(new Error('cannot swap master: master has open positions'))
+
+    renderPage()
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(screen.getByRole('dialog', { name: 'Edit Group' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('cannot swap master: master has open positions')
+    expect(screen.getByRole('dialog', { name: 'Edit Group' })).toBeInTheDocument()
   })
 })

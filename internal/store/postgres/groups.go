@@ -108,9 +108,19 @@ func (s *Store) CreateGroup(ctx context.Context, id uuid.UUID, name string, mast
 
 // UpdateGroup updates group name and/or master ID.
 func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name *string, masterID *uuid.UUID) error {
+	info, err := s.queries.GroupInfo(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	groupID := info.ID
+	currentMasterID := info.MasterID
+
 	if name != nil {
 		affected, err := s.queries.UpdateGroupName(ctx, sqlcgen.UpdateGroupNameParams{
-			ID:   id,
+			ID:   groupID,
 			Name: *name,
 		})
 		if err != nil {
@@ -120,19 +130,78 @@ func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name *string, mas
 			return domain.ErrNotFound
 		}
 	}
-	if masterID != nil {
-		affected, err := s.queries.UpdateGroupMaster(ctx, sqlcgen.UpdateGroupMasterParams{
-			ID:       id,
-			MasterID: *masterID,
-		})
+	if masterID != nil && *masterID != currentMasterID {
+		openCount, err := s.queries.CountOpenPositionsByAccount(ctx, currentMasterID)
 		if err != nil {
-			if isForeignKeyViolation(err) {
-				return domain.ErrNotFound
-			}
 			return err
 		}
-		if affected == 0 {
-			return domain.ErrNotFound
+		if openCount > 0 {
+			return domain.ErrMasterHasOpenPositions
+		}
+
+		targetOpenCount, err := s.queries.CountOpenPositionsByAccount(ctx, *masterID)
+		if err != nil {
+			return err
+		}
+		if targetOpenCount > 0 {
+			return domain.ErrMasterHasOpenPositions
+		}
+
+		otherGroup, err := s.queries.GroupByMasterID(ctx, *masterID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+
+		if err == nil {
+			tx, err := s.pool.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback(ctx)
+
+			qtx := s.queries.WithTx(tx)
+			affected1, err := qtx.UpdateGroupMaster(ctx, sqlcgen.UpdateGroupMasterParams{
+				ID:       groupID,
+				MasterID: *masterID,
+			})
+			if err != nil {
+				return err
+			}
+			if affected1 == 0 {
+				return domain.ErrNotFound
+			}
+
+			affected2, err := qtx.UpdateGroupMaster(ctx, sqlcgen.UpdateGroupMasterParams{
+				ID:       otherGroup.ID,
+				MasterID: currentMasterID,
+			})
+			if err != nil {
+				return err
+			}
+			if affected2 == 0 {
+				return domain.ErrNotFound
+			}
+
+			if err := tx.Commit(ctx); err != nil {
+				return err
+			}
+		} else {
+			affected, err := s.queries.UpdateGroupMaster(ctx, sqlcgen.UpdateGroupMasterParams{
+				ID:       groupID,
+				MasterID: *masterID,
+			})
+			if err != nil {
+				if isUniqueViolation(err) {
+					return domain.ErrDuplicate
+				}
+				if isForeignKeyViolation(err) {
+					return domain.ErrNotFound
+				}
+				return err
+			}
+			if affected == 0 {
+				return domain.ErrNotFound
+			}
 		}
 	}
 	return nil

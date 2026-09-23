@@ -78,7 +78,7 @@ SELECT a.id, a.name, a.broker_user_id, f.enabled, a.status
 FROM follow_links f
 JOIN accounts a ON a.id = f.follower_id
 WHERE f.group_id = $1
-ORDER BY a.created_at ASC
+ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC
 `
 
 type GroupFollowerRowsRow struct {
@@ -161,7 +161,7 @@ FROM groups g
 JOIN accounts a ON a.id = g.master_id
 LEFT JOIN follow_links f ON f.group_id = g.id
 GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active
-ORDER BY g.created_at ASC
+ORDER BY LOWER(g.name) ASC, g.id ASC
 `
 
 type GroupsRow struct {

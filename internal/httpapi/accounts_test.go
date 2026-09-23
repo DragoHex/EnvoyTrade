@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"envoytrade/internal/crypto"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/httpapi"
 
@@ -274,6 +275,7 @@ func TestPostAccount_FollowerWithMasterID_Succeeds(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678", "apiSecret": "s",
 		"capitalRatio": "0.5", "maxQtyPerOrder": maxQty, "masterId": master.String(),
+		"ip": "192.168.1.100",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -289,6 +291,9 @@ func TestPostAccount_FollowerWithMasterID_Succeeds(t *testing.T) {
 	if link.MasterID != master || link.MaxQtyPerOrder != maxQty || !link.CapitalRatio.Equal(decimal.RequireFromString("0.5")) {
 		t.Errorf("link = %+v", link)
 	}
+	if len(store.createAccountArgs) != 1 || store.createAccountArgs[0].IPAddress != "192.168.1.100" {
+		t.Errorf("createAccountArgs = %+v, want ip 192.168.1.100", store.createAccountArgs)
+	}
 }
 
 func TestPostAccount_FollowerMissingMasterID_Returns400(t *testing.T) {
@@ -298,6 +303,7 @@ func TestPostAccount_FollowerMissingMasterID_Returns400(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
 		"capitalRatio": "0.5", "maxQtyPerOrder": 10,
+		"ip": "192.168.1.100",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -314,7 +320,8 @@ func TestPostAccount_InvalidMasterID_Returns400(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
-		"capitalRatio": "0.5", "maxQtyPerOrder": 10, "masterId": uuid.New().String(),
+		"capitalRatio": "0.5", "maxQtyPerOrder": 10,
+		"ip": "192.168.1.100", "masterId": uuid.New().String(),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -465,5 +472,113 @@ func TestPatchAccount_Name_UpdatesAccountName(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestPostAccount_WithPasswordAndTOTPSecret_EncryptsCredentials(t *testing.T) {
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"role":            "master",
+		"broker":          "kite",
+		"brokerAccountId": "TEST01",
+		"apiKey":          "kite_key",
+		"apiSecret":       "kite_secret",
+		"password":        "secret_password_123",
+		"totpSecret":      "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createAccountArgs) != 1 {
+		t.Fatalf("CreateAccount called %d times, want 1", len(store.createAccountArgs))
+	}
+	args := store.createAccountArgs[0]
+	if args.EncryptedPassword == "" || args.EncryptedPassword == "secret_password_123" {
+		t.Errorf("EncryptedPassword = %q, want encrypted ciphertext", args.EncryptedPassword)
+	}
+	if args.EncryptedTotpSecret == "" || args.EncryptedTotpSecret == "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" {
+		t.Errorf("EncryptedTotpSecret = %q, want encrypted ciphertext", args.EncryptedTotpSecret)
+	}
+
+	decPass, err := crypto.Decrypt(args.EncryptedPassword)
+	if err != nil || decPass != "secret_password_123" {
+		t.Errorf("decrypted password = %q, err = %v", decPass, err)
+	}
+	decTotp, err := crypto.Decrypt(args.EncryptedTotpSecret)
+	if err != nil || decTotp != "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" {
+		t.Errorf("decrypted totp = %q, err = %v", decTotp, err)
+	}
+}
+
+func TestPatchAccount_PasswordAndTOTPSecret_EncryptsCredentials(t *testing.T) {
+	id := uuid.New()
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"password":   "new_secret_pass",
+		"totpSecret": "NEWTOTPSECRET32CHARSXXXXXXXXXX",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+id.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setEncryptedCredentialsArgs) != 1 {
+		t.Fatalf("SetAccountEncryptedCredentials called %d times, want 1", len(store.setEncryptedCredentialsArgs))
+	}
+	args := store.setEncryptedCredentialsArgs[0]
+	decPass, err := crypto.Decrypt(args.EncryptedPassword)
+	if err != nil || decPass != "new_secret_pass" {
+		t.Errorf("decrypted pass = %q, err = %v", decPass, err)
+	}
+	decTotp, err := crypto.Decrypt(args.EncryptedTotpSecret)
+	if err != nil || decTotp != "NEWTOTPSECRET32CHARSXXXXXXXXXX" {
+		t.Errorf("decrypted totp = %q, err = %v", decTotp, err)
+	}
+}
+
+func TestPatchAccount_MultipleFields_UpdatesAllFields(t *testing.T) {
+	id := uuid.New()
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"apiKey":     "multi-key",
+		"apiSecret":  "multi-secret",
+		"password":   "multi-pass",
+		"totpSecret": "MULTITOTPSECRET32CHARSXXXXXXXX",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+id.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setAPIKeyArgs) != 1 || store.setAPIKeyArgs[0].ApiKey != "multi-key" {
+		t.Errorf("setAPIKeyArgs = %+v, want multi-key", store.setAPIKeyArgs)
+	}
+	if len(store.setAPISecretArgs) != 1 || store.setAPISecretArgs[0].ApiSecret != "multi-secret" {
+		t.Errorf("setAPISecretArgs = %+v, want multi-secret", store.setAPISecretArgs)
+	}
+	if len(store.setEncryptedCredentialsArgs) != 1 {
+		t.Fatalf("setEncryptedCredentialsArgs called %d times, want 1", len(store.setEncryptedCredentialsArgs))
+	}
+	decPass, err := crypto.Decrypt(store.setEncryptedCredentialsArgs[0].EncryptedPassword)
+	if err != nil || decPass != "multi-pass" {
+		t.Errorf("decrypted pass = %q, err = %v", decPass, err)
+	}
+	decTotp, err := crypto.Decrypt(store.setEncryptedCredentialsArgs[0].EncryptedTotpSecret)
+	if err != nil || decTotp != "MULTITOTPSECRET32CHARSXXXXXXXX" {
+		t.Errorf("decrypted totp = %q, err = %v", decTotp, err)
 	}
 }

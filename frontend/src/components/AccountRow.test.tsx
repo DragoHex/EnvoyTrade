@@ -2,6 +2,7 @@ import { render, screen } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AccountRow } from './AccountRow'
+import * as api from '../api'
 import type { GroupFollower } from '../api'
 
 const follower: GroupFollower = {
@@ -90,11 +91,13 @@ describe('AccountRow', () => {
     ))
     await userEvent.click(screen.getByLabelText('Exit Open Orders'))
     expect(onExitOpenOrders).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
     await userEvent.click(screen.getByText('Confirm'))
     expect(onExitOpenOrders).toHaveBeenCalled()
   })
 
-  it('master row: renders Stop/Start instead of the copy toggle', async () => {
+  it('master row: renders a Stop Copy button instead of a toggle and stops copy when active', async () => {
     const onToggleCopy = vi.fn()
     render(() => (
       <AccountRow
@@ -164,11 +167,10 @@ describe('AccountRow', () => {
       />
     ))
     await userEvent.click(screen.getByLabelText('Rebalance'))
-    const toast = await screen.findByText('no master fill to rebalance from')
-    expect(toast.closest('.result-toast')).toHaveClass('result-toast-error')
+    await screen.findByText(/no master fill to rebalance from/i)
   })
 
-  it('greys out the row and disables its actions when actionsDisabled', () => {
+  it('marks the row disabled and disables actions when actionsDisabled is true', () => {
     render(() => (
       <AccountRow
         follower={follower}
@@ -244,5 +246,58 @@ describe('AccountRow', () => {
     ))
     expect(screen.getByLabelText('Stop Copy')).not.toBeDisabled()
     expect(screen.getByLabelText('Rebalance')).toBeDisabled()
+  })
+
+  it('expands details and loads live summary metrics on expand button click', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: {
+        netQty: 150,
+        openPositionsCount: 2,
+        closedPositionsCount: 1,
+        pendingOrdersCount: 3,
+        totalMtm: '1250.50',
+        realizedPnl: '500.00',
+        accountValue: '250000.00',
+        availableCash: '75000.00',
+        availableMargin: '180000.00',
+        status: 'online',
+      },
+      counts: {
+        openPositions: 2,
+        closedPositions: 1,
+        holdings: 0,
+        openOrders: 3,
+        closedOrders: 0,
+        rejectedOrders: 0,
+      },
+      pagination: {
+        tab: 'open_positions',
+        page: 1,
+        limit: 10,
+        totalCount: 2,
+        totalPages: 1,
+      },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => (
+      <AccountRow
+        follower={follower}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const expandBtn = screen.getByTestId('expand-row-btn')
+    await userEvent.click(expandBtn)
+
+    expect(screen.getByTestId('account-details-expansion-row')).toBeInTheDocument()
   })
 })

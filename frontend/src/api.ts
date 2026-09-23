@@ -19,9 +19,13 @@ export interface GroupFollower {
   brokerAccountId: string
   enabled: boolean
   status: 'ok' | 'error'
-  // netQty/positions/openOrders/totalMtm/availableCash/availableMargin are
-  // omitted by the backend until broker wiring exists (docs/APIs/groups.md
-  // "Current implementation" note) — rendered as "—" by AccountTable.
+  netQty?: number
+  openPositionsCount?: number
+  closedPositionsCount?: number
+  openOrdersCount?: number
+  totalMtm?: number | string
+  availableCash?: number | string
+  availableMargin?: number | string
 }
 
 export interface GroupDetail {
@@ -34,7 +38,7 @@ export interface GroupDetail {
   followers: GroupFollower[]
 }
 
-export type ActionType = 'rebalance' | 'square_off' | 'exit_open_orders'
+export type ActionType = 'rebalance' | 'square_off' | 'exit_open_orders' | 'sync_positions'
 
 export interface Account {
   id: string
@@ -42,6 +46,11 @@ export interface Account {
   role: 'master' | 'follower'
   broker: string
   brokerAccountId: string
+  apiKey?: string | null
+  apiSecret?: string | null
+  ip?: string | null
+  authStatus?: 'unauthenticated' | 'authenticated' | 'error' | null
+  authError?: string | null
   groupId?: string | null
   groupName?: string | null
   masterId: string | null
@@ -59,6 +68,9 @@ export interface CreateAccountRequest {
   brokerAccountId: string
   apiKey: string
   apiSecret: string
+  password?: string
+  totpSecret?: string
+  ip?: string
   capitalRatio?: string
   maxQtyPerOrder?: number
   groupId?: string
@@ -122,7 +134,10 @@ export function patchAccount(
     | { enabled: boolean }
     | { active: boolean }
     | { capitalRatio?: string; maxQtyPerOrder?: number }
-    | { status: string },
+    | { status: string }
+    | { ip?: string }
+    | { apiKey?: string; apiSecret?: string }
+    | { password?: string; totpSecret?: string },
 ): Promise<Record<string, unknown>> {
   return fetch(`${BASE}/accounts/${id}`, {
     method: 'PATCH',
@@ -195,6 +210,8 @@ export interface AccountSummaryMetrics {
   totalMtm: number | string
   realizedPnl: number | string
   accountValue: number | string
+  availableCash?: number | string
+  availableMargin?: number | string
   status: string
 }
 

@@ -28,6 +28,7 @@ import (
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
 	"envoytrade/internal/httpapi"
+	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/callback"
 	"envoytrade/internal/kite/fake"
 	"envoytrade/internal/listener"
@@ -151,11 +152,16 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	syncer := &kite.PortfolioSyncer{
+		Store: store,
+	}
+
 	router := httpapi.NewRouter(
 		store,
 		eng,
 		httpapi.WithPostbackHandler(postbackHandler),
 		httpapi.WithLogger(logger.With("component", "httpapi")),
+		httpapi.WithPortfolioSyncer(syncer),
 	)
 
 	server := &http.Server{

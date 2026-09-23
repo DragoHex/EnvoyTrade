@@ -15,6 +15,7 @@ const (
 	actionRebalance      = "rebalance"
 	actionSquareOff      = "square_off"
 	actionExitOpenOrders = "exit_open_orders"
+	actionSyncPositions  = "sync_positions"
 )
 
 // ActionsStore is what POST /accounts/{id}/actions needs to run
@@ -52,6 +53,14 @@ func (h *handlers) postAction(w http.ResponseWriter, r *http.Request) {
 	switch req.Type {
 	case actionRebalance:
 		h.rebalance(w, r, id)
+	case actionSyncPositions:
+		if h.syncer != nil {
+			if err := h.syncer.SyncAccountPortfolio(r.Context(), id); err != nil {
+				writeError(w, http.StatusInternalServerError, "sync failed: "+err.Error())
+				return
+			}
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"type": actionSyncPositions, "status": "accepted"})
 	case actionSquareOff:
 		writeError(w, http.StatusNotImplemented, "square_off is not implemented yet")
 	case actionExitOpenOrders:

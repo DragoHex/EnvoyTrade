@@ -15,6 +15,9 @@ type API interface {
 	PlaceOrder(variety string, orderParams kiteconnect.OrderParams) (kiteconnect.OrderResponse, error)
 	GetOrders() (kiteconnect.Orders, error)
 	GetOrderHistory(orderID string) ([]kiteconnect.Order, error)
+	GetPositions() (kiteconnect.Positions, error)
+	GetHoldings() (kiteconnect.Holdings, error)
+	GetUserMargins() (kiteconnect.AllMargins, error)
 }
 
 // Broker adapts Zerodha's Kite Connect Client to the broker-agnostic
@@ -67,4 +70,31 @@ func (b *Broker) GetOrderHistory(ctx context.Context, orderID string) ([]kitecon
 		return nil, fmt.Errorf("kite get order history: %w", err)
 	}
 	return history, nil
+}
+
+// GetPositions retrieves user positions (both net and day).
+func (b *Broker) GetPositions(ctx context.Context) (kiteconnect.Positions, error) {
+	positions, err := b.api.GetPositions()
+	if err != nil {
+		return kiteconnect.Positions{}, fmt.Errorf("kite get positions: %w", err)
+	}
+	return positions, nil
+}
+
+// GetHoldings retrieves user equity holdings.
+func (b *Broker) GetHoldings(ctx context.Context) (kiteconnect.Holdings, error) {
+	holdings, err := b.api.GetHoldings()
+	if err != nil {
+		return nil, fmt.Errorf("kite get holdings: %w", err)
+	}
+	return holdings, nil
+}
+
+// GetUserMargins retrieves equity and commodity user margins.
+func (b *Broker) GetUserMargins(ctx context.Context) (kiteconnect.AllMargins, error) {
+	margins, err := b.api.GetUserMargins()
+	if err != nil {
+		return kiteconnect.AllMargins{}, fmt.Errorf("kite get user margins: %w", err)
+	}
+	return margins, nil
 }
