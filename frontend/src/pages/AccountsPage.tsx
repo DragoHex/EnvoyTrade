@@ -46,7 +46,7 @@ export function AccountsPage() {
   }
 
   const [groups, { refetch: refetchGroups, mutate: mutateGroups }] = createResource(getGroups)
-  const [accounts, { mutate: mutateAccounts }] = createResource(() => getAccounts())
+  const [accounts, { refetch: refetchAccounts, mutate: mutateAccounts }] = createResource(() => getAccounts())
   const [drawerOpen, setDrawerOpen] = createSignal(false)
   const [createGroupOpen, setCreateGroupOpen] = createSignal(false)
   const [editingGroup, setEditingGroup] = createSignal<GroupSummary | null>(null)
@@ -91,6 +91,7 @@ export function AccountsPage() {
       showToast({ kind: 'success', message: 'Group updated successfully.' })
       setEditingGroup(null)
       refetchGroups()
+      refetchAccounts()
     } catch (e) {
       showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to update group.' })
       throw e
@@ -102,6 +103,7 @@ export function AccountsPage() {
       await createGroup({ name, masterId })
       showToast({ kind: 'success', message: 'Group created successfully.' })
       refetchGroups()
+      refetchAccounts()
     } catch (e) {
       showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to create group.' })
       throw e
@@ -164,6 +166,7 @@ export function AccountsPage() {
       try {
         await deleteGroup(pending.group.id || pending.group.masterId)
         mutateGroups((prev) => prev?.filter((g) => (g.id || g.masterId) !== (pending.group.id || pending.group.masterId)))
+        refetchAccounts()
         showToast({ kind: 'success', message: 'Group deleted successfully.' })
       } catch (e) {
         showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to delete group.' })
@@ -171,7 +174,37 @@ export function AccountsPage() {
     }
   }
 
-  const masters = () => accounts()?.filter((a) => a.role === 'master') ?? []
+  const assignedMasterIds = () => new Set((groups() ?? []).map((g) => g.masterId))
+  const allMasters = () => accounts()?.filter((a) => a.role === 'master') ?? []
+  const availableMastersForCreate = () =>
+    allMasters()
+      .filter((a) => !assignedMasterIds().has(a.id))
+      .sort((a, b) =>
+        (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+      )
+  const availableMastersForEdit = () =>
+    [...allMasters()].sort((a, b) =>
+      (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+    )
+
+  const sortedGroups = () => {
+    const list = groups()
+    if (!list) return undefined
+    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+  }
+
+  const sortedAccounts = () => {
+    const list = accounts()
+    if (!list) return undefined
+    return [...list].sort((a, b) => {
+      const nameA = a.name || a.brokerAccountId || ''
+      const nameB = b.name || b.brokerAccountId || ''
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
+    })
+  }
+
+  const masterAccounts = () => sortedAccounts()?.filter((a) => a.role === 'master') ?? []
+  const followerAccounts = () => sortedAccounts()?.filter((a) => a.role === 'follower') ?? []
 
   return (
     <div class="page">
@@ -214,7 +247,7 @@ export function AccountsPage() {
       </div>
 
       <Show when={tab() === 'groups'}>
-        <Show when={groups()} fallback={<LoadingTimeout><TableSkeleton /></LoadingTimeout>}>
+        <Show when={sortedGroups()} fallback={<LoadingTimeout><TableSkeleton /></LoadingTimeout>}>
           {(gs) => (
             <section class="accounts-card">
               <table class="groups-table">
@@ -292,18 +325,29 @@ export function AccountsPage() {
       </Show>
 
       <Show when={tab() === 'accounts'}>
-        <Show when={accounts()} fallback={<LoadingTimeout><TableSkeleton /></LoadingTimeout>}>
-          {(as) => (
-            <section class="accounts-card">
-              <AccountsTable
-                accounts={as()}
-                onToggleActive={handleToggleActive}
-                onEdit={openEdit}
-                onRemoveFromGroup={(a) => setPendingAction({ type: 'remove_from_group', account: a })}
-                onDelete={(a) => setPendingAction({ type: 'delete', account: a })}
-              />
-            </section>
-          )}
+        <Show when={sortedAccounts()} fallback={<LoadingTimeout><TableSkeleton /></LoadingTimeout>}>
+          <section class="accounts-card">
+            <h2>Master Accounts</h2>
+            <AccountsTable
+              accounts={masterAccounts()}
+              emptyMessage="No master accounts."
+              onToggleActive={handleToggleActive}
+              onEdit={openEdit}
+              onRemoveFromGroup={(a) => setPendingAction({ type: 'remove_from_group', account: a })}
+              onDelete={(a) => setPendingAction({ type: 'delete', account: a })}
+            />
+          </section>
+          <section class="accounts-card">
+            <h2>Follower Accounts</h2>
+            <AccountsTable
+              accounts={followerAccounts()}
+              emptyMessage="No follower accounts."
+              onToggleActive={handleToggleActive}
+              onEdit={openEdit}
+              onRemoveFromGroup={(a) => setPendingAction({ type: 'remove_from_group', account: a })}
+              onDelete={(a) => setPendingAction({ type: 'delete', account: a })}
+            />
+          </section>
         </Show>
       </Show>
 
@@ -316,7 +360,7 @@ export function AccountsPage() {
 
       <CreateGroupModal
         open={createGroupOpen()}
-        masters={masters()}
+        masters={availableMastersForCreate()}
         onClose={() => setCreateGroupOpen(false)}
         onCreate={handleCreateGroup}
       />
@@ -325,7 +369,7 @@ export function AccountsPage() {
         open={editingGroup() !== null}
         initialName={editingGroup()?.name || ''}
         currentMasterId={editingGroup()?.masterId || ''}
-        masters={masters()}
+        masters={availableMastersForEdit()}
         onClose={() => setEditingGroup(null)}
         onSave={handleSaveGroup}
       />
@@ -333,7 +377,7 @@ export function AccountsPage() {
       <AccountDetailDrawer
         open={drawerOpen()}
         account={editing()}
-        masters={masters()}
+        masters={allMasters()}
         onClose={() => setDrawerOpen(false)}
         onCreate={handleCreate}
         onSave={handleSave}

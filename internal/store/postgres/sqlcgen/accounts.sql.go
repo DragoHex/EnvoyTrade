@@ -13,6 +13,48 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const accountAuthInfo = `-- name: AccountAuthInfo :one
+SELECT id, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret, access_token, token_expires_at, auth_status, auth_error
+FROM accounts WHERE id = $1
+`
+
+type AccountAuthInfoRow struct {
+	ID                  uuid.UUID
+	Role                string
+	Broker              string
+	BrokerUserID        string
+	ApiKey              string
+	ApiSecret           string
+	IpAddress           string
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+	AccessToken         string
+	TokenExpiresAt      pgtype.Timestamptz
+	AuthStatus          string
+	AuthError           string
+}
+
+func (q *Queries) AccountAuthInfo(ctx context.Context, id uuid.UUID) (AccountAuthInfoRow, error) {
+	row := q.db.QueryRow(ctx, accountAuthInfo, id)
+	var i AccountAuthInfoRow
+	err := row.Scan(
+		&i.ID,
+		&i.Role,
+		&i.Broker,
+		&i.BrokerUserID,
+		&i.ApiKey,
+		&i.ApiSecret,
+		&i.IpAddress,
+		&i.EncryptedPassword,
+		&i.EncryptedTotpSecret,
+		&i.AccessToken,
+		&i.TokenExpiresAt,
+		&i.AuthStatus,
+		&i.AuthError,
+	)
+	return i, err
+}
+
 const accountByBrokerUserID = `-- name: AccountByBrokerUserID :one
 SELECT id, role, api_secret FROM accounts WHERE broker_user_id = $1
 `
@@ -42,15 +84,16 @@ func (q *Queries) AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 }
 
 const accounts = `-- name: Accounts :many
-SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.active, a.status,
+SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret, a.active, a.status, a.ip_address,
+       a.auth_status, a.auth_error,
        g.id AS group_id, g.name AS group_name, g.master_id,
        f.capital_ratio, f.max_qty_per_order,
        COALESCE(f.enabled, true) AS enabled
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
-LEFT JOIN groups g ON g.id = f.group_id
+LEFT JOIN groups g ON (g.id = f.group_id OR (a.role = 'master' AND g.master_id = a.id))
 WHERE $1::uuid[] IS NULL OR a.id = ANY($1::uuid[])
-ORDER BY a.role, a.name, a.broker_user_id
+ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC
 `
 
 type AccountsRow struct {
@@ -59,8 +102,13 @@ type AccountsRow struct {
 	Role           string
 	Broker         string
 	BrokerUserID   string
+	ApiKey         string
+	ApiSecret      string
 	Active         bool
 	Status         string
+	IpAddress      string
+	AuthStatus     string
+	AuthError      string
 	GroupID        pgtype.UUID
 	GroupName      *string
 	MasterID       pgtype.UUID
@@ -84,8 +132,13 @@ func (q *Queries) Accounts(ctx context.Context, ids []uuid.UUID) ([]AccountsRow,
 			&i.Role,
 			&i.Broker,
 			&i.BrokerUserID,
+			&i.ApiKey,
+			&i.ApiSecret,
 			&i.Active,
 			&i.Status,
+			&i.IpAddress,
+			&i.AuthStatus,
+			&i.AuthError,
 			&i.GroupID,
 			&i.GroupName,
 			&i.MasterID,
@@ -104,7 +157,7 @@ func (q *Queries) Accounts(ctx context.Context, ids []uuid.UUID) ([]AccountsRow,
 }
 
 const createAccount = `-- name: CreateAccount :exec
-INSERT INTO accounts (id, name, role, broker, broker_user_id, api_secret) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateAccountParams struct {
@@ -113,7 +166,9 @@ type CreateAccountParams struct {
 	Role         string
 	Broker       string
 	BrokerUserID string
+	ApiKey       string
 	ApiSecret    string
+	IpAddress    string
 }
 
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) error {
@@ -123,7 +178,43 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) er
 		arg.Role,
 		arg.Broker,
 		arg.BrokerUserID,
+		arg.ApiKey,
 		arg.ApiSecret,
+		arg.IpAddress,
+	)
+	return err
+}
+
+const createAccountWithCredentials = `-- name: CreateAccountWithCredentials :exec
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`
+
+type CreateAccountWithCredentialsParams struct {
+	ID                  uuid.UUID
+	Name                string
+	Role                string
+	Broker              string
+	BrokerUserID        string
+	ApiKey              string
+	ApiSecret           string
+	IpAddress           string
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+}
+
+func (q *Queries) CreateAccountWithCredentials(ctx context.Context, arg CreateAccountWithCredentialsParams) error {
+	_, err := q.db.Exec(ctx, createAccountWithCredentials,
+		arg.ID,
+		arg.Name,
+		arg.Role,
+		arg.Broker,
+		arg.BrokerUserID,
+		arg.ApiKey,
+		arg.ApiSecret,
+		arg.IpAddress,
+		arg.EncryptedPassword,
+		arg.EncryptedTotpSecret,
 	)
 	return err
 }
@@ -151,6 +242,66 @@ func (q *Queries) MasterActive(ctx context.Context, id uuid.UUID) (bool, error) 
 	return active, err
 }
 
+const setAccountAPIKey = `-- name: SetAccountAPIKey :execrows
+UPDATE accounts SET api_key = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAccountAPIKeyParams struct {
+	ID     uuid.UUID
+	ApiKey string
+}
+
+func (q *Queries) SetAccountAPIKey(ctx context.Context, arg SetAccountAPIKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountAPIKey, arg.ID, arg.ApiKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountAPISecret = `-- name: SetAccountAPISecret :execrows
+UPDATE accounts SET api_secret = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAccountAPISecretParams struct {
+	ID        uuid.UUID
+	ApiSecret string
+}
+
+func (q *Queries) SetAccountAPISecret(ctx context.Context, arg SetAccountAPISecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountAPISecret, arg.ID, arg.ApiSecret)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountAccessToken = `-- name: SetAccountAccessToken :execrows
+UPDATE accounts SET access_token = $2, token_expires_at = $3, auth_status = $4, auth_error = $5, updated_at = now() WHERE id = $1
+`
+
+type SetAccountAccessTokenParams struct {
+	ID             uuid.UUID
+	AccessToken    string
+	TokenExpiresAt pgtype.Timestamptz
+	AuthStatus     string
+	AuthError      string
+}
+
+func (q *Queries) SetAccountAccessToken(ctx context.Context, arg SetAccountAccessTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountAccessToken,
+		arg.ID,
+		arg.AccessToken,
+		arg.TokenExpiresAt,
+		arg.AuthStatus,
+		arg.AuthError,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAccountActive = `-- name: SetAccountActive :execrows
 UPDATE accounts SET active = $2, updated_at = now() WHERE id = $1
 `
@@ -162,6 +313,45 @@ type SetAccountActiveParams struct {
 
 func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActiveParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setAccountActive, arg.ID, arg.Active)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountEncryptedCredentials = `-- name: SetAccountEncryptedCredentials :execrows
+UPDATE accounts
+SET encrypted_password = CASE WHEN $2::text != '' THEN $2::text ELSE encrypted_password END,
+    encrypted_totp_secret = CASE WHEN $3::text != '' THEN $3::text ELSE encrypted_totp_secret END,
+    updated_at = now()
+WHERE id = $1
+`
+
+type SetAccountEncryptedCredentialsParams struct {
+	ID                  uuid.UUID
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+}
+
+func (q *Queries) SetAccountEncryptedCredentials(ctx context.Context, arg SetAccountEncryptedCredentialsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountEncryptedCredentials, arg.ID, arg.EncryptedPassword, arg.EncryptedTotpSecret)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountIPAddress = `-- name: SetAccountIPAddress :execrows
+UPDATE accounts SET ip_address = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAccountIPAddressParams struct {
+	ID        uuid.UUID
+	IpAddress string
+}
+
+func (q *Queries) SetAccountIPAddress(ctx context.Context, arg SetAccountIPAddressParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountIPAddress, arg.ID, arg.IpAddress)
 	if err != nil {
 		return 0, err
 	}

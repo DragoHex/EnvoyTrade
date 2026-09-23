@@ -2,7 +2,9 @@ package httpapi_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,6 +41,30 @@ func TestPostAction_Rebalance_CallsEngineWithLatestMasterFill(t *testing.T) {
 	}
 	if got["type"] != "rebalance" || got["status"] != "accepted" {
 		t.Errorf("body = %+v, want {type:rebalance status:accepted}", got)
+	}
+}
+
+func TestPostAction_SyncPositions_Returns202(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	r := httpapi.NewRouter(store, engine)
+
+	body, _ := json.Marshal(map[string]string{"type": "sync_positions"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/actions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", w.Code, w.Body.String())
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["type"] != "sync_positions" || got["status"] != "accepted" {
+		t.Errorf("body = %+v, want {type:sync_positions status:accepted}", got)
 	}
 }
 
@@ -143,5 +169,50 @@ func TestPostAction_InvalidUUID_Returns400(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
+type mockSyncer struct {
+	calledWith uuid.UUID
+	err        error
+}
+
+func (m *mockSyncer) SyncAccountPortfolio(_ context.Context, id uuid.UUID) error {
+	m.calledWith = id
+	return m.err
+}
+
+func TestPostAction_SyncPositions_CallsSyncer(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{}
+	syncer := &mockSyncer{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithPortfolioSyncer(syncer))
+
+	body, _ := json.Marshal(map[string]string{"type": "sync_positions"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/actions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", w.Code, w.Body.String())
+	}
+	if syncer.calledWith != accID {
+		t.Errorf("syncer.calledWith = %v, want %v", syncer.calledWith, accID)
+	}
+}
+
+func TestPostAction_SyncPositions_SyncerError_Returns500(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{}
+	syncer := &mockSyncer{err: errors.New("auth failed")}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithPortfolioSyncer(syncer))
+
+	body, _ := json.Marshal(map[string]string{"type": "sync_positions"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/actions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", w.Code, w.Body.String())
 	}
 }

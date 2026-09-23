@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AccountsTable } from './AccountsTable'
+import * as api from '../api'
 import type { Account } from '../api'
 
 const master: Account = {
@@ -54,6 +55,16 @@ describe('AccountsTable', () => {
     expect(brokerLogos).toHaveLength(2)
     expect(brokerLogos[0]).toHaveAttribute('data-tooltip', 'Zerodha Kite')
     expect(brokerLogos[0].querySelector('svg.broker-logo-svg')).not.toBeNull()
+  })
+
+  it('renders emptyMessage spanning all columns when accounts is empty', () => {
+    render(() => (
+      <AccountsTable accounts={[]} emptyMessage="No master accounts." onEdit={vi.fn()} />
+    ))
+
+    const emptyCell = screen.getByText('No master accounts.').closest('td')
+    expect(emptyCell).toBeInTheDocument()
+    expect(emptyCell).toHaveAttribute('colspan', '11')
   })
 
   it('renders Active copy-toggles and handles onToggleActive', async () => {
@@ -147,5 +158,76 @@ describe('AccountsTable', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(onDelete).toHaveBeenCalledWith(master)
+  })
+
+  it('clicking expand button toggles holdings dropdown row', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: {
+        netQty: 0,
+        totalMtm: '0.00',
+        realizedPnl: '0.00',
+        accountValue: '0.00',
+        status: 'online',
+      },
+      holdings: [
+        {
+          instrument: 'INFY',
+          sellableQuantity: 10,
+          buyAveragePrice: '1400.00',
+          ltp: '1450.00',
+          pnl: '500.00',
+        },
+      ],
+      openPositions: [],
+      closedPositions: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => (
+      <AccountsTable accounts={[follower]} onEdit={vi.fn()} />
+    ))
+
+    const expandBtn = screen.getByTestId(`expand-holdings-btn-${follower.id}`)
+    expect(screen.queryByTestId('account-holdings-expansion-row')).not.toBeInTheDocument()
+
+    await userEvent.click(expandBtn)
+    expect(screen.getByTestId('account-holdings-expansion-row')).toBeInTheDocument()
+    expect(await screen.findByText('INFY')).toBeInTheDocument()
+
+    await userEvent.click(expandBtn)
+    expect(screen.queryByTestId('account-holdings-expansion-row')).not.toBeInTheDocument()
+  })
+
+  it('clicking Sync from Kite calls postAction and refreshes holdings', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: {
+        netQty: 0,
+        totalMtm: '0.00',
+        realizedPnl: '0.00',
+        accountValue: '0.00',
+        status: 'online',
+      },
+      holdings: [],
+      openPositions: [],
+      closedPositions: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+    const postActionSpy = vi.spyOn(api, 'postAction').mockResolvedValue({ type: 'sync_positions', status: 'accepted' })
+
+    render(() => (
+      <AccountsTable accounts={[follower]} onEdit={vi.fn()} />
+    ))
+
+    const expandBtn = screen.getByTestId(`expand-holdings-btn-${follower.id}`)
+    await userEvent.click(expandBtn)
+
+    const syncBtn = await screen.findByRole('button', { name: /Sync from Kite/i })
+    await userEvent.click(syncBtn)
+
+    expect(postActionSpy).toHaveBeenCalledWith(follower.id, 'sync_positions')
   })
 })

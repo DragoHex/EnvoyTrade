@@ -76,14 +76,16 @@ export function EditGroupModal(props: {
               <select
                 value={masterId()}
                 onChange={(e) => setMasterId(e.currentTarget.value)}
+                disabled={props.masters.length === 0}
                 required
               >
                 <option value="" disabled>
-                  select master account
+                  {props.masters.length === 0 ? 'no master accounts available' : 'select master account'}
                 </option>
                 {props.masters.map((m) => (
                   <option value={m.id}>
                     {m.name ? `${m.name} (${m.brokerAccountId})` : m.brokerAccountId}
+                    {m.groupName ? ` [Group: ${m.groupName}]` : ' [Unassigned]'}
                   </option>
                 ))}
               </select>
@@ -93,7 +95,7 @@ export function EditGroupModal(props: {
               <button type="button" class="confirm-modal-cancel" onClick={props.onClose}>
                 Cancel
               </button>
-              <button type="submit" class="confirm-modal-confirm" disabled={saving()}>
+              <button type="submit" class="confirm-modal-confirm" disabled={saving() || props.masters.length === 0}>
                 Save
               </button>
             </div>

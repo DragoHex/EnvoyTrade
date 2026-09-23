@@ -2,21 +2,24 @@ import { Show, createSignal } from 'solid-js'
 import type { Account } from '../api'
 import { DataTable, type Column } from './DataTable'
 import { StatusDot } from './StatusDot'
-import { EditIcon, TrashIcon, UserMinusIcon } from './icons'
+import { ChevronDownIcon, EditIcon, TrashIcon, UserMinusIcon } from './icons'
 import { BrokerLogo } from './BrokerLogo'
 import { CopyToggle } from './CopyToggle'
 import { RoleIcon } from './RoleIcon'
+import { AccountHoldingsRow } from './AccountHoldingsRow'
 
-// AccountsTable lists all accounts across both roles with quick-action
-// toggles and row-level edit/remove/delete buttons (docs/UI-PLAN.md §3).
+// AccountsTable lists accounts with quick-action toggles and row-level
+// edit/remove/delete buttons (docs/UI-PLAN.md §3).
 export function AccountsTable(props: {
   accounts: Account[]
+  emptyMessage?: string
   onEdit: (account: Account) => void
   onRemoveFromGroup?: (account: Account) => void
   onDelete?: (account: Account) => void
   onToggleActive?: (id: string, nextActive: boolean) => Promise<void>
 }) {
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
+  const [expandedId, setExpandedId] = createSignal<string | null>(null)
 
   const handleToggle = async (a: Account, next: boolean) => {
     if (!props.onToggleActive) return
@@ -28,6 +31,10 @@ export function AccountsTable(props: {
     } finally {
       setTogglingId(null)
     }
+  }
+
+  const toggleExpand = (id: string) => {
+    setExpandedId((curr) => (curr === id ? null : id))
   }
 
   const columns: Column<Account>[] = [
@@ -79,10 +86,14 @@ export function AccountsTable(props: {
     },
     {
       header: 'Capital Ratio',
+      headerClass: 'col-center',
+      cellClass: 'col-center',
       cell: (a) => a.capitalRatio ?? '—',
     },
     {
       header: 'Max Qty/Order',
+      headerClass: 'col-center',
+      cellClass: 'col-center',
       cell: (a) => (a.maxQtyPerOrder != null ? a.maxQtyPerOrder : '—'),
     },
     {
@@ -136,7 +147,42 @@ export function AccountsTable(props: {
         </div>
       ),
     },
+    {
+      header: '',
+      headerClass: 'th-expand-col',
+      cellClass: 'row-expand-cell',
+      cell: (a) => (
+        <button
+          type="button"
+          class={`row-expand-toggle-btn ${expandedId() === a.id ? 'row-expand-open' : ''}`}
+          aria-label={expandedId() === a.id ? 'Collapse holdings' : 'Expand holdings'}
+          data-tooltip={expandedId() === a.id ? 'Hide holdings' : 'View holdings'}
+          onClick={() => toggleExpand(a.id)}
+          data-testid={`expand-holdings-btn-${a.id}`}
+        >
+          <ChevronDownIcon class={`chevron-icon ${expandedId() === a.id ? 'chevron-rotated' : ''}`} />
+        </button>
+      ),
+    },
   ]
 
-  return <DataTable tableClass="accounts-table" columns={columns} rows={props.accounts} rowKey={(a) => a.id} />
+  return (
+    <DataTable
+      tableClass="accounts-table"
+      columns={columns}
+      rows={props.accounts}
+      rowKey={(a) => a.id}
+      emptyMessage={props.emptyMessage}
+      renderExpandedRow={(a) => (
+        <Show when={expandedId() === a.id}>
+          <AccountHoldingsRow
+            accountId={a.id}
+            accountName={a.name}
+            brokerAccountId={a.brokerAccountId}
+            colspan={columns.length}
+          />
+        </Show>
+      )}
+    />
+  )
 }

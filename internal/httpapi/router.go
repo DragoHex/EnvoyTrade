@@ -5,10 +5,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Option configures optional router behaviors.
@@ -17,12 +20,25 @@ type Option func(*routerConfig)
 type routerConfig struct {
 	postbackHandler http.Handler
 	logger          *slog.Logger
+	syncer          PortfolioSyncer
+}
+
+// PortfolioSyncer provides live portfolio synchronization for an account.
+type PortfolioSyncer interface {
+	SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error
 }
 
 // WithPostbackHandler mounts a webhook handler at POST /broker-callback.
 func WithPostbackHandler(h http.Handler) Option {
 	return func(c *routerConfig) {
 		c.postbackHandler = h
+	}
+}
+
+// WithPortfolioSyncer configures a portfolio syncer for automated login and sync actions.
+func WithPortfolioSyncer(syncer PortfolioSyncer) Option {
+	return func(c *routerConfig) {
+		c.syncer = syncer
 	}
 }
 
@@ -43,7 +59,7 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	h := &handlers{store: store, engine: actionEngine}
+	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer}
 
 	mux.HandleFunc("GET /api/v1/groups", h.getGroups)
 	mux.HandleFunc("POST /api/v1/groups", h.postGroup)
@@ -128,6 +144,7 @@ type Store interface {
 type handlers struct {
 	store  Store
 	engine Engine
+	syncer PortfolioSyncer
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

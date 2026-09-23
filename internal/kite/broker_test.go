@@ -20,6 +20,12 @@ type fakeKiteAPI struct {
 	ordersErr     error
 	history       []kiteconnect.Order
 	historyErr    error
+	positions     kiteconnect.Positions
+	positionsErr  error
+	holdings      kiteconnect.Holdings
+	holdingsErr   error
+	margins       kiteconnect.AllMargins
+	marginsErr    error
 }
 
 func (f *fakeKiteAPI) PlaceOrder(variety string, orderParams kiteconnect.OrderParams) (kiteconnect.OrderResponse, error) {
@@ -43,6 +49,27 @@ func (f *fakeKiteAPI) GetOrderHistory(orderID string) ([]kiteconnect.Order, erro
 		return nil, f.historyErr
 	}
 	return f.history, nil
+}
+
+func (f *fakeKiteAPI) GetPositions() (kiteconnect.Positions, error) {
+	if f.positionsErr != nil {
+		return kiteconnect.Positions{}, f.positionsErr
+	}
+	return f.positions, nil
+}
+
+func (f *fakeKiteAPI) GetHoldings() (kiteconnect.Holdings, error) {
+	if f.holdingsErr != nil {
+		return nil, f.holdingsErr
+	}
+	return f.holdings, nil
+}
+
+func (f *fakeKiteAPI) GetUserMargins() (kiteconnect.AllMargins, error) {
+	if f.marginsErr != nil {
+		return kiteconnect.AllMargins{}, f.marginsErr
+	}
+	return f.margins, nil
 }
 
 func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
@@ -111,6 +138,61 @@ func TestBroker_GetOrders_And_History(t *testing.T) {
 	}
 	if len(hist) != 1 || hist[0].Status != "COMPLETE" {
 		t.Fatalf("unexpected history: %v", hist)
+	}
+}
+
+func TestBroker_GetPositions_Delegates(t *testing.T) {
+	api := &fakeKiteAPI{
+		positions: kiteconnect.Positions{
+			Net: []kiteconnect.Position{
+				{Tradingsymbol: "NIFTY26SEP24000CE", Product: "NRML", Quantity: 50, M2M: 250.5},
+			},
+		},
+	}
+	b := kite.NewBroker(api)
+
+	pos, err := b.GetPositions(context.Background())
+	if err != nil {
+		t.Fatalf("GetPositions: %v", err)
+	}
+	if len(pos.Net) != 1 || pos.Net[0].Tradingsymbol != "NIFTY26SEP24000CE" {
+		t.Fatalf("unexpected positions: %+v", pos)
+	}
+}
+
+func TestBroker_GetHoldings_Delegates(t *testing.T) {
+	api := &fakeKiteAPI{
+		holdings: kiteconnect.Holdings{
+			{Tradingsymbol: "INFY", Quantity: 100, AveragePrice: 1500.0},
+		},
+	}
+	b := kite.NewBroker(api)
+
+	h, err := b.GetHoldings(context.Background())
+	if err != nil {
+		t.Fatalf("GetHoldings: %v", err)
+	}
+	if len(h) != 1 || h[0].Tradingsymbol != "INFY" {
+		t.Fatalf("unexpected holdings: %+v", h)
+	}
+}
+
+func TestBroker_GetUserMargins_Delegates(t *testing.T) {
+	api := &fakeKiteAPI{
+		margins: kiteconnect.AllMargins{
+			Equity: kiteconnect.Margins{
+				Available: kiteconnect.AvailableMargins{Cash: 50000.0, LiveBalance: 120000.0},
+			},
+		},
+	}
+	b := kite.NewBroker(api)
+
+	m, err := b.GetUserMargins(context.Background())
+	if err != nil {
+		t.Fatalf("GetUserMargins: %v", err)
+	}
+	if m.Equity.Available.Cash != 50000.0 {
+		t.Fatalf("unexpected margins: %+v", m)
 	}
 }
 

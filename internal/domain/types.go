@@ -108,6 +108,10 @@ var ErrNotFound = errors.New("domain: not found")
 // story; Postgres's own FK constraints are the source of truth here).
 var ErrConflict = errors.New("domain: conflict")
 
+// ErrMasterHasOpenPositions is returned when a master account swap is attempted
+// while the current master account still has open positions.
+var ErrMasterHasOpenPositions = errors.New("domain: master has open positions")
+
 // Account is the flat, ungrouped view of a single account (master or
 // follower) the Accounts page manages — unlike GroupSummary/GroupDetail,
 // which model the master+followers rollup, this is one row per account
@@ -118,14 +122,70 @@ type Account struct {
 	Role            string
 	Broker          string
 	BrokerAccountID string
+	ApiKey          string
+	ApiSecret       string
 	Active          bool
 	Status          string
+	IPAddress       string
+	AuthStatus      string
+	AuthError       string
 	GroupID         *uuid.UUID
 	GroupName       *string
 	MasterID        *uuid.UUID
 	CapitalRatio    *decimal.Decimal
 	MaxQtyPerOrder  *int
 	Enabled         bool
+}
+
+// AccountAuthInfo holds authentication credentials and session details for an account.
+type AccountAuthInfo struct {
+	ID                  uuid.UUID
+	Role                string
+	Broker              string
+	BrokerAccountID     string
+	ApiKey              string
+	ApiSecret           string
+	IPAddress           string
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+	AccessToken         string
+	TokenExpiresAt      *time.Time
+	AuthStatus          string
+	AuthError           string
+}
+
+// PositionSyncParam represents one position row to sync.
+type PositionSyncParam struct {
+	Product      string
+	Instrument   string
+	Quantity     int
+	BuyPrice     decimal.Decimal
+	SellPrice    decimal.Decimal
+	BuyQuantity  int
+	SellQuantity int
+	Ltp          decimal.Decimal
+	Mtm          decimal.Decimal
+	Pnl          decimal.Decimal
+	Action       string
+}
+
+// HoldingSyncParam represents one holding row to sync.
+type HoldingSyncParam struct {
+	Instrument       string
+	SellableQuantity int
+	BuyAveragePrice  decimal.Decimal
+	Ltp              decimal.Decimal
+	Pnl              decimal.Decimal
+	Action           string
+}
+
+// MarginSyncParam represents account margin and summary metrics to sync.
+type MarginSyncParam struct {
+	NetQty       int
+	TotalMtm     decimal.Decimal
+	RealizedPnl  decimal.Decimal
+	AccountValue decimal.Decimal
+	Status       string
 }
 
 // Group models a trading group with a designated master account.
@@ -236,14 +296,16 @@ type OrderEvent struct {
 
 // AccountSummaryMetrics represents the persistent top summary header for an account.
 type AccountSummaryMetrics struct {
-	NetQty               int             `json:"netQty"`
-	OpenPositionsCount   int             `json:"openPositionsCount"`
-	ClosedPositionsCount int             `json:"closedPositionsCount"`
-	PendingOrdersCount   int             `json:"pendingOrdersCount"`
-	TotalMtm             decimal.Decimal `json:"totalMtm"`
-	RealizedPnl          decimal.Decimal `json:"realizedPnl"`
-	AccountValue         decimal.Decimal `json:"accountValue"`
-	Status               string          `json:"status"`
+	NetQty               int              `json:"netQty"`
+	OpenPositionsCount   int              `json:"openPositionsCount"`
+	ClosedPositionsCount int              `json:"closedPositionsCount"`
+	PendingOrdersCount   int              `json:"pendingOrdersCount"`
+	TotalMtm             decimal.Decimal  `json:"totalMtm"`
+	RealizedPnl          decimal.Decimal  `json:"realizedPnl"`
+	AccountValue         decimal.Decimal  `json:"accountValue"`
+	AvailableCash        *decimal.Decimal `json:"availableCash,omitempty"`
+	AvailableMargin      *decimal.Decimal `json:"availableMargin,omitempty"`
+	Status               string           `json:"status"`
 }
 
 // PositionItem represents an open or closed position row.

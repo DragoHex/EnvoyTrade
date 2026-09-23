@@ -222,3 +222,74 @@ func TestPatchGroup_SwapMaster_Succeeds(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestPostGroup_MasterAlreadyAssigned_Returns409(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{
+		accountRoles:   map[uuid.UUID]string{master: "master"},
+		createGroupErr: domain.ErrDuplicate,
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"name": "Duplicate Group", "masterId": master.String()})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+	var got map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got["error"] != "master account is already assigned to a group" {
+		t.Errorf("error = %q, want %q", got["error"], "master account is already assigned to a group")
+	}
+}
+
+func TestPatchGroup_SwapMaster_CurrentMasterHasOpenPositions_Returns409(t *testing.T) {
+	newMaster := uuid.New()
+	groupID := uuid.New()
+	store := &stubStore{
+		accountRoles:   map[uuid.UUID]string{newMaster: "master"},
+		updateGroupErr: domain.ErrMasterHasOpenPositions,
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"masterId": newMaster.String()})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/groups/"+groupID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+	var got map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got["error"] != "cannot swap master: master has open positions" {
+		t.Errorf("error = %q, want %q", got["error"], "cannot swap master: master has open positions")
+	}
+}
+
+func TestPatchGroup_SwapMaster_NewMasterAlreadyAssigned_Returns409(t *testing.T) {
+	newMaster := uuid.New()
+	groupID := uuid.New()
+	store := &stubStore{
+		accountRoles:   map[uuid.UUID]string{newMaster: "master"},
+		updateGroupErr: domain.ErrDuplicate,
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"masterId": newMaster.String()})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/groups/"+groupID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+	var got map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got["error"] != "new master account is already assigned to another group" {
+		t.Errorf("error = %q, want %q", got["error"], "new master account is already assigned to another group")
+	}
+}

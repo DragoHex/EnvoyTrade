@@ -11,16 +11,24 @@ import (
 )
 
 type Account struct {
-	ID           uuid.UUID
-	Role         string
-	Broker       string
-	BrokerUserID string
-	Status       string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	ApiSecret    string
-	Active       bool
-	Name         string
+	ID                  uuid.UUID
+	Role                string
+	Broker              string
+	BrokerUserID        string
+	Status              string
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	ApiSecret           string
+	Active              bool
+	Name                string
+	IpAddress           string
+	ApiKey              string
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+	AccessToken         string
+	TokenExpiresAt      pgtype.Timestamptz
+	AuthStatus          string
+	AuthError           string
 }
 
 type AccountHolding struct {

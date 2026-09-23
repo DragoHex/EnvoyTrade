@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@solidjs/testing-library'
+import { render, screen, waitFor, within } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { Router, Route } from '@solidjs/router'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -194,4 +194,49 @@ describe('GroupManagePage', () => {
     expect(getAccountSpy).toHaveBeenCalledWith('f2')
     expect(getAccountsSpy).toHaveBeenCalledTimes(initialCallCount)
   })
+  it('EditGroupModal in GroupManagePage includes all masters for master swap', async () => {
+    const otherMaster: api.Account = {
+      ...master,
+      id: 'm2',
+      brokerAccountId: 'ZX5678',
+      name: 'Other Master',
+    }
+    const freeMaster: api.Account = {
+      ...master,
+      id: 'm3',
+      brokerAccountId: 'ZX9999',
+      name: 'Free Master',
+    }
+
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [],
+    })
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 0, status: 'ok' },
+      { id: 'g2', name: 'Group 2', masterId: 'm2', masterAccountId: 'ZX5678', broker: 'kite', followerCount: 0, status: 'ok' },
+    ])
+    vi.spyOn(api, 'getAccounts').mockImplementation((ids?: string[]) => {
+      return Promise.resolve(ids ? [master] : [master, otherMaster, freeMaster])
+    })
+
+    renderPage()
+    expect(await screen.findByText('ZX1234')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Group' }))
+    expect(screen.getByRole('dialog', { name: 'Edit Group' })).toBeInTheDocument()
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit Group' })
+    const select = within(dialog).getByLabelText(/Master Account/)
+    const options = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value)
+    // Should include current master m1, and other masters m2 and m3 for master swap
+    expect(options).toContain('m1')
+    expect(options).toContain('m2')
+    expect(options).toContain('m3')
+  })
+
 })

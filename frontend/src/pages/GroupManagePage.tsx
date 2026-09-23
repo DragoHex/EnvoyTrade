@@ -31,12 +31,18 @@ export function GroupManagePage() {
     getGroupDetail
   )
   const [members, setMembers] = createSignal<Account[]>()
-  const [allAccounts, { mutate: mutateAll }] = createResource(() => getAccounts())
+  const [allAccounts, { mutate: mutateAll, refetch: refetchAll }] = createResource(() => getAccounts())
 
   const loadMembersForGroup = async (d: { masterId: string; followers: { accountId: string }[] }) => {
     const ids = [d.masterId, ...d.followers.map((f) => f.accountId)]
     const accs = await getAccounts(ids)
-    setMembers(accs)
+    const master = accs.find((a) => a.id === d.masterId)
+    const followers = accs
+      .filter((a) => a.id !== d.masterId)
+      .sort((a, b) =>
+        (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+      )
+    setMembers(master ? [master, ...followers] : accs)
   }
 
   let lastLoadedId = ''
@@ -193,6 +199,7 @@ export function GroupManagePage() {
     await patchGroup(groupId, { name, masterId })
     showToast({ kind: 'success', message: 'Group updated successfully.' })
     lastLoadedId = ''
+    await refetchAll()
     const d = await refetchDetail()
     if (d) {
       await loadMembersForGroup(d)
@@ -200,10 +207,19 @@ export function GroupManagePage() {
   }
 
   const unattachedFollowers = () =>
-    (allAccounts() ?? []).filter((a) => a.role === 'follower' && a.masterId == null)
+    (allAccounts() ?? [])
+      .filter((a) => a.role === 'follower' && a.masterId == null)
+      .sort((a, b) =>
+        (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+      )
 
   const masterAccount = () => (members() ?? []).find((a) => a.role === 'master')
-  const masters = () => (allAccounts() ?? []).filter((a) => a.role === 'master')
+  const masters = () =>
+    (allAccounts() ?? [])
+      .filter((a) => a.role === 'master')
+      .sort((a, b) =>
+        (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+      )
 
   return (
     <div class="page">

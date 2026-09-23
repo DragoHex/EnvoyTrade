@@ -6,6 +6,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	_ "embed"
 	"errors"
 	"time"
@@ -39,6 +40,18 @@ var groupsAndNamesSchema string
 
 //go:embed migrations/0006_positions_and_holdings.sql
 var positionsAndHoldingsSchema string
+
+//go:embed migrations/0007_group_master_unique.sql
+var groupMasterUniqueSchema string
+
+//go:embed migrations/0008_account_ip_address.sql
+var accountIPAddressSchema string
+
+//go:embed migrations/0009_account_api_key.sql
+var accountAPIKeySchema string
+
+//go:embed migrations/0010_account_credentials.sql
+var accountCredentialsSchema string
 
 const uniqueViolation = "23505"
 const foreignKeyViolation = "23503"
@@ -79,22 +92,36 @@ func NewPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
 // startup (cmd/server) as well as against a fresh database (tests).
 func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, fanoutSchema); err != nil {
-		return err
+		return fmt.Errorf("0001_fanout: %w", err)
 	}
 	if _, err := s.pool.Exec(ctx, instrumentsSchema); err != nil {
-		return err
+		return fmt.Errorf("0002_instruments: %w", err)
 	}
 	if _, err := s.pool.Exec(ctx, accountAPISecretSchema); err != nil {
-		return err
+		return fmt.Errorf("0003_account_api_secret: %w", err)
 	}
 	if _, err := s.pool.Exec(ctx, accountActiveSchema); err != nil {
-		return err
+		return fmt.Errorf("0004_account_active: %w", err)
 	}
 	if _, err := s.pool.Exec(ctx, groupsAndNamesSchema); err != nil {
-		return err
+		return fmt.Errorf("0005_groups_and_names: %w", err)
 	}
-	_, err := s.pool.Exec(ctx, positionsAndHoldingsSchema)
-	return err
+	if _, err := s.pool.Exec(ctx, positionsAndHoldingsSchema); err != nil {
+		return fmt.Errorf("0006_positions_and_holdings: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, groupMasterUniqueSchema); err != nil {
+		return fmt.Errorf("0007_group_master_unique: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, accountIPAddressSchema); err != nil {
+		return fmt.Errorf("0008_account_ip_address: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, accountAPIKeySchema); err != nil {
+		return fmt.Errorf("0009_account_api_key: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, accountCredentialsSchema); err != nil {
+		return fmt.Errorf("0010_account_credentials: %w", err)
+	}
+	return nil
 }
 
 // CreateAccount is a fixture helper: the auth/onboarding flow that
@@ -103,33 +130,110 @@ func (s *Store) Migrate(ctx context.Context) error {
 // that account's own Kite Connect app secret — every account (master and
 // each follower) has its own app, needed to verify that account's
 // postback checksums.
-func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiSecret string) error {
+func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string) error {
 	err := s.queries.CreateAccount(ctx, sqlcgen.CreateAccountParams{
 		ID:           id,
 		Name:         name,
 		Role:         role,
 		Broker:       broker,
 		BrokerUserID: brokerUserID,
+		ApiKey:       apiKey,
 		ApiSecret:    apiSecret,
+		IpAddress:    ipAddress,
 	})
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
 	}
+	return err
+}
+
+// CreateAccountWithCredentials creates an account with encrypted credentials.
+func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string, encPassword, encTotpSecret string) error {
+	err := s.queries.CreateAccountWithCredentials(ctx, sqlcgen.CreateAccountWithCredentialsParams{
+		ID:                  id,
+		Name:                name,
+		Role:                role,
+		Broker:              broker,
+		BrokerUserID:        brokerUserID,
+		ApiKey:              apiKey,
+		ApiSecret:           apiSecret,
+		IpAddress:           ipAddress,
+		EncryptedPassword:   encPassword,
+		EncryptedTotpSecret: encTotpSecret,
+	})
+	if isUniqueViolation(err) {
+		return domain.ErrDuplicate
+	}
+	return err
+}
+
+// SetAccountEncryptedCredentials updates encrypted password and TOTP secret.
+func (s *Store) SetAccountEncryptedCredentials(ctx context.Context, id uuid.UUID, encPassword, encTotpSecret string) error {
+	n, err := s.queries.SetAccountEncryptedCredentials(ctx, sqlcgen.SetAccountEncryptedCredentialsParams{
+		ID:                  id,
+		EncryptedPassword:   encPassword,
+		EncryptedTotpSecret: encTotpSecret,
+	})
 	if err != nil {
 		return err
 	}
-	if role == "master" {
-		groupName := name
-		if groupName == "" {
-			groupName = brokerUserID
-		}
-		_ = s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
-			ID:       id,
-			Name:     groupName,
-			MasterID: id,
-		})
+	if n == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
+}
+
+// SetAccountAccessToken stores the active access token and token status.
+func (s *Store) SetAccountAccessToken(ctx context.Context, id uuid.UUID, token string, expiresAt *time.Time, authStatus, authError string) error {
+	var exp pgtype.Timestamptz
+	if expiresAt != nil {
+		exp = pgtype.Timestamptz{Time: *expiresAt, Valid: true}
+	}
+	n, err := s.queries.SetAccountAccessToken(ctx, sqlcgen.SetAccountAccessTokenParams{
+		ID:             id,
+		AccessToken:    token,
+		TokenExpiresAt: exp,
+		AuthStatus:     authStatus,
+		AuthError:      authError,
+	})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// AccountAuthInfo retrieves an account's authentication details and credentials.
+func (s *Store) AccountAuthInfo(ctx context.Context, id uuid.UUID) (domain.AccountAuthInfo, error) {
+	row, err := s.queries.AccountAuthInfo(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.AccountAuthInfo{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.AccountAuthInfo{}, err
+	}
+	var expiresAt *time.Time
+	if row.TokenExpiresAt.Valid {
+		t := row.TokenExpiresAt.Time
+		expiresAt = &t
+	}
+	return domain.AccountAuthInfo{
+		ID:                  row.ID,
+		Role:                row.Role,
+		Broker:              row.Broker,
+		BrokerAccountID:     row.BrokerUserID,
+		ApiKey:              row.ApiKey,
+		ApiSecret:           row.ApiSecret,
+		IPAddress:           row.IpAddress,
+		EncryptedPassword:   row.EncryptedPassword,
+		EncryptedTotpSecret: row.EncryptedTotpSecret,
+		AccessToken:         row.AccessToken,
+		TokenExpiresAt:      expiresAt,
+		AuthStatus:          row.AuthStatus,
+		AuthError:           row.AuthError,
+	}, nil
 }
 
 // AccountByBrokerUserID resolves the account a postback's user_id
@@ -456,8 +560,13 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 			Role:            r.Role,
 			Broker:          r.Broker,
 			BrokerAccountID: r.BrokerUserID,
+			ApiKey:          r.ApiKey,
+			ApiSecret:       r.ApiSecret,
 			Active:          r.Active,
 			Status:          r.Status,
+			IPAddress:       r.IpAddress,
+			AuthStatus:      r.AuthStatus,
+			AuthError:       r.AuthError,
 			Enabled:         r.Enabled,
 			GroupName:       r.GroupName,
 		}
@@ -465,7 +574,7 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 			groupID := uuid.UUID(r.GroupID.Bytes)
 			a.GroupID = &groupID
 		}
-		if r.MasterID.Valid {
+		if r.Role == "follower" && r.MasterID.Valid {
 			masterID := uuid.UUID(r.MasterID.Bytes)
 			a.MasterID = &masterID
 		}
@@ -562,6 +671,51 @@ func (s *Store) SetAccountName(ctx context.Context, id uuid.UUID, name string) e
 	rowsAffected, err := s.queries.SetAccountName(ctx, sqlcgen.SetAccountNameParams{
 		ID:   id,
 		Name: name,
+	})
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// SetAccountIPAddress updates an account's IP address (IPv4 or IPv6).
+func (s *Store) SetAccountIPAddress(ctx context.Context, id uuid.UUID, ip string) error {
+	rowsAffected, err := s.queries.SetAccountIPAddress(ctx, sqlcgen.SetAccountIPAddressParams{
+		ID:        id,
+		IpAddress: ip,
+	})
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// SetAccountAPIKey updates an account's Kite Connect API key.
+func (s *Store) SetAccountAPIKey(ctx context.Context, id uuid.UUID, apiKey string) error {
+	rowsAffected, err := s.queries.SetAccountAPIKey(ctx, sqlcgen.SetAccountAPIKeyParams{
+		ID:     id,
+		ApiKey: apiKey,
+	})
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// SetAccountAPISecret updates an account's Kite Connect API secret.
+func (s *Store) SetAccountAPISecret(ctx context.Context, id uuid.UUID, apiSecret string) error {
+	rowsAffected, err := s.queries.SetAccountAPISecret(ctx, sqlcgen.SetAccountAPISecretParams{
+		ID:        id,
+		ApiSecret: apiSecret,
 	})
 	if err != nil {
 		return err

@@ -1,21 +1,30 @@
-import { createSignal, onCleanup, Show } from 'solid-js'
+import { createResource, createSignal, onCleanup, Show } from 'solid-js'
 import { CopyToggle } from './CopyToggle'
 import { ConfirmActionModal } from './ConfirmActionModal'
 import { ResultToast, type ToastResult } from './ResultToast'
 import { StatusDot } from './StatusDot'
 import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, SyncIcon, ChevronDownIcon } from './icons'
 import { AccountOrderDetails } from './AccountOrderDetails'
-import type { GroupFollower } from '../api'
+import { getAccountOrders, type GroupFollower } from '../api'
 
 type DestructiveAction = 'square_off' | 'exit_open_orders' | null
 const TOAST_DISMISS_MS = 4000
+
+function formatCurrency(val: unknown): string {
+  if (val === null || val === undefined || val === '') return '—'
+  const n = typeof val === 'number' ? val : Number(val)
+  if (Number.isNaN(n)) return '—'
+  const sign = n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  return `${sign}₹${abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 export function AccountRow(props: {
   follower: GroupFollower
   isMaster?: boolean
   actionsDisabled?: boolean
   toggleDisabled?: boolean
-  onToggleCopy: (next: boolean) => void
+  onToggleCopy: (next: boolean) => void | Promise<void>
   onRebalance: () => Promise<void>
   onSquareOff: () => void
   onExitOpenOrders: () => void
@@ -26,6 +35,14 @@ export function AccountRow(props: {
   const [expanded, setExpanded] = createSignal(false)
   let dismissTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => clearTimeout(dismissTimer))
+
+  // Fetch account orders/metrics on row expansion or if already expanded
+  const [ordersData] = createResource(
+    () => (expanded() ? props.follower.accountId : null),
+    (accId) => getAccountOrders(accId, 'open_positions'),
+  )
+
+  const summary = () => ordersData()?.summary
 
   const showToast = (result: ToastResult) => {
     setToast(result)
@@ -72,6 +89,7 @@ export function AccountRow(props: {
               class="icon-button icon-button-danger"
               aria-label={props.follower.enabled ? 'Stop Copy' : 'Start Copy'}
               data-tooltip={props.follower.enabled ? 'Stop' : 'Start'}
+              disabled={props.toggleDisabled}
               onClick={() => props.onToggleCopy(!props.follower.enabled)}
             >
               {props.follower.enabled ? <BlockIcon /> : <PlayCircleIcon />}
@@ -80,12 +98,16 @@ export function AccountRow(props: {
         </td>
         <td>{props.follower.name || '—'}</td>
         <td>{props.follower.brokerAccountId}</td>
-        <td>—</td>
-        <td>—</td>
-        <td>—</td>
-        <td>—</td>
-        <td>—</td>
-        <td>—</td>
+        <td>{summary() ? summary()!.netQty : (props.follower.netQty ?? '—')}</td>
+        <td>
+          {summary()
+            ? `${summary()!.openPositionsCount ?? 0}/${summary()!.closedPositionsCount ?? 0}`
+            : (props.follower.openPositionsCount != null ? `${props.follower.openPositionsCount}/${props.follower.closedPositionsCount ?? 0}` : '—')}
+        </td>
+        <td>{summary() ? (summary()!.pendingOrdersCount ?? 0) : (props.follower.openOrdersCount ?? '—')}</td>
+        <td>{summary() ? formatCurrency(summary()!.totalMtm) : (props.follower.totalMtm != null ? formatCurrency(props.follower.totalMtm) : '—')}</td>
+        <td>{summary() && summary()!.availableCash != null ? formatCurrency(summary()!.availableCash) : (props.follower.availableCash != null ? formatCurrency(props.follower.availableCash) : '—')}</td>
+        <td>{summary() && summary()!.availableMargin != null ? formatCurrency(summary()!.availableMargin) : (props.follower.availableMargin != null ? formatCurrency(props.follower.availableMargin) : '—')}</td>
         <td>
           <StatusDot status={props.follower.status} />
         </td>

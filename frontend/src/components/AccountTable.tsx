@@ -1,14 +1,34 @@
-import { Index } from 'solid-js'
+import { Index, createSignal } from 'solid-js'
 import { AccountRow } from './AccountRow'
 import type { ActionType, GroupFollower } from '../api'
 
 export function AccountTable(props: {
   master: { masterId: string; name?: string; brokerAccountId: string; status: 'ok' | 'error'; active: boolean }
   followers: GroupFollower[]
-  onToggleCopy: (accountId: string, next: boolean) => void
-  onToggleMasterActive: (next: boolean) => void
+  onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
+  onToggleMasterActive: (next: boolean) => Promise<void> | void
   onAction: (accountId: string, type: ActionType) => Promise<void>
 }) {
+  const [togglingId, setTogglingId] = createSignal<string | null>(null)
+
+  const handleToggleMaster = async (next: boolean) => {
+    setTogglingId(props.master.masterId)
+    try {
+      await props.onToggleMasterActive(next)
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  const handleToggleFollower = async (accountId: string, next: boolean) => {
+    setTogglingId(accountId)
+    try {
+      await props.onToggleCopy(accountId, next)
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   return (
     <table>
       <thead>
@@ -38,7 +58,8 @@ export function AccountTable(props: {
           }}
           isMaster
           actionsDisabled={!props.master.active}
-          onToggleCopy={props.onToggleMasterActive}
+          toggleDisabled={togglingId() === props.master.masterId}
+          onToggleCopy={handleToggleMaster}
           onRebalance={() => props.onAction(props.master.masterId, 'rebalance')}
           onSquareOff={() => props.onAction(props.master.masterId, 'square_off')}
           onExitOpenOrders={() => props.onAction(props.master.masterId, 'exit_open_orders')}
@@ -53,8 +74,8 @@ export function AccountTable(props: {
             <AccountRow
               follower={f()}
               actionsDisabled={!props.master.active || !f().enabled}
-              toggleDisabled={!props.master.active}
-              onToggleCopy={(next) => props.onToggleCopy(f().accountId, next)}
+              toggleDisabled={!props.master.active || togglingId() === f().accountId}
+              onToggleCopy={(next) => handleToggleFollower(f().accountId, next)}
               onRebalance={() => props.onAction(f().accountId, 'rebalance')}
               onSquareOff={() => props.onAction(f().accountId, 'square_off')}
               onExitOpenOrders={() => props.onAction(f().accountId, 'exit_open_orders')}

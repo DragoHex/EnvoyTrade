@@ -12,18 +12,12 @@ CREATE TABLE IF NOT EXISTS groups (
 );
 
 DO $$ BEGIN
-  ALTER TABLE groups DROP CONSTRAINT IF EXISTS groups_master_id_fkey;
-  ALTER TABLE groups ADD CONSTRAINT groups_master_id_fkey FOREIGN KEY (master_id) REFERENCES accounts(id) ON DELETE CASCADE;
-EXCEPTION WHEN OTHERS THEN
-  NULL;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'groups_master_id_fkey'
+  ) THEN
+    ALTER TABLE groups ADD CONSTRAINT groups_master_id_fkey FOREIGN KEY (master_id) REFERENCES accounts(id) ON DELETE CASCADE;
+  END IF;
 END $$;
-
--- Backfill existing master accounts into groups table (matching group id to master account id)
-INSERT INTO groups (id, name, master_id)
-SELECT id, COALESCE(NULLIF(name, ''), broker_user_id), id
-FROM accounts
-WHERE role = 'master'
-ON CONFLICT (id) DO NOTHING;
 
 -- Modify follow_links to reference groups(id) instead of master accounts(id)
 ALTER TABLE follow_links ADD COLUMN IF NOT EXISTS group_id uuid REFERENCES groups(id);
@@ -33,6 +27,13 @@ DO $$ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'follow_links' AND column_name = 'master_id'
   ) THEN
+    -- Backfill existing master accounts into groups table (matching group id to master account id)
+    INSERT INTO groups (id, name, master_id)
+    SELECT id, COALESCE(NULLIF(name, ''), broker_user_id), id
+    FROM accounts
+    WHERE role = 'master'
+    ON CONFLICT (id) DO NOTHING;
+
     UPDATE follow_links f
     SET group_id = g.id
     FROM groups g

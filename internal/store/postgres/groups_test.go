@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -18,6 +19,12 @@ func TestGroups_ListsMastersWithFollowerCountAndStatus(t *testing.T) {
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	otherMaster := seedAccount(t, s, "master")
+	if err := s.CreateGroup(ctx, master, "Master Group", master); err != nil {
+		t.Fatalf("CreateGroup master: %v", err)
+	}
+	if err := s.CreateGroup(ctx, otherMaster, "Other Master Group", otherMaster); err != nil {
+		t.Fatalf("CreateGroup otherMaster: %v", err)
+	}
 	f1 := seedAccount(t, s, "follower")
 	f2 := seedAccount(t, s, "follower")
 
@@ -161,6 +168,9 @@ func TestGroups_NewMasterIsActiveByDefault(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
+	if err := s.CreateGroup(ctx, master, "Master Group", master); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
 
 	groups, err := s.Groups(ctx)
 	if err != nil {
@@ -178,6 +188,9 @@ func TestGroupDetail_MasterActiveReflectsAccountsActive(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
+	if err := s.CreateGroup(ctx, master, "Master Group", master); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
 
 	detail, err := s.GroupDetail(ctx, master)
 	if err != nil {
@@ -328,5 +341,148 @@ func TestLatestMasterFill_NoneReturnsErrNotFound(t *testing.T) {
 	_, err := s.LatestMasterFill(ctx, master)
 	if err != domain.ErrNotFound {
 		t.Fatalf("err = %v, want domain.ErrNotFound", err)
+	}
+}
+
+func TestCreateGroup_DuplicateMasterReturnsErrDuplicate(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	if err := s.CreateGroup(ctx, master, "First Group", master); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+
+	err := s.CreateGroup(ctx, uuid.New(), "Another Group", master)
+	if !errors.Is(err, domain.ErrDuplicate) {
+		t.Fatalf("CreateGroup with duplicate master: err = %v, want ErrDuplicate", err)
+	}
+}
+
+func TestUpdateGroup_SwapMasterBothAssigned_SwapsSuccessfully(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master1 := seedAccount(t, s, "master")
+	master2 := seedAccount(t, s, "master")
+
+	// Confirm masters initially have no group assigned
+	initialAccs, err := s.Accounts(ctx, []uuid.UUID{master1, master2})
+	if err != nil {
+		t.Fatalf("Accounts initial: %v", err)
+	}
+	for _, a := range initialAccs {
+		if a.GroupID != nil || a.GroupName != nil {
+			t.Errorf("unassigned master %v should have nil group, got GroupID=%v, GroupName=%v", a.ID, a.GroupID, a.GroupName)
+		}
+	}
+
+	g1 := uuid.New()
+	g2 := uuid.New()
+	if err := s.CreateGroup(ctx, g1, "Group 1", master1); err != nil {
+		t.Fatalf("CreateGroup master1: %v", err)
+	}
+	if err := s.CreateGroup(ctx, g2, "Group 2", master2); err != nil {
+		t.Fatalf("CreateGroup master2: %v", err)
+	}
+
+	err = s.UpdateGroup(ctx, g1, nil, &master2)
+	if err != nil {
+		t.Fatalf("UpdateGroup swap: err = %v, want nil", err)
+	}
+
+	info1, err := s.GroupDetail(ctx, g1)
+	if err != nil {
+		t.Fatalf("GroupDetail g1: %v", err)
+	}
+	if info1.MasterID != master2 {
+		t.Errorf("g1.MasterID = %v, want %v", info1.MasterID, master2)
+	}
+
+	info2, err := s.GroupDetail(ctx, g2)
+	if err != nil {
+		t.Fatalf("GroupDetail g2: %v", err)
+	}
+	if info2.MasterID != master1 {
+		t.Errorf("g2.MasterID = %v, want %v", info2.MasterID, master1)
+	}
+
+	swappedAccs, err := s.Accounts(ctx, []uuid.UUID{master1, master2})
+	if err != nil {
+		t.Fatalf("Accounts swapped: %v", err)
+	}
+	for _, a := range swappedAccs {
+		if a.ID == master1 {
+			if a.GroupID == nil || *a.GroupID != g2 {
+				t.Errorf("master1 GroupID = %v, want %v", a.GroupID, g2)
+			}
+			if a.GroupName == nil || *a.GroupName != "Group 2" {
+				t.Errorf("master1 GroupName = %v, want Group 2", a.GroupName)
+			}
+		}
+		if a.ID == master2 {
+			if a.GroupID == nil || *a.GroupID != g1 {
+				t.Errorf("master2 GroupID = %v, want %v", a.GroupID, g1)
+			}
+			if a.GroupName == nil || *a.GroupName != "Group 1" {
+				t.Errorf("master2 GroupName = %v, want Group 1", a.GroupName)
+			}
+		}
+	}
+}
+
+func TestUpdateGroup_SwapMasterTargetMasterHasOpenPositions_ReturnsErrMasterHasOpenPositions(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master1 := seedAccount(t, s, "master")
+	master2 := seedAccount(t, s, "master")
+	if err := s.CreateGroup(ctx, master1, "Group 1", master1); err != nil {
+		t.Fatalf("CreateGroup master1: %v", err)
+	}
+	if err := s.CreateGroup(ctx, master2, "Group 2", master2); err != nil {
+		t.Fatalf("CreateGroup master2: %v", err)
+	}
+
+	_, err := pool.Exec(ctx, "INSERT INTO account_positions (account_id, product, instrument, quantity) VALUES ($1, 'CNC', 'INFY', 10)", master2)
+	if err != nil {
+		t.Fatalf("insert open position: %v", err)
+	}
+
+	err = s.UpdateGroup(ctx, master1, nil, &master2)
+	if !errors.Is(err, domain.ErrMasterHasOpenPositions) {
+		t.Fatalf("UpdateGroup with target master having open positions: err = %v, want ErrMasterHasOpenPositions", err)
+	}
+}
+
+func TestUpdateGroup_SwapMasterBlockedWithOpenPositions(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master1 := seedAccount(t, s, "master")
+	master2 := seedAccount(t, s, "master")
+	if err := s.CreateGroup(ctx, master1, "Group 1", master1); err != nil {
+		t.Fatalf("CreateGroup master1: %v", err)
+	}
+	// master2 is created without a group, available for swap
+
+	// Insert an open position for master1
+	_, err := pool.Exec(ctx, "INSERT INTO account_positions (account_id, product, instrument, quantity) VALUES ($1, 'CNC', 'INFY', 10)", master1)
+	if err != nil {
+		t.Fatalf("insert open position: %v", err)
+	}
+
+	// Attempting swap should be blocked by open positions
+	err = s.UpdateGroup(ctx, master1, nil, &master2)
+	if !errors.Is(err, domain.ErrMasterHasOpenPositions) {
+		t.Fatalf("UpdateGroup with open positions: err = %v, want ErrMasterHasOpenPositions", err)
+	}
+
+	// Close the position (quantity = 0)
+	_, err = pool.Exec(ctx, "UPDATE account_positions SET quantity = 0 WHERE account_id = $1", master1)
+	if err != nil {
+		t.Fatalf("close position: %v", err)
+	}
+
+	// Now swap should succeed
+	err = s.UpdateGroup(ctx, master1, nil, &master2)
+	if err != nil {
+		t.Fatalf("UpdateGroup after closing positions: %v", err)
 	}
 }

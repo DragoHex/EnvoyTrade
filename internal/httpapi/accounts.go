@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strings"
 
+	"envoytrade/internal/crypto"
 	"envoytrade/internal/domain"
 
 	"github.com/google/uuid"
@@ -22,8 +24,13 @@ type AccountsStore interface {
 	SetAccountActive(ctx context.Context, id uuid.UUID, active bool) error
 	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
-	CreateAccount(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiSecret string) error
+	CreateAccount(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress string) error
+	CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret string) error
 	SetAccountName(ctx context.Context, id uuid.UUID, name string) error
+	SetAccountIPAddress(ctx context.Context, id uuid.UUID, ip string) error
+	SetAccountAPIKey(ctx context.Context, id uuid.UUID, apiKey string) error
+	SetAccountAPISecret(ctx context.Context, id uuid.UUID, apiSecret string) error
+	SetAccountEncryptedCredentials(ctx context.Context, id uuid.UUID, encPassword, encTotpSecret string) error
 	CreateFollowLink(ctx context.Context, link domain.FollowLink) error
 	UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, capitalRatio decimal.Decimal, maxQtyPerOrder *int) error
 	SetAccountStatus(ctx context.Context, id uuid.UUID, status string) error
@@ -37,6 +44,9 @@ type accountResponse struct {
 	Role            string  `json:"role"`
 	Broker          string  `json:"broker"`
 	BrokerAccountID string  `json:"brokerAccountId"`
+	ApiKey          *string `json:"apiKey,omitempty"`
+	ApiSecret       *string `json:"apiSecret,omitempty"`
+	IP              *string `json:"ip"`
 	GroupID         *string `json:"groupId"`
 	GroupName       *string `json:"groupName"`
 	MasterID        *string `json:"masterId"`
@@ -45,6 +55,8 @@ type accountResponse struct {
 	Enabled         bool    `json:"enabled"`
 	Active          bool    `json:"active"`
 	Status          string  `json:"status"`
+	AuthStatus      *string `json:"authStatus,omitempty"`
+	AuthError       *string `json:"authError,omitempty"`
 }
 
 func toAccountResponse(a domain.Account) accountResponse {
@@ -59,6 +71,26 @@ func toAccountResponse(a domain.Account) accountResponse {
 		Active:          a.Active,
 		Status:          a.Status,
 		GroupName:       a.GroupName,
+	}
+	if a.AuthStatus != "" {
+		st := a.AuthStatus
+		resp.AuthStatus = &st
+	}
+	if a.AuthError != "" {
+		ae := a.AuthError
+		resp.AuthError = &ae
+	}
+	if a.ApiKey != "" {
+		k := a.ApiKey
+		resp.ApiKey = &k
+	}
+	if a.ApiSecret != "" {
+		s := a.ApiSecret
+		resp.ApiSecret = &s
+	}
+	if a.IPAddress != "" {
+		ip := a.IPAddress
+		resp.IP = &ip
 	}
 	if a.GroupID != nil {
 		s := a.GroupID.String()
@@ -104,18 +136,41 @@ func (h *handlers) getAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func validateIP(raw *string, role string) (string, error) {
+	val := ""
+	if raw != nil {
+		val = strings.TrimSpace(*raw)
+	}
+	if role == "follower" {
+		if val == "" {
+			return "", errors.New("ip is required for follower accounts")
+		}
+	}
+	if val == "" {
+		return "", nil
+	}
+	addr, err := netip.ParseAddr(val)
+	if err != nil || (!addr.Is4() && !addr.Is6()) {
+		return "", errors.New("invalid IP address: must be a valid IPv4 or IPv6 address")
+	}
+	return val, nil
+}
+
 type postAccountRequest struct {
 	Name            string  `json:"name"`
 	Role            string  `json:"role"`
 	Broker          string  `json:"broker"`
 	BrokerAccountID string  `json:"brokerAccountId"`
+	ApiKey          string  `json:"apiKey"`
 	ApiSecret       string  `json:"apiSecret"`
+	Password        *string `json:"password"`
+	TotpSecret      *string `json:"totpSecret"`
+	IP              *string `json:"ip"`
+	IPAddress       *string `json:"ipAddress"`
 	CapitalRatio    *string `json:"capitalRatio"`
 	MaxQtyPerOrder  *int    `json:"maxQtyPerOrder"`
 	GroupID         *string `json:"groupId"`
 	MasterID        *string `json:"masterId"`
-	// ApiKey is accepted and ignored — accounts has no api_key column yet
-	// (docs/APIs/accounts.md's documented backend gap).
 }
 
 // postAccount creates a master or follower account, for the Accounts
@@ -140,6 +195,18 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" {
 		req.Name = req.BrokerAccountID
+	}
+
+	var rawIP *string
+	if req.IP != nil {
+		rawIP = req.IP
+	} else if req.IPAddress != nil {
+		rawIP = req.IPAddress
+	}
+	validIP, err := validateIP(rawIP, req.Role)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	var capitalRatio decimal.Decimal
@@ -182,7 +249,25 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := uuid.New()
-	err := h.store.CreateAccount(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiSecret)
+	var encPass, encTotp string
+	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+		enc, err := crypto.Encrypt(strings.TrimSpace(*req.Password))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encrypt password")
+			return
+		}
+		encPass = enc
+	}
+	if req.TotpSecret != nil && strings.TrimSpace(*req.TotpSecret) != "" {
+		enc, err := crypto.Encrypt(strings.TrimSpace(*req.TotpSecret))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encrypt totp secret")
+			return
+		}
+		encTotp = enc
+	}
+
+	err = h.store.CreateAccountWithCredentials(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiKey, req.ApiSecret, validIP, encPass, encTotp)
 	if errors.Is(err, domain.ErrDuplicate) {
 		writeError(w, http.StatusConflict, "an account with this brokerAccountId already exists")
 		return
@@ -190,6 +275,12 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create account")
 		return
+	}
+
+	if h.syncer != nil && encPass != "" && encTotp != "" {
+		go func() {
+			_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
+		}()
 	}
 
 	resp := accountResponse{
@@ -201,6 +292,15 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		Enabled:         true,
 		Active:          true,
 		Status:          "ok",
+	}
+	if req.ApiKey != "" {
+		resp.ApiKey = &req.ApiKey
+	}
+	if req.ApiSecret != "" {
+		resp.ApiSecret = &req.ApiSecret
+	}
+	if validIP != "" {
+		resp.IP = &validIP
 	}
 	if req.Role == "follower" {
 		maxQty := 0
@@ -241,6 +341,12 @@ type patchAccountRequest struct {
 	CapitalRatio   *string `json:"capitalRatio"`
 	MaxQtyPerOrder *int    `json:"maxQtyPerOrder"`
 	Status         *string `json:"status"`
+	IP             *string `json:"ip"`
+	IPAddress      *string `json:"ipAddress"`
+	ApiKey         *string `json:"apiKey"`
+	ApiSecret      *string `json:"apiSecret"`
+	Password       *string `json:"password"`
+	TotpSecret     *string `json:"totpSecret"`
 }
 
 // writePatchStoreError writes the appropriate error response for a store
@@ -270,52 +376,141 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch {
-	case req.Name != nil:
+	updated := false
+	resp := map[string]any{}
+
+	if req.Name != nil {
 		if writePatchStoreError(w, h.store.SetAccountName(r.Context(), id, *req.Name)) {
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"name": *req.Name})
-	case req.Active != nil:
+		resp["name"] = *req.Name
+		updated = true
+	}
+	if req.Active != nil {
 		if writePatchStoreError(w, h.store.SetAccountActive(r.Context(), id, *req.Active)) {
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"active": *req.Active})
-	case req.Enabled != nil:
+		resp["active"] = *req.Active
+		updated = true
+	}
+	if req.Enabled != nil {
 		if writePatchStoreError(w, h.store.SetFollowLinkEnabled(r.Context(), id, *req.Enabled)) {
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"enabled": *req.Enabled})
-	case req.CapitalRatio != nil || req.MaxQtyPerOrder != nil:
-		h.patchFollowLinkTerms(w, r, id, req)
-	case req.Status != nil:
+		resp["enabled"] = *req.Enabled
+		updated = true
+	}
+	if req.CapitalRatio != nil || req.MaxQtyPerOrder != nil {
+		linkResp, ok := h.applyFollowLinkTerms(w, r, id, req)
+		if !ok {
+			return
+		}
+		for k, v := range linkResp {
+			resp[k] = v
+		}
+		updated = true
+	}
+	if req.Status != nil {
 		if writePatchStoreError(w, h.store.SetAccountStatus(r.Context(), id, *req.Status)) {
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": *req.Status})
-	default:
-		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"capitalRatio\", \"maxQtyPerOrder\", or \"status\" is required")
+		resp["status"] = *req.Status
+		updated = true
 	}
+	if req.IP != nil || req.IPAddress != nil {
+		rawIP := req.IP
+		if rawIP == nil {
+			rawIP = req.IPAddress
+		}
+		role, err := h.store.AccountRole(r.Context(), id)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "account not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to get account role")
+			return
+		}
+		validIP, err := validateIP(rawIP, role)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if writePatchStoreError(w, h.store.SetAccountIPAddress(r.Context(), id, validIP)) {
+			return
+		}
+		resp["ip"] = validIP
+		updated = true
+	}
+	if req.ApiKey != nil {
+		if writePatchStoreError(w, h.store.SetAccountAPIKey(r.Context(), id, *req.ApiKey)) {
+			return
+		}
+		resp["apiKey"] = *req.ApiKey
+		updated = true
+	}
+	if req.ApiSecret != nil {
+		if writePatchStoreError(w, h.store.SetAccountAPISecret(r.Context(), id, *req.ApiSecret)) {
+			return
+		}
+		resp["apiSecret"] = *req.ApiSecret
+		updated = true
+	}
+	if req.Password != nil || req.TotpSecret != nil {
+		var encPass, encTotp string
+		if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+			enc, err := crypto.Encrypt(strings.TrimSpace(*req.Password))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to encrypt password")
+				return
+			}
+			encPass = enc
+		}
+		if req.TotpSecret != nil && strings.TrimSpace(*req.TotpSecret) != "" {
+			enc, err := crypto.Encrypt(strings.TrimSpace(*req.TotpSecret))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to encrypt totp secret")
+				return
+			}
+			encTotp = enc
+		}
+		if writePatchStoreError(w, h.store.SetAccountEncryptedCredentials(r.Context(), id, encPass, encTotp)) {
+			return
+		}
+		if h.syncer != nil && (encPass != "" || encTotp != "") {
+			go func() {
+				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
+			}()
+		}
+		resp["credentials"] = "updated"
+		updated = true
+	}
+
+	if !updated {
+		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"capitalRatio\", \"maxQtyPerOrder\", \"status\", \"ip\", \"apiKey\", \"apiSecret\", \"password\", or \"totpSecret\" is required")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
-// patchFollowLinkTerms handles the capitalRatio/maxQtyPerOrder half of
+// applyFollowLinkTerms handles the capitalRatio/maxQtyPerOrder half of
 // PATCH /accounts/{id} — the Accounts page's edit form. It fetches the
 // account's current follow-link fields first so a partial body (just
 // one of the two) doesn't clobber the other.
-func (h *handlers) patchFollowLinkTerms(w http.ResponseWriter, r *http.Request, id uuid.UUID, req patchAccountRequest) {
+func (h *handlers) applyFollowLinkTerms(w http.ResponseWriter, r *http.Request, id uuid.UUID, req patchAccountRequest) (map[string]any, bool) {
 	accounts, err := h.store.Accounts(r.Context(), []uuid.UUID{id})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update account")
-		return
+		return nil, false
 	}
 	if len(accounts) == 0 {
 		writeError(w, http.StatusNotFound, "account not found")
-		return
+		return nil, false
 	}
 	current := accounts[0]
 	if current.Role == "master" {
 		writeError(w, http.StatusBadRequest, "capitalRatio/maxQtyPerOrder only apply to follower accounts")
-		return
+		return nil, false
 	}
 
 	capitalRatio := current.CapitalRatio
@@ -323,13 +518,13 @@ func (h *handlers) patchFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 		parsed, err := decimal.NewFromString(*req.CapitalRatio)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid capitalRatio")
-			return
+			return nil, false
 		}
 		capitalRatio = &parsed
 	}
 	if capitalRatio == nil {
 		writeError(w, http.StatusBadRequest, "account has no capitalRatio to update")
-		return
+		return nil, false
 	}
 	maxQtyPerOrder := current.MaxQtyPerOrder
 	if req.MaxQtyPerOrder != nil {
@@ -337,7 +532,7 @@ func (h *handlers) patchFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if writePatchStoreError(w, h.store.UpdateFollowLinkTerms(r.Context(), id, *capitalRatio, maxQtyPerOrder)) {
-		return
+		return nil, false
 	}
 
 	resp := map[string]any{}
@@ -347,7 +542,7 @@ func (h *handlers) patchFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 	if req.MaxQtyPerOrder != nil {
 		resp["maxQtyPerOrder"] = *req.MaxQtyPerOrder
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, true
 }
 
 // deleteAccount removes an account, for the Accounts page's "Delete"

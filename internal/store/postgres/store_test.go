@@ -85,7 +85,7 @@ func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 func seedAccountWithSecret(t *testing.T, s *postgres.Store, role string, apiSecret string) (uuid.UUID, string) {
 	t.Helper()
 	id := uuid.New()
-	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), apiSecret); err != nil {
+	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", apiSecret, "127.0.0.1"); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	return id, id.String()
@@ -652,7 +652,7 @@ func TestCreateAccount_DuplicateBrokerUserIDReturnsErrDuplicate(t *testing.T) {
 	ctx := context.Background()
 	_, brokerUserID := seedAccountWithSecret(t, s, "master", "secret")
 
-	err := s.CreateAccount(ctx, uuid.New(), "Another Master", "master", "zerodha", brokerUserID, "secret2")
+	err := s.CreateAccount(ctx, uuid.New(), "Another Master", "master", "zerodha", brokerUserID, "key2", "secret2", "127.0.0.1")
 	if !errors.Is(err, domain.ErrDuplicate) {
 		t.Fatalf("CreateAccount duplicate broker_user_id: err = %v, want ErrDuplicate", err)
 	}
@@ -826,6 +826,51 @@ func TestDeleteFollowLink_Succeeds(t *testing.T) {
 	// Now that the follower has no references, it can be deleted.
 	if err := s.DeleteAccount(ctx, follower); err != nil {
 		t.Fatalf("DeleteAccount after detach: %v", err)
+	}
+}
+
+func TestSetAccountAPIKey_UpdatesKey(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	accountID, _ := seedAccountWithSecret(t, s, "master", "initial-secret")
+
+	if err := s.SetAccountAPIKey(ctx, accountID, "new-api-key"); err != nil {
+		t.Fatalf("SetAccountAPIKey: %v", err)
+	}
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{accountID})
+	if err != nil {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if len(accs) != 1 {
+		t.Fatalf("Accounts len = %d, want 1", len(accs))
+	}
+	if accs[0].ApiKey != "new-api-key" {
+		t.Errorf("ApiKey = %q, want %q", accs[0].ApiKey, "new-api-key")
+	}
+	if accs[0].ApiSecret != "initial-secret" {
+		t.Errorf("ApiSecret = %q, want %q", accs[0].ApiSecret, "initial-secret")
+	}
+}
+
+func TestSetAccountAPISecret_UpdatesSecret(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	accountID, _ := seedAccountWithSecret(t, s, "follower", "initial-secret")
+
+	if err := s.SetAccountAPISecret(ctx, accountID, "updated-secret"); err != nil {
+		t.Fatalf("SetAccountAPISecret: %v", err)
+	}
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{accountID})
+	if err != nil {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if len(accs) != 1 {
+		t.Fatalf("Accounts len = %d, want 1", len(accs))
+	}
+	if accs[0].ApiSecret != "updated-secret" {
+		t.Errorf("ApiSecret = %q, want %q", accs[0].ApiSecret, "updated-secret")
 	}
 }
 

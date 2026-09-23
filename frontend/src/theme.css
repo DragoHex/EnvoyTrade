@@ -917,6 +917,28 @@ tr[data-testid='master-row'] td {
   text-align: center;
 }
 
+.col-center,
+.text-center {
+  text-align: center !important;
+}
+
+.col-left,
+.text-left {
+  text-align: left !important;
+}
+
+.col-right,
+.text-right {
+  text-align: right !important;
+}
+
+.broker-cell-centered {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
 .role-cell-centered {
   display: flex;
   align-items: center;

@@ -5,8 +5,8 @@ import { StatusDot } from './StatusDot'
 export function GroupCard(props: {
   detail: GroupDetail
   status: 'ok' | 'error'
-  onToggleCopy: (accountId: string, next: boolean) => void
-  onToggleMasterActive: (next: boolean) => void
+  onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
+  onToggleMasterActive: (next: boolean) => Promise<void> | void
   onAction: (accountId: string, type: ActionType) => Promise<void>
 }) {
   return (

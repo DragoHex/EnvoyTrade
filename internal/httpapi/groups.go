@@ -111,7 +111,7 @@ func (h *handlers) postGroup(w http.ResponseWriter, r *http.Request) {
 	id := uuid.New()
 	if err := h.store.CreateGroup(r.Context(), id, req.Name, masterID); err != nil {
 		if errors.Is(err, domain.ErrDuplicate) {
-			writeError(w, http.StatusConflict, "group already exists")
+			writeError(w, http.StatusConflict, "master account is already assigned to a group")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create group")
@@ -211,6 +211,14 @@ func (h *handlers) patchGroup(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.UpdateGroup(r.Context(), id, req.Name, masterIDPtr); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "group not found")
+			return
+		}
+		if errors.Is(err, domain.ErrMasterHasOpenPositions) {
+			writeError(w, http.StatusConflict, "cannot swap master: master has open positions")
+			return
+		}
+		if errors.Is(err, domain.ErrDuplicate) {
+			writeError(w, http.StatusConflict, "new master account is already assigned to another group")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update group")
