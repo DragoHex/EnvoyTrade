@@ -92,9 +92,15 @@ SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
 LEFT JOIN groups g ON (g.id = f.group_id OR (a.role = 'master' AND g.master_id = a.id))
-WHERE $1::uuid[] IS NULL OR a.id = ANY($1::uuid[])
+WHERE ($1::uuid[] IS NULL OR a.id = ANY($1::uuid[]))
+  AND ($2::uuid IS NULL OR a.user_id = $2::uuid)
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC
 `
+
+type AccountsParams struct {
+	Ids    []uuid.UUID
+	UserID *uuid.UUID
+}
 
 type AccountsRow struct {
 	ID             uuid.UUID
@@ -117,8 +123,8 @@ type AccountsRow struct {
 	Enabled        bool
 }
 
-func (q *Queries) Accounts(ctx context.Context, ids []uuid.UUID) ([]AccountsRow, error) {
-	rows, err := q.db.Query(ctx, accounts, ids)
+func (q *Queries) Accounts(ctx context.Context, arg AccountsParams) ([]AccountsRow, error) {
+	rows, err := q.db.Query(ctx, accounts, arg.Ids, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +163,7 @@ func (q *Queries) Accounts(ctx context.Context, ids []uuid.UUID) ([]AccountsRow,
 }
 
 const createAccount = `-- name: CreateAccount :exec
-INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type CreateAccountParams struct {
@@ -169,6 +175,7 @@ type CreateAccountParams struct {
 	ApiKey       string
 	ApiSecret    string
 	IpAddress    string
+	UserID       *uuid.UUID
 }
 
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) error {
@@ -181,13 +188,14 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) er
 		arg.ApiKey,
 		arg.ApiSecret,
 		arg.IpAddress,
+		arg.UserID,
 	)
 	return err
 }
 
 const createAccountWithCredentials = `-- name: CreateAccountWithCredentials :exec
-INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type CreateAccountWithCredentialsParams struct {
@@ -201,6 +209,7 @@ type CreateAccountWithCredentialsParams struct {
 	IpAddress           string
 	EncryptedPassword   string
 	EncryptedTotpSecret string
+	UserID              *uuid.UUID
 }
 
 func (q *Queries) CreateAccountWithCredentials(ctx context.Context, arg CreateAccountWithCredentialsParams) error {
@@ -215,6 +224,7 @@ func (q *Queries) CreateAccountWithCredentials(ctx context.Context, arg CreateAc
 		arg.IpAddress,
 		arg.EncryptedPassword,
 		arg.EncryptedTotpSecret,
+		arg.UserID,
 	)
 	return err
 }

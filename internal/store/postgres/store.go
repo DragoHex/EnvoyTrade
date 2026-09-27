@@ -53,6 +53,15 @@ var accountAPIKeySchema string
 //go:embed migrations/0010_account_credentials.sql
 var accountCredentialsSchema string
 
+//go:embed migrations/0011_users_and_sessions.sql
+var usersAndSessionsSchema string
+
+//go:embed migrations/0012_user_scoping.sql
+var userScopingSchema string
+
+//go:embed migrations/0013_user_profile_fields.sql
+var userProfileFieldsSchema string
+
 const uniqueViolation = "23505"
 const foreignKeyViolation = "23503"
 
@@ -121,6 +130,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, accountCredentialsSchema); err != nil {
 		return fmt.Errorf("0010_account_credentials: %w", err)
 	}
+	if _, err := s.pool.Exec(ctx, usersAndSessionsSchema); err != nil {
+		return fmt.Errorf("0011_users_and_sessions: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, userScopingSchema); err != nil {
+		return fmt.Errorf("0012_user_scoping: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, userProfileFieldsSchema); err != nil {
+		return fmt.Errorf("0013_user_profile_fields: %w", err)
+	}
 	return nil
 }
 
@@ -131,6 +149,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 // each follower) has its own app, needed to verify that account's
 // postback checksums.
 func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string) error {
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
 	err := s.queries.CreateAccount(ctx, sqlcgen.CreateAccountParams{
 		ID:           id,
 		Name:         name,
@@ -140,6 +162,7 @@ func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, ro
 		ApiKey:       apiKey,
 		ApiSecret:    apiSecret,
 		IpAddress:    ipAddress,
+		UserID:       userID,
 	})
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
@@ -149,6 +172,10 @@ func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, ro
 
 // CreateAccountWithCredentials creates an account with encrypted credentials.
 func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string, encPassword, encTotpSecret string) error {
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
 	err := s.queries.CreateAccountWithCredentials(ctx, sqlcgen.CreateAccountWithCredentialsParams{
 		ID:                  id,
 		Name:                name,
@@ -160,6 +187,7 @@ func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, 
 		IpAddress:           ipAddress,
 		EncryptedPassword:   encPassword,
 		EncryptedTotpSecret: encTotpSecret,
+		UserID:              userID,
 	})
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
@@ -548,7 +576,14 @@ func (s *Store) AccountRole(ctx context.Context, id uuid.UUID) (string, error) {
 // follow_link (if any) — the flat, ungrouped view the Accounts page's
 // list/detail needs. ids filters to just those accounts; nil returns all.
 func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error) {
-	rows, err := s.queries.Accounts(ctx, ids)
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
+	rows, err := s.queries.Accounts(ctx, sqlcgen.AccountsParams{
+		Ids:    ids,
+		UserID: userID,
+	})
 	if err != nil {
 		return nil, err
 	}

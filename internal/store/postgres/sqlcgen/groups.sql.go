@@ -12,18 +12,19 @@ import (
 )
 
 const createGroup = `-- name: CreateGroup :exec
-INSERT INTO groups (id, name, master_id)
-VALUES ($1, $2, $3)
+INSERT INTO groups (id, name, master_id, user_id)
+VALUES ($1, $2, $3, $4)
 `
 
 type CreateGroupParams struct {
 	ID       uuid.UUID
 	Name     string
 	MasterID uuid.UUID
+	UserID   *uuid.UUID
 }
 
 func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) error {
-	_, err := q.db.Exec(ctx, createGroup, arg.ID, arg.Name, arg.MasterID)
+	_, err := q.db.Exec(ctx, createGroup, arg.ID, arg.Name, arg.MasterID, arg.UserID)
 	return err
 }
 
@@ -122,9 +123,15 @@ SELECT g.id, g.name, g.master_id,
        a.active AS master_active
 FROM groups g
 JOIN accounts a ON a.id = g.master_id
-WHERE g.id = $1 OR g.master_id = $1
+WHERE (g.id = $1 OR g.master_id = $1)
+  AND ($2::uuid IS NULL OR g.user_id = $2::uuid)
 LIMIT 1
 `
+
+type GroupInfoParams struct {
+	ID     uuid.UUID
+	UserID *uuid.UUID
+}
 
 type GroupInfoRow struct {
 	ID                 uuid.UUID
@@ -135,8 +142,8 @@ type GroupInfoRow struct {
 	MasterActive       bool
 }
 
-func (q *Queries) GroupInfo(ctx context.Context, id uuid.UUID) (GroupInfoRow, error) {
-	row := q.db.QueryRow(ctx, groupInfo, id)
+func (q *Queries) GroupInfo(ctx context.Context, arg GroupInfoParams) (GroupInfoRow, error) {
+	row := q.db.QueryRow(ctx, groupInfo, arg.ID, arg.UserID)
 	var i GroupInfoRow
 	err := row.Scan(
 		&i.ID,
@@ -160,6 +167,7 @@ SELECT g.id, g.name, g.master_id,
 FROM groups g
 JOIN accounts a ON a.id = g.master_id
 LEFT JOIN follow_links f ON f.group_id = g.id
+WHERE $1::uuid IS NULL OR g.user_id = $1::uuid
 GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active
 ORDER BY LOWER(g.name) ASC, g.id ASC
 `
@@ -176,8 +184,8 @@ type GroupsRow struct {
 	FollowerCount      int32
 }
 
-func (q *Queries) Groups(ctx context.Context) ([]GroupsRow, error) {
-	rows, err := q.db.Query(ctx, groups)
+func (q *Queries) Groups(ctx context.Context, userID *uuid.UUID) ([]GroupsRow, error) {
+	rows, err := q.db.Query(ctx, groups, userID)
 	if err != nil {
 		return nil, err
 	}

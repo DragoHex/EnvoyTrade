@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"time"
 
 	"envoytrade/internal/domain"
 
@@ -286,6 +287,54 @@ func (s *stubStore) AccountOrders(_ context.Context, id uuid.UUID, tab string, p
 		s.ordersDetail.AccountID = id
 	}
 	return s.ordersDetail, nil
+}
+
+func (s *stubStore) BypassAuth() bool {
+	return true
+}
+
+func (s *stubStore) CreateUser(_ context.Context, _ uuid.UUID, _, _, _, _, _ string) error {
+	return nil
+}
+
+func (s *stubStore) GetUserByEmail(_ context.Context, _ string) (*domain.User, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (s *stubStore) GetUserByUsername(_ context.Context, _ string) (*domain.User, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (s *stubStore) GetUserByID(_ context.Context, _ uuid.UUID) (*domain.User, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (s *stubStore) CreateSession(_ context.Context, _ string, _ uuid.UUID, _, _ string, _ time.Time) error {
+	return nil
+}
+
+func (s *stubStore) GetSessionWithUser(_ context.Context, _ string) (*domain.SessionWithUser, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (s *stubStore) TouchSession(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+
+func (s *stubStore) DeleteSession(_ context.Context, _ string) error {
+	return nil
+}
+
+func (s *stubStore) UpdateUserProfile(_ context.Context, _ uuid.UUID, _, _, _, _, _, _ string) error {
+	return nil
+}
+
+func (s *stubStore) UpdateUserPassword(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+func (s *stubStore) DeleteOtherSessions(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
 }
 
 // stubActionEngine is a hand-written fake satisfying httpapi.Engine.

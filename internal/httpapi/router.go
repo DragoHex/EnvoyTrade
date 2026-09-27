@@ -61,6 +61,13 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	mux := http.NewServeMux()
 	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer}
 
+	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)
+	mux.HandleFunc("POST /api/v1/auth/login", h.postLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", h.postLogout)
+	mux.HandleFunc("GET /api/v1/auth/me", h.getMe)
+	mux.HandleFunc("PUT /api/v1/user/profile", h.putUserProfile)
+	mux.HandleFunc("POST /api/v1/user/password", h.postUserPassword)
+
 	mux.HandleFunc("GET /api/v1/groups", h.getGroups)
 	mux.HandleFunc("POST /api/v1/groups", h.postGroup)
 	mux.HandleFunc("GET /api/v1/groups/{id}", h.getGroupDetail)
@@ -79,10 +86,13 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 		mux.Handle("POST /broker-callback", cfg.postbackHandler)
 	}
 
+	var handler http.Handler = mux
+	handler = authMiddleware(handler, store, cfg.logger)
+
 	if cfg.logger != nil {
-		return loggingMiddleware(mux, cfg.logger)
+		return loggingMiddleware(handler, cfg.logger)
 	}
-	return mux
+	return handler
 }
 
 type statusRecorder struct {
@@ -139,6 +149,7 @@ type Store interface {
 	AccountsStore
 	ActionsStore
 	OrdersStore
+	AuthStore
 }
 
 type handlers struct {

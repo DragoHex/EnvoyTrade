@@ -34,8 +34,30 @@ classDiagram
         ReasonInvalidRatio
     }
 
+    class User {
+        +UUID ID
+        +string Email
+        +string Username
+        +string Name
+        +string PasswordHash
+        +string Role
+        +time.Time CreatedAt
+        +time.Time UpdatedAt
+    }
+
+    class Session {
+        +int64 ID
+        +string TokenHash
+        +UUID UserID
+        +string IPAddress
+        +string UserAgent
+        +time.Time ExpiresAt
+        +time.Time LastSeenAt
+    }
+
     class Account {
         +UUID ID
+        +UUID UserID
         +AccountRole Role
         +string Broker
         +string BrokerUserID
@@ -164,6 +186,9 @@ classDiagram
         +bool Enabled
         +string Status
     }
+
+    User "1" --> "0..*" Session : "authenticates via"
+    User "1" --> "0..*" Account : "owns (tenant scoping)"
 
     Account "1" --> "0..*" FollowLink : "master of"
     Account "1" --> "0..1" FollowLink : "follower in"

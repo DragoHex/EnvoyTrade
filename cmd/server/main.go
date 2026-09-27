@@ -152,6 +152,24 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	// Periodic session expiration cleaner
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if deleted, err := store.DeleteExpiredSessions(ctx); err != nil && !errors.Is(err, context.Canceled) {
+					logger.Error("failed to prune expired sessions", "error", err)
+				} else if deleted > 0 {
+					logger.Info("pruned expired sessions", "count", deleted)
+				}
+			}
+		}
+	}()
+
 	syncer := &kite.PortfolioSyncer{
 		Store: store,
 	}

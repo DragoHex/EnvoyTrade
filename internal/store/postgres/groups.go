@@ -24,7 +24,11 @@ func statusFromAccountStatus(accountStatus string) string {
 // Groups lists every group with follower-count and status rollup,
 // for the Dashboard's GroupList (docs/APIs/groups.md).
 func (s *Store) Groups(ctx context.Context) ([]domain.GroupSummary, error) {
-	rows, err := s.queries.Groups(ctx)
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
+	rows, err := s.queries.Groups(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +56,11 @@ func (s *Store) Groups(ctx context.Context) ([]domain.GroupSummary, error) {
 // GroupDetail returns one group's master info plus its member follower rows.
 // Accepts either group ID or master account ID.
 func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDetail, error) {
-	info, err := s.queries.GroupInfo(ctx, id)
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
+	info, err := s.queries.GroupInfo(ctx, sqlcgen.GroupInfoParams{ID: id, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.GroupDetail{}, domain.ErrNotFound
 	}
@@ -92,10 +100,15 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 
 // CreateGroup creates a new group.
 func (s *Store) CreateGroup(ctx context.Context, id uuid.UUID, name string, masterID uuid.UUID) error {
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
 	err := s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
 		ID:       id,
 		Name:     name,
 		MasterID: masterID,
+		UserID:   userID,
 	})
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
@@ -108,7 +121,11 @@ func (s *Store) CreateGroup(ctx context.Context, id uuid.UUID, name string, mast
 
 // UpdateGroup updates group name and/or master ID.
 func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name *string, masterID *uuid.UUID) error {
-	info, err := s.queries.GroupInfo(ctx, id)
+	var userID *uuid.UUID
+	if u, ok := domain.UserFromContext(ctx); ok {
+		userID = &u.ID
+	}
+	info, err := s.queries.GroupInfo(ctx, sqlcgen.GroupInfoParams{ID: id, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrNotFound
 	}

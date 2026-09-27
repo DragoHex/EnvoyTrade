@@ -11,7 +11,7 @@ The core V1 copy-trade pipeline is wired in `cmd/server/main.go`:
 - **Order-callback ingestion** (`internal/kite/callback`, `internal/listener`): Kite postback (`POST /broker-callback`) + WS ticker (`callback.MasterTicker`) → in-memory queue (`internal/queue/memchan`) → store/engine.
 - **Broker adapter & worker pool** (`internal/kite`, `internal/worker`): real `kite.Broker` (`*kiteconnect.Client` wrapper) with per-account static proxy egress (`RESTClientFor`), per-account rate-limiting (~10 orders/s), and timeout retries (up to 3 attempts). Margin/RMS rejections fail immediately.
 - **Reconciliation backstop** (`internal/recon`): periodic REST poller (30–60s) backfilling missed master fills, resolving stuck follower orders (>2 min), and raising drift alerts.
-- **Admin HTTP API** (`internal/httpapi`): dashboard groups, accounts, and rebalance actions.
+- **Admin HTTP API & Authentication** (`internal/httpapi`, `internal/auth`): dashboard groups, accounts, and actions protected behind session authentication (`envoytrade_session` HTTP-only cookie, SHA-256 token hashing, bcrypt cost 12 passwords). Whitelists `POST /broker-callback` and health checks. Automatically scopes account/group queries by tenant via `domain.UserFromContext(ctx)`.
 - **Structured logging** (`slog`): zero-dependency JSON/text logging across server lifecycle, HTTP middleware, engine, worker pool, listener, and recon. Defaults to `/var/log/envoytrade/app.log` (configurable via `LOG_FILE`, `LOG_FORMAT`, `LOG_LEVEL`, `LOG_TO_STDOUT`) with graceful fallback to `stdout` when unprivileged.
 
 Remaining future scope per `docs/PLAN.md`: interactive daily auth web flow / refresh-token daemon, multi-account session management, kill switch panic button, and full metrics/tracing.
@@ -22,7 +22,7 @@ Remaining future scope per `docs/PLAN.md`: interactive daily auth web flow / ref
 go build ./...
 go vet ./...
 
-# Fast unit tests (domain, queue/memchan, worker, kite/fake) — no external deps
+# Fast unit tests (domain, queue/memchan, worker, kite/fake, auth, httpapi) — no external deps
 go test ./...
 
 # Integration tests (store/postgres, engine) require Docker/Podman for testcontainers-go
@@ -34,6 +34,11 @@ go test -tags integration ./internal/engine/... -run TestHandleMasterFill_Redeli
 # Frontend tests & build
 pnpm -C frontend test --run
 pnpm -C frontend build
+
+# Local DB management & test seeding
+make db-up     # start postgres container
+make db-seed   # seed mock users, masters, followers, groups, positions (user: trader@envoytrade.com / password123)
+make db-flush  # truncate all tables
 ```
 
 Docker isn't available in this environment — use **Podman** instead. Testcontainers needs `DOCKER_HOST` pointed at the Podman socket:
