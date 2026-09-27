@@ -12,6 +12,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { LoginPage } from './pages/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { LogoutIcon } from './components/icons'
+import { EnvoyLogo } from './components/EnvoyLogo'
 import './theme.css'
 import './order-details.css'
 
@@ -38,7 +39,10 @@ function TopNav(props: { children?: JSX.Element }) {
     <>
       <Show when={!isNotFound()}>
         <nav>
-          <span>EnvoyTrade</span>
+          <span class="brand-title">
+            <EnvoyLogo size={24} />
+            <span>EnvoyTrade</span>
+          </span>
           <Show when={isAuthenticated()}>
             <A href="/" end>Dashboard</A>
             <A href="/accounts">Accounts</A>

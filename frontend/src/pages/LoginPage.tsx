@@ -2,6 +2,7 @@ import { createSignal, createEffect, Show } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import { useAuth } from '../context/AuthContext'
 import { SyncIcon } from '../components/icons'
+import { EnvoyLogo } from '../components/EnvoyLogo'
 
 export function LoginPage() {
   const { login, register, isAuthenticated } = useAuth()
@@ -71,6 +72,9 @@ export function LoginPage() {
         }}
       >
         <div style={{ 'text-align': 'center', 'margin-bottom': '1.5rem' }}>
+          <div style={{ 'margin-bottom': '1rem', display: 'flex', 'justify-content': 'center' }}>
+            <EnvoyLogo size={48} />
+          </div>
           <h2 style={{ margin: '0 0 0.5rem 0', 'font-size': '1.75rem', color: 'var(--color-text)' }}>
             {mode() === 'login' ? 'Sign In' : 'Create Account'}
           </h2>
