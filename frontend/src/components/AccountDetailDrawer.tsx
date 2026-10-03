@@ -1,5 +1,10 @@
 import { createEffect, createSignal, Show } from 'solid-js'
-import type { Account, CreateAccountRequest } from '../api'
+import {
+  fetchAvailableProxyIPs,
+  type Account,
+  type AvailableProxyIPsResponse,
+  type CreateAccountRequest,
+} from '../api'
 import { BrokerLogo, SUPPORTED_BROKERS } from './BrokerLogo'
 import { isValidIP } from '../utils/ip'
 
@@ -23,6 +28,8 @@ export function AccountDetailDrawer(props: {
   const [apiSecret, setApiSecret] = createSignal('')
   const [password, setPassword] = createSignal('')
   const [totpSecret, setTotpSecret] = createSignal('')
+  const [availableIPs, setAvailableIPs] = createSignal<AvailableProxyIPsResponse>({ ipv4: [], ipv6: [] })
+  const [ipType, setIpType] = createSignal<'na' | 'ipv4' | 'ipv6'>('ipv4')
   const [ip, setIp] = createSignal('')
   const [capitalRatio, setCapitalRatio] = createSignal('')
   const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
@@ -35,23 +42,89 @@ export function AccountDetailDrawer(props: {
     if (!props.open) return
     const a = props.account
     setName(a?.name ?? '')
-    setRole(a?.role ?? 'follower')
+    const currentRole = a?.role ?? 'follower'
+    setRole(currentRole)
     setBroker(a?.broker ?? 'kite')
     setBrokerAccountId(a?.brokerAccountId ?? '')
     setApiKey(a?.apiKey ?? '')
     setApiSecret(a?.apiSecret ?? '')
     setPassword('')
     setTotpSecret('')
-    setIp(a?.ip ?? '')
     setCapitalRatio(a?.capitalRatio ?? '')
     setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
     setMasterId(a?.masterId ?? '')
     setStatus(a?.status ?? 'ok')
     setError(null)
+
+    // Synchronous initial IP state
+    if (a?.ip) {
+      setIp(a.ip)
+      setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
+    } else {
+      setIp('')
+      setIpType(currentRole === 'master' ? 'na' : 'ipv4')
+    }
+
+    // Load available proxy IPs
+    fetchAvailableProxyIPs(a?.id)
+      .then((ips) => {
+        setAvailableIPs(ips)
+        // In create mode for follower, auto-assign first available IP if still empty
+        if (!a && currentRole === 'follower' && !ip()) {
+          if (ips.ipv4 && ips.ipv4.length > 0) {
+            setIpType('ipv4')
+            setIp(ips.ipv4[0].ipAddress)
+          } else if (ips.ipv6 && ips.ipv6.length > 0) {
+            setIpType('ipv6')
+            setIp(ips.ipv6[0].ipAddress)
+          }
+        }
+      })
+      .catch(() => {})
   })
 
   const isFollower = () => role() === 'follower'
   const isEdit = () => props.account != null
+
+  const handleRoleChange = (newRole: 'master' | 'follower') => {
+    setRole(newRole)
+    if (newRole === 'master') {
+      setIpType('na')
+      setIp('')
+    } else {
+      if (ipType() === 'na') {
+        const pool = availableIPs()
+        if (pool.ipv4 && pool.ipv4.length > 0) {
+          setIpType('ipv4')
+          setIp(pool.ipv4[0].ipAddress)
+        } else if (pool.ipv6 && pool.ipv6.length > 0) {
+          setIpType('ipv6')
+          setIp(pool.ipv6[0].ipAddress)
+        } else {
+          setIpType('ipv4')
+          setIp('')
+        }
+      }
+    }
+  }
+
+  const handleIPTypeChange = (type: 'na' | 'ipv4' | 'ipv6') => {
+    setIpType(type)
+    if (type === 'na') {
+      setIp('')
+      return
+    }
+    const pool = availableIPs()
+    const list = type === 'ipv4' ? (pool.ipv4 || []) : (pool.ipv6 || [])
+    const existing = props.account?.ip
+    if (existing && list.some((item) => item.ipAddress === existing)) {
+      setIp(existing)
+    } else if (list.length > 0) {
+      setIp(list[0].ipAddress)
+    } else {
+      setIp('')
+    }
+  }
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
@@ -185,7 +258,7 @@ export function AccountDetailDrawer(props: {
               <select
                 value={role()}
                 disabled={isEdit()}
-                onChange={(e) => setRole(e.currentTarget.value as 'master' | 'follower')}
+                onChange={(e) => handleRoleChange(e.currentTarget.value as 'master' | 'follower')}
               >
                 <option value="follower">Follower</option>
                 <option value="master">Master</option>
@@ -236,12 +309,46 @@ export function AccountDetailDrawer(props: {
               />
             </label>
             <label>
+              IP Type {isFollower() ? '*' : ''}
+              <select
+                aria-label="IP Type"
+                value={ipType()}
+                onChange={(e) => handleIPTypeChange(e.currentTarget.value as 'na' | 'ipv4' | 'ipv6')}
+              >
+                <Show when={!isFollower()}>
+                  <option value="na">NA (Direct / No Proxy)</option>
+                </Show>
+                <option value="ipv4">IPv4</option>
+                <option value="ipv6">IPv6</option>
+              </select>
+            </label>
+            <label>
               IP Address {isFollower() ? '*' : '(Optional)'}
               <input
                 value={ip()}
-                onInput={(e) => setIp(e.currentTarget.value)}
-                placeholder="e.g. 192.168.1.100 or 2001:db8::1"
+                onInput={(e) => {
+                  setIp(e.currentTarget.value)
+                  const val = e.currentTarget.value.trim()
+                  if (!val) {
+                    if (!isFollower()) setIpType('na')
+                  } else if (val.includes(':')) {
+                    setIpType('ipv6')
+                  } else {
+                    setIpType('ipv4')
+                  }
+                }}
+                placeholder={ipType() === 'na' ? 'None (Direct connection)' : 'e.g. 148.113.41.42 or 2402:1f00:...'}
               />
+              <Show when={ipType() !== 'na' && !ip()}>
+                <span style={{ color: '#ef4444', 'font-size': '0.75rem', 'margin-top': '0.25rem', display: 'block' }}>
+                  No available {ipType().toUpperCase()} address in proxy pool.
+                </span>
+              </Show>
+              <Show when={ip()}>
+                <span style={{ color: '#059669', 'font-size': '0.75rem', 'margin-top': '0.25rem', display: 'block' }}>
+                  Assigned {ipType() === 'ipv6' ? 'IPv6' : 'IPv4'} proxy IP: <strong>{ip()}</strong>
+                </span>
+              </Show>
             </label>
             <Show when={isFollower()}>
               <label>

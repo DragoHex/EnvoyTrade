@@ -1,5 +1,6 @@
-import { createSignal, createResource, createMemo, Show, For } from 'solid-js'
+import { createSignal, createResource, createMemo, Show, Index, onMount, onCleanup } from 'solid-js'
 import { getAccountOrders } from '../api'
+import { isOrdersDataEqual } from '../utils/ordersDiff'
 import {
   ExitSquareIcon,
   ProhibitIcon,
@@ -52,8 +53,9 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   const [page, setPage] = createSignal<number>(1)
   const [holdingSortField, setHoldingSortField] = createSignal<'instrument' | 'sellableQuantity'>('instrument')
   const [holdingSortDir, setHoldingSortDir] = createSignal<'asc' | 'desc'>('asc')
+  const [isPolling, setIsPolling] = createSignal<boolean>(false)
 
-  const [ordersData] = createResource(
+  const [ordersData, { mutate }] = createResource(
     () => ({
       accountId: props.accountId,
       tab: activeTab(),
@@ -62,6 +64,28 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
     }),
     ({ accountId, tab, page, limit }) => getAccountOrders(accountId, tab, page, limit),
   )
+
+  onMount(() => {
+    const timer = setInterval(async () => {
+      if (activeTab() === 'holdings') return
+      try {
+        setIsPolling(true)
+        const currentTab = activeTab()
+        const currentPage = page()
+        const fresh = await getAccountOrders(props.accountId, currentTab, currentPage, 10)
+        if (activeTab() === currentTab && page() === currentPage) {
+          if (!isOrdersDataEqual(ordersData(), fresh, currentTab)) {
+            mutate(fresh)
+          }
+        }
+      } catch (err) {
+        // Silently ignore background poll errors
+      } finally {
+        setIsPolling(false)
+      }
+    }, 3000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   function switchTab(tab: OrderTabId) {
     setActiveTab(tab)
@@ -349,14 +373,14 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
         <Show when={ordersData()}>
           {/* Tab 1: Open Position */}
           <Show when={activeTab() === 'open_positions'}>
-            <div class={`order-table-container ${ordersData.loading ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
                     <th style={{ width: '9%' }}>Product</th>
                     <th style={{ width: '27%' }}>Instrument</th>
                     <th class="text-right" style={{ width: '11%' }}>QTY</th>
-                    <th style={{ width: '16%' }}>Avg Price (B/S)</th>
+                    <th style={{ width: '16%' }}>Avg Price</th>
                     <th class="text-right" style={{ width: '12%' }}>LTP</th>
                     <th class="text-right" style={{ width: '17%' }}>MTM</th>
                     <th class="text-center" style={{ width: '8%' }}>Action</th>
@@ -373,32 +397,32 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                       </tr>
                     }
                   >
-                    <For each={openPositions()}>
+                    <Index each={openPositions()}>
                       {(pos) => (
                         <tr>
                           <td>
-                            <span class="product-badge">{pos.product}</span>
+                            <span class="product-badge">{pos().product}</span>
                           </td>
-                          <td class="font-medium">{pos.instrument}</td>
+                          <td class="font-medium">{pos().instrument}</td>
                           <td
                             class={`text-right font-mono ${
-                              pos.qty > 0 ? 'text-positive' : pos.qty < 0 ? 'text-negative' : ''
+                              pos().qty > 0 ? 'text-positive' : pos().qty < 0 ? 'text-negative' : ''
                             }`}
                           >
-                            {pos.qty}
+                            {pos().qty}
                           </td>
-                          <td class="font-mono text-muted">{pos.avgPrice}</td>
-                          <td class="text-right font-mono">{formatPrice(pos.ltp)}</td>
+                          <td class="font-mono text-muted">{pos().avgPrice}</td>
+                          <td class="text-right font-mono">{formatPrice(pos().ltp)}</td>
                           <td
                             class={`text-right font-mono font-medium ${
-                              toNumber(pos.mtm) > 0
+                              toNumber(pos().mtm) > 0
                                 ? 'text-positive'
-                                : toNumber(pos.mtm) < 0
+                                : toNumber(pos().mtm) < 0
                                 ? 'text-negative'
                                 : ''
                             }`}
                           >
-                            {formatCurrency(pos.mtm)}
+                            {formatCurrency(pos().mtm)}
                           </td>
                           <td class="text-center">
                             <button
@@ -412,7 +436,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           </td>
                         </tr>
                       )}
-                    </For>
+                    </Index>
                   </Show>
                 </tbody>
               </table>
@@ -421,7 +445,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 2: Closed Position */}
           <Show when={activeTab() === 'closed_positions'}>
-            <div class={`order-table-container ${ordersData.loading ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -429,7 +453,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     <th style={{ width: '36%' }}>Instrument</th>
                     <th style={{ width: '20%' }}>Avg Price (B/S)</th>
                     <th class="text-right" style={{ width: '14%' }}>LTP</th>
-                    <th class="text-right" style={{ width: '18%' }}>MTM</th>
+                    <th class="text-right" style={{ width: '18%' }}>P&L</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -443,29 +467,32 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                       </tr>
                     }
                   >
-                    <For each={closedPositions()}>
-                      {(pos) => (
-                        <tr>
-                          <td>
-                            <span class="product-badge">{pos.product}</span>
-                          </td>
-                          <td class="font-medium">{pos.instrument}</td>
-                          <td class="font-mono text-muted">{pos.avgPrice}</td>
-                          <td class="text-right font-mono">{formatPrice(pos.ltp)}</td>
-                          <td
-                            class={`text-right font-mono font-medium ${
-                              toNumber(pos.mtm) > 0
-                                ? 'text-positive'
-                                : toNumber(pos.mtm) < 0
-                                ? 'text-negative'
-                                : ''
-                            }`}
-                          >
-                            {formatCurrency(pos.mtm)}
-                          </td>
-                        </tr>
-                      )}
-                    </For>
+                    <Index each={closedPositions()}>
+                      {(pos) => {
+                        const val = pos().pnl !== undefined ? pos().pnl : pos().mtm
+                        return (
+                          <tr>
+                            <td>
+                              <span class="product-badge">{pos().product}</span>
+                            </td>
+                            <td class="font-medium">{pos().instrument}</td>
+                            <td class="font-mono text-muted">{pos().avgPrice}</td>
+                            <td class="text-right font-mono">{formatPrice(pos().ltp)}</td>
+                            <td
+                              class={`text-right font-mono font-medium ${
+                                toNumber(val) > 0
+                                  ? 'text-positive'
+                                  : toNumber(val) < 0
+                                  ? 'text-negative'
+                                  : ''
+                              }`}
+                            >
+                              {formatCurrency(val)}
+                            </td>
+                          </tr>
+                        )
+                      }}
+                    </Index>
                   </Show>
                 </tbody>
               </table>
@@ -474,7 +501,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 3: Holding */}
           <Show when={activeTab() === 'holdings'}>
-            <div class={`order-table-container ${ordersData.loading ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -519,23 +546,23 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                       </tr>
                     }
                   >
-                    <For each={sortedHoldings()}>
+                    <Index each={sortedHoldings()}>
                       {(h) => (
                         <tr>
-                          <td class="font-medium">{h.instrument}</td>
-                          <td class="text-right font-mono">{formatNumber(h.sellableQuantity)}</td>
-                          <td class="text-right font-mono">{formatPrice(h.buyAveragePrice)}</td>
-                          <td class="text-right font-mono">{formatPrice(h.ltp)}</td>
+                          <td class="font-medium">{h().instrument}</td>
+                          <td class="text-right font-mono">{formatNumber(h().sellableQuantity)}</td>
+                          <td class="text-right font-mono">{formatPrice(h().buyAveragePrice)}</td>
+                          <td class="text-right font-mono">{formatPrice(h().ltp)}</td>
                           <td
                             class={`text-right font-mono font-medium ${
-                              toNumber(h.pnl) > 0
+                              toNumber(h().pnl) > 0
                                 ? 'text-positive'
-                                : toNumber(h.pnl) < 0
+                                : toNumber(h().pnl) < 0
                                 ? 'text-negative'
                                 : ''
                             }`}
                           >
-                            {formatCurrency(h.pnl)}
+                            {formatCurrency(h().pnl)}
                           </td>
                           <td class="text-center">
                             <button
@@ -549,7 +576,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           </td>
                         </tr>
                       )}
-                    </For>
+                    </Index>
                   </Show>
                 </tbody>
               </table>
@@ -558,7 +585,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 4: Open Order */}
           <Show when={activeTab() === 'open_orders'}>
-            <div class={`order-table-container ${ordersData.loading ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -583,24 +610,24 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                       </tr>
                     }
                   >
-                    <For each={openOrders()}>
+                    <Index each={openOrders()}>
                       {(ord) => (
                         <tr>
                           <td>
-                            <span class="product-badge">{ord.product ?? 'CNC'}</span>
+                            <span class="product-badge">{ord().product ?? 'CNC'}</span>
                           </td>
-                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
-                          <td class="font-medium">{ord.instrument}</td>
-                          <td class="text-right font-mono">{ord.quantity}</td>
-                          <td class="text-right font-mono">{formatPrice(ord.triggerPrice)}</td>
-                          <td class="text-right font-mono">{formatPrice(ord.limitPrice)}</td>
+                          <td class="font-mono text-sm text-muted">{ord().time ?? '—'}</td>
+                          <td class="font-medium">{ord().instrument}</td>
+                          <td class="text-right font-mono">{ord().quantity}</td>
+                          <td class="text-right font-mono">{formatPrice(ord().triggerPrice)}</td>
+                          <td class="text-right font-mono">{formatPrice(ord().limitPrice)}</td>
                           <td class="text-center">
                             <span
                               class={`type-badge ${
-                                ord.type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
+                                ord().type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
                               }`}
                             >
-                              {ord.type}
+                              {ord().type}
                             </span>
                           </td>
                           <td class="text-center">
@@ -615,7 +642,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           </td>
                         </tr>
                       )}
-                    </For>
+                    </Index>
                   </Show>
                 </tbody>
               </table>
@@ -624,7 +651,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 5: Closed Order */}
           <Show when={activeTab() === 'closed_orders'}>
-            <div class={`order-table-container ${ordersData.loading ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -647,28 +674,28 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                       </tr>
                     }
                   >
-                    <For each={closedOrders()}>
+                    <Index each={closedOrders()}>
                       {(ord) => (
                         <tr>
                           <td>
-                            <span class="product-badge">{ord.product ?? 'CNC'}</span>
+                            <span class="product-badge">{ord().product ?? 'CNC'}</span>
                           </td>
-                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
-                          <td class="font-medium">{ord.instrument}</td>
-                          <td class="text-right font-mono">{ord.quantity}</td>
-                          <td class="text-right font-mono">{formatPrice(ord.price)}</td>
+                          <td class="font-mono text-sm text-muted">{ord().time ?? '—'}</td>
+                          <td class="font-medium">{ord().instrument}</td>
+                          <td class="text-right font-mono">{ord().quantity}</td>
+                          <td class="text-right font-mono">{formatPrice(ord().price)}</td>
                           <td class="text-center">
                             <span
                               class={`type-badge ${
-                                ord.type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
+                                ord().type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
                               }`}
                             >
-                              {ord.type}
+                              {ord().type}
                             </span>
                           </td>
                         </tr>
                       )}
-                    </For>
+                    </Index>
                   </Show>
                 </tbody>
               </table>
@@ -677,7 +704,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 6: Rejected Order */}
           <Show when={activeTab() === 'rejected_orders'}>
-            <div class={`order-table-container ${ordersData.loading ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -699,25 +726,25 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                       </tr>
                     }
                   >
-                    <For each={rejectedOrders()}>
+                    <Index each={rejectedOrders()}>
                       {(ord) => (
                         <tr>
-                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
-                          <td class="font-medium">{ord.instrument}</td>
-                          <td class="text-right font-mono">{ord.quantity}</td>
+                          <td class="font-mono text-sm text-muted">{ord().time ?? '—'}</td>
+                          <td class="font-medium">{ord().instrument}</td>
+                          <td class="text-right font-mono">{ord().quantity}</td>
                           <td class="text-center">
                             <span
                               class={`type-badge ${
-                                ord.type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
+                                ord().type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
                               }`}
                             >
-                              {ord.type}
+                              {ord().type}
                             </span>
                           </td>
-                          <td class="text-negative font-medium">{ord.reason ?? 'Rejected'}</td>
+                          <td class="text-negative font-medium">{ord().reason ?? 'Rejected'}</td>
                         </tr>
                       )}
-                    </For>
+                    </Index>
                   </Show>
                 </tbody>
               </table>
@@ -736,7 +763,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                 <button
                   type="button"
                   class="pagination-btn"
-                  disabled={pagination().page <= 1 || ordersData.loading}
+                  disabled={pagination().page <= 1 || (ordersData.loading && !isPolling())}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   aria-label="Previous page"
                 >
@@ -749,7 +776,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                 <button
                   type="button"
                   class="pagination-btn"
-                  disabled={pagination().page >= pagination().totalPages || ordersData.loading}
+                  disabled={pagination().page >= pagination().totalPages || (ordersData.loading && !isPolling())}
                   onClick={() => setPage((p) => Math.min(pagination().totalPages, p + 1))}
                   aria-label="Next page"
                 >

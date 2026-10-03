@@ -8,6 +8,8 @@ import {
   updatePassword,
   getGroups,
   setOnUnauthorized,
+  fetchProxyIPs,
+  fetchAvailableProxyIPs,
 } from './api'
 
 describe('api client', () => {
@@ -217,5 +219,34 @@ describe('api client', () => {
     await expect(
       login({ email: 'bad@example.com', password: 'wrong' }),
     ).rejects.toThrow('invalid email or password')
+  })
+
+  it('fetchProxyIPs sends GET /api/v1/proxy-ips', async () => {
+    const fakeIPs = [
+      { ipAddress: '148.113.41.41', ipType: 'ipv4', host: 'dc46-mum-01.algoip.in', port: 443 },
+    ]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeIPs), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+
+    const result = await fetchProxyIPs()
+    expect(result).toEqual(fakeIPs)
+    const [url] = (globalThis.fetch as any).mock.calls[0]
+    expect(url).toBe('/api/v1/proxy-ips')
+  })
+
+  it('fetchAvailableProxyIPs sends GET /api/v1/proxy-ips/available with optional accountId', async () => {
+    const fakeAvailable = {
+      ipv4: [{ ipAddress: '148.113.41.42', ipType: 'ipv4' }],
+      ipv6: [{ ipAddress: '2402:1f00::1', ipType: 'ipv6' }],
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeAvailable), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+
+    const result = await fetchAvailableProxyIPs('acc-123')
+    expect(result).toEqual(fakeAvailable)
+    const [url] = (globalThis.fetch as any).mock.calls[0]
+    expect(url).toBe('/api/v1/proxy-ips/available?accountId=acc-123')
   })
 })

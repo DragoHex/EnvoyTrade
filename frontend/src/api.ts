@@ -77,6 +77,13 @@ export interface GroupDetail {
   masterAccountId: string
   masterName?: string
   masterActive: boolean
+  masterNetQty?: number
+  masterOpenPositionsCount?: number
+  masterClosedPositionsCount?: number
+  masterOpenOrdersCount?: number
+  masterTotalMtm?: number | string
+  masterAvailableCash?: number | string
+  masterAvailableMargin?: number | string
   followers: GroupFollower[]
 }
 
@@ -344,6 +351,7 @@ export interface PositionItem {
   avgPrice: string
   ltp: number | string
   mtm: number | string
+  pnl?: number | string
   action?: string
 }
 
@@ -396,3 +404,31 @@ export function getAccountOrders(
   const qs = params.toString() ? `?${params.toString()}` : ''
   return apiFetch(`${BASE}/accounts/${accountId}/orders${qs}`).then((r) => json(r))
 }
+
+export interface ProxyIP {
+  ipAddress: string
+  ipType: 'ipv4' | 'ipv6'
+  host: string
+  port: number
+  validFrom: string
+  validUntil: string
+  plan: string
+  isAssigned?: boolean
+  assignedAccountId?: string | null
+  assignedAccountName?: string | null
+}
+
+export interface AvailableProxyIPsResponse {
+  ipv4: ProxyIP[]
+  ipv6: ProxyIP[]
+}
+
+export function fetchProxyIPs(): Promise<ProxyIP[]> {
+  return apiFetch(`${BASE}/proxy-ips`).then((r) => json(r))
+}
+
+export function fetchAvailableProxyIPs(accountId?: string): Promise<AvailableProxyIPsResponse> {
+  const qs = accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''
+  return apiFetch(`${BASE}/proxy-ips/available${qs}`).then((r) => json(r))
+}
+
