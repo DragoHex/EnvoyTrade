@@ -21,6 +21,13 @@ export function GroupCard(props: {
           brokerAccountId: props.detail.masterAccountId,
           status: props.status,
           active: props.detail.masterActive,
+          netQty: props.detail.masterNetQty,
+          openPositionsCount: props.detail.masterOpenPositionsCount,
+          closedPositionsCount: props.detail.masterClosedPositionsCount,
+          openOrdersCount: props.detail.masterOpenOrdersCount,
+          totalMtm: props.detail.masterTotalMtm,
+          availableCash: props.detail.masterAvailableCash,
+          availableMargin: props.detail.masterAvailableMargin,
         }}
         followers={props.detail.followers}
         onToggleCopy={props.onToggleCopy}

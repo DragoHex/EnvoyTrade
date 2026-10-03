@@ -872,6 +872,87 @@ tr[data-testid='master-row'] td {
   white-space: nowrap;
 }
 
+/* Dashboard AccountTable layout stability (locked to collapsed form) */
+.account-table-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.account-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.account-table th {
+  white-space: nowrap;
+}
+
+.account-table .col-toggle {
+  width: 4%;
+  min-width: 44px;
+}
+
+.account-table .col-name {
+  width: 10.5%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-table .col-account-id {
+  width: 14%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-table .col-net-qty {
+  width: 5.5%;
+  white-space: nowrap;
+}
+
+.account-table .col-positions {
+  width: 9.5%;
+  white-space: nowrap;
+}
+
+.account-table .col-open-orders {
+  width: 8.5%;
+  white-space: nowrap;
+}
+
+.account-table .col-mtm {
+  width: 7%;
+  white-space: nowrap;
+}
+
+.account-table .col-cash {
+  width: 9.5%;
+  white-space: nowrap;
+}
+
+.account-table .col-margin {
+  width: 11%;
+  white-space: nowrap;
+}
+
+.account-table .col-status {
+  width: 5.5%;
+  white-space: nowrap;
+}
+
+.account-table .col-actions {
+  width: 10.5%;
+  white-space: nowrap;
+}
+
+.account-table .col-expand {
+  width: 4.5%;
+  text-align: right;
+  padding-right: 12px;
+}
+
 /* Broker logo presentation */
 .broker-logo-wrap {
   display: inline-flex;

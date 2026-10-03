@@ -75,7 +75,7 @@ export function AccountRow(props: {
         data-disabled={!!props.actionsDisabled}
         class={expanded() ? 'row-expanded' : ''}
       >
-        <td>
+        <td class="col-toggle">
           <Show when={!props.isMaster}>
             <CopyToggle
               enabled={props.follower.enabled}
@@ -96,22 +96,22 @@ export function AccountRow(props: {
             </button>
           </Show>
         </td>
-        <td>{props.follower.name || '—'}</td>
-        <td>{props.follower.brokerAccountId}</td>
-        <td>{summary() ? summary()!.netQty : (props.follower.netQty ?? '—')}</td>
-        <td>
+        <td class="col-name" title={props.follower.name || '—'}>{props.follower.name || '—'}</td>
+        <td class="col-account-id" title={props.follower.brokerAccountId}>{props.follower.brokerAccountId}</td>
+        <td class="col-net-qty">{summary() ? summary()!.netQty : (props.follower.netQty ?? '—')}</td>
+        <td class="col-positions">
           {summary()
             ? `${summary()!.openPositionsCount ?? 0}/${summary()!.closedPositionsCount ?? 0}`
             : (props.follower.openPositionsCount != null ? `${props.follower.openPositionsCount}/${props.follower.closedPositionsCount ?? 0}` : '—')}
         </td>
-        <td>{summary() ? (summary()!.pendingOrdersCount ?? 0) : (props.follower.openOrdersCount ?? '—')}</td>
-        <td>{summary() ? formatCurrency(summary()!.totalMtm) : (props.follower.totalMtm != null ? formatCurrency(props.follower.totalMtm) : '—')}</td>
-        <td>{summary() && summary()!.availableCash != null ? formatCurrency(summary()!.availableCash) : (props.follower.availableCash != null ? formatCurrency(props.follower.availableCash) : '—')}</td>
-        <td>{summary() && summary()!.availableMargin != null ? formatCurrency(summary()!.availableMargin) : (props.follower.availableMargin != null ? formatCurrency(props.follower.availableMargin) : '—')}</td>
-        <td>
+        <td class="col-open-orders">{summary() ? (summary()!.pendingOrdersCount ?? 0) : (props.follower.openOrdersCount ?? '—')}</td>
+        <td class="col-mtm">{summary() ? formatCurrency(summary()!.totalMtm) : (props.follower.totalMtm != null ? formatCurrency(props.follower.totalMtm) : '—')}</td>
+        <td class="col-cash">{summary() && summary()!.availableCash != null ? formatCurrency(summary()!.availableCash) : (props.follower.availableCash != null ? formatCurrency(props.follower.availableCash) : '—')}</td>
+        <td class="col-margin">{summary() && summary()!.availableMargin != null ? formatCurrency(summary()!.availableMargin) : (props.follower.availableMargin != null ? formatCurrency(props.follower.availableMargin) : '—')}</td>
+        <td class="col-status">
           <StatusDot status={props.follower.status} />
         </td>
-        <td>
+        <td class="col-actions">
           <div class="row-actions-group">
             <button
               type="button"
@@ -145,7 +145,7 @@ export function AccountRow(props: {
             </button>
           </div>
         </td>
-        <td class="row-expand-cell">
+        <td class="col-expand row-expand-cell">
           <button
             type="button"
             class={`row-expand-toggle-btn ${expanded() ? 'row-expand-open' : ''}`}
