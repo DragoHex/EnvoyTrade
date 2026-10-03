@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AccountDetailDrawer } from './AccountDetailDrawer'
 import type { Account } from '../api'
+import * as api from '../api'
 
 const master: Account = {
   id: 'm1',
@@ -246,5 +247,71 @@ describe('AccountDetailDrawer', () => {
     ))
 
     expect(screen.getByRole('alert')).toHaveTextContent('Authentication required: Invalid 2FA TOTP code')
+  })
+
+  it('create mode, role=follower with available proxy IPs: auto-assigns IPv4, and switches to IPv6 on dropdown select', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '148.113.41.42',
+          ipType: 'ipv4',
+          host: 'dc46-mum-01.algoip.in',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'QUARTERLY',
+        },
+      ],
+      ipv6: [
+        {
+          ipAddress: '2402:1f00:8302:91e6:6d08:9249:eca8:8252',
+          ipType: 'ipv6',
+          host: 'dc46-mum-01.algoip.in',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'QUARTERLY',
+        },
+      ],
+    })
+
+    render(() => (
+      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    // Wait for async fetch to populate IP
+    const ipInput = await screen.findByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('148.113.41.42')
+
+    // Switch to IPv6
+    const ipTypeSelect = screen.getByLabelText('IP Type')
+    await userEvent.selectOptions(ipTypeSelect, 'ipv6')
+    expect(ipInput).toHaveValue('2402:1f00:8302:91e6:6d08:9249:eca8:8252')
+  })
+
+  it('create mode, role=master: shows NA option in IP Type and sets IP to empty', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [{ ipAddress: '148.113.41.42', ipType: 'ipv4', host: 'dc46-mum-01.algoip.in', port: 443, validFrom: '', validUntil: '', plan: 'QUARTERLY' }],
+      ipv6: [],
+    })
+
+    render(() => (
+      <AccountDetailDrawer open account={null} masters={[]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
+    const ipTypeSelect = screen.getByLabelText('IP Type')
+    expect(ipTypeSelect).toHaveValue('na')
+
+    const ipInput = screen.getByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('')
+
+    // Selecting IPv4 sets the available IPv4
+    await userEvent.selectOptions(ipTypeSelect, 'ipv4')
+    expect(ipInput).toHaveValue('148.113.41.42')
+
+    // Selecting NA clears it
+    await userEvent.selectOptions(ipTypeSelect, 'na')
+    expect(ipInput).toHaveValue('')
   })
 })

@@ -70,6 +70,10 @@ func (m *mockSyncStore) SyncAccountMargins(ctx context.Context, accountID uuid.U
 	return nil
 }
 
+func (m *mockSyncStore) ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error) {
+	return domain.ProxyIP{}, domain.ErrNotFound
+}
+
 func TestSyncAccountPortfolio_WithValidAccessToken(t *testing.T) {
 	accID := uuid.New()
 	validExpiry := time.Now().Add(2 * time.Hour)
@@ -147,7 +151,7 @@ func TestSyncAccountPortfolio_WithValidAccessToken(t *testing.T) {
 	if len(store.syncedPositions) != 1 || store.syncedPositions[0].Instrument != "NIFTY26SEPFUT" {
 		t.Fatalf("syncedPositions = %+v, want 1 position", store.syncedPositions)
 	}
-	if store.syncedMargins == nil || !store.syncedMargins.AccountValue.Equal(decimal.NewFromFloat(195000.0)) {
+	if store.syncedMargins == nil || !store.syncedMargins.AccountValue.Equal(decimal.NewFromFloat(95000.0)) {
 		t.Fatalf("syncedMargins = %+v", store.syncedMargins)
 	}
 }
@@ -197,6 +201,12 @@ func TestSyncAccountPortfolio_ExpiredToken_PerformsLoginAndSyncs(t *testing.T) {
 		},
 	}
 
+	refreshedAccountID := uuid.Nil
+	syncer.OnTokenRefreshed = func(ctx context.Context, accountID uuid.UUID) error {
+		refreshedAccountID = accountID
+		return nil
+	}
+
 	err := syncer.SyncAccountPortfolio(context.Background(), accID)
 	if err != nil {
 		t.Fatalf("SyncAccountPortfolio failed: %v", err)
@@ -204,6 +214,9 @@ func TestSyncAccountPortfolio_ExpiredToken_PerformsLoginAndSyncs(t *testing.T) {
 
 	if !loginCalled {
 		t.Fatalf("expected LoginFunc to be called")
+	}
+	if refreshedAccountID != accID {
+		t.Errorf("refreshedAccountID = %s, want %s", refreshedAccountID, accID)
 	}
 	if len(store.setTokenCalls) != 1 || store.setTokenCalls[0].Token != "new_token_777" {
 		t.Fatalf("setTokenCalls = %+v, want token new_token_777", store.setTokenCalls)

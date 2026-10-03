@@ -39,7 +39,7 @@ func (q *Queries) CountOpenFollowerOrders(ctx context.Context, followerID uuid.U
 
 const countRejectedFollowerOrders = `-- name: CountRejectedFollowerOrders :one
 SELECT COUNT(*) FROM follower_orders fo
-WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered') OR fo.intended_qty = 0)
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
 `
 
 func (q *Queries) CountRejectedFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error) {
@@ -408,7 +408,7 @@ SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
 JOIN master_fills mf ON fo.master_fill_id = mf.id
-WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered') OR fo.intended_qty = 0)
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3
 `
@@ -494,7 +494,7 @@ SELECT id, master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size,
        placed_qty, broker_order_id, terminal_status, filled_qty, average_price, attempt_count,
        last_error, created_at, updated_at
 FROM follower_orders
-WHERE terminal_status IS NULL AND created_at < $1
+WHERE terminal_status IS NULL AND intended_qty > 0 AND created_at < $1
 ORDER BY id ASC
 `
 

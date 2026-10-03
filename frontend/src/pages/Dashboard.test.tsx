@@ -115,4 +115,50 @@ describe('Dashboard', () => {
     expect(accountsLink).toHaveAttribute('href', '/accounts')
     expect(screen.getByTestId('order-empty-state')).toBeInTheDocument()
   })
+
+  it('renders master and follower metrics auto-filled on initial page load without expanding', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
+      masterActive: true,
+      masterNetQty: 200,
+      masterOpenPositionsCount: 3,
+      masterClosedPositionsCount: 1,
+      masterOpenOrdersCount: 2,
+      masterTotalMtm: 4500.5,
+      masterAvailableCash: 100000,
+      masterAvailableMargin: 250000,
+      followers: [
+        {
+          accountId: 'f1',
+          name: 'Follower 1',
+          brokerAccountId: 'ZY5678',
+          enabled: true,
+          status: 'ok',
+          netQty: 100,
+          openPositionsCount: 2,
+          closedPositionsCount: 1,
+          openOrdersCount: 1,
+          totalMtm: 2250.25,
+          availableCash: 50000,
+          availableMargin: 125000,
+        },
+      ],
+    })
+
+    render(() => <Dashboard />)
+
+    expect(await screen.findByText('200')).toBeInTheDocument()
+    expect(screen.getByText('3/1')).toBeInTheDocument()
+    expect(screen.getByText('100')).toBeInTheDocument()
+    expect(screen.getByText('2/1')).toBeInTheDocument()
+    expect(screen.getByText('₹4,500.50')).toBeInTheDocument()
+    expect(screen.getByText('₹2,250.25')).toBeInTheDocument()
+  })
 })

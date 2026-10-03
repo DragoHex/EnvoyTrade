@@ -26,21 +26,20 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
     }
   }
 
-  // Show (not Suspense) here on purpose: createResource keeps the last
-  // resolved value while refetch() is in flight, and Show only cares about
-  // that value being truthy — so a refetch after a button click updates the
-  // table in place instead of re-suspending and flashing the whole card.
+  // Non-keyed Show (not keyed function child, and not Suspense) here on purpose:
+  // createResource keeps the last resolved value while refetch() is in flight,
+  // and non-keyed Show evaluates truthiness without disposing or remounting children,
+  // so a refetch after an action updates the table in place instead of remounting
+  // and closing any opened dropdowns or expansion rows.
   return (
     <Show when={detail()} fallback={<LoadingTimeout><GroupCardSkeleton /></LoadingTimeout>}>
-      {(d) => (
-        <GroupCard
-          detail={d()}
-          status={props.status}
-          onToggleCopy={onToggleCopy}
-          onToggleMasterActive={onToggleMasterActive}
-          onAction={onAction}
-        />
-      )}
+      <GroupCard
+        detail={detail()!}
+        status={props.status}
+        onToggleCopy={onToggleCopy}
+        onToggleMasterActive={onToggleMasterActive}
+        onAction={onAction}
+      />
     </Show>
   )
 }
@@ -48,29 +47,22 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
 export function Dashboard() {
   const [groups] = createResource(getGroups)
 
-  // Show (not Suspense) here for the same reason as GroupCardLoader below:
-  // a <Suspense> boundary re-suspends — hiding everything inside it, not
-  // just the one card whose resource refetched — for ANY resource read in
-  // its subtree, including every GroupCardLoader's per-group resource. That
-  // turned one button's refetch into a flash of the whole dashboard.
   return (
     <div class="page">
       <h1>Dashboard</h1>
       <Show when={groups()} fallback={<LoadingTimeout><GroupsSkeleton /></LoadingTimeout>}>
-        {(gs) => (
-          <Show
-            when={gs().length > 0}
-            fallback={
-              <div class="dashboard-empty-card">
-                <EmptyState>
-                  No group added. Please go to <a href="/accounts" class="empty-state-link">accounts</a> to add groups
-                </EmptyState>
-              </div>
-            }
-          >
-            <For each={gs()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} />}</For>
-          </Show>
-        )}
+        <Show
+          when={(groups()?.length ?? 0) > 0}
+          fallback={
+            <div class="dashboard-empty-card">
+              <EmptyState>
+                No group added. Please go to <a href="/accounts" class="empty-state-link">accounts</a> to add groups
+              </EmptyState>
+            </div>
+          }
+        >
+          <For each={groups()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} />}</For>
+        </Show>
       </Show>
     </div>
   )

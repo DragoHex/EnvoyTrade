@@ -66,12 +66,12 @@ func TestDecrypt_TamperedCiphertext(t *testing.T) {
 		t.Fatalf("Encrypt failed: %v", err)
 	}
 
-	// Corrupt one character in ciphertext
+	// Corrupt first character of ciphertext
 	tampered := []byte(enc)
-	if tampered[len(tampered)-2] == 'A' {
-		tampered[len(tampered)-2] = 'B'
+	if tampered[0] == 'A' {
+		tampered[0] = 'B'
 	} else {
-		tampered[len(tampered)-2] = 'A'
+		tampered[0] = 'A'
 	}
 
 	_, err = crypto.Decrypt(string(tampered))

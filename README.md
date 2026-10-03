@@ -60,6 +60,7 @@ flowchart TD
 - **Worker Isolation**: Each follower operates within its own dedicated goroutine and buffered dispatch channel. Dispatch is non-blocking: if a follower's queue fills up or its broker connection hangs, it is marked as dead-lettered without delaying or blocking execution for other followers.
 - **Dedicated Egress Proxy Support**: Egress requests to Kite Connect can be routed through per-account HTTP proxies, satisfying broker static-IP authorization requirements.
 - **Dual-Path Ingestion with Reconnect Catch-Up**: Trades are ingested via Kite WebSocket ticker (for sub-millisecond master detection) and HTTP postback webhooks (with HMAC verification per account). On WebSocket reconnects, an automated catch-up hook queries the Kite REST API to ingest any executions missed during disconnection.
+- **Database-Backed Authentication & Multi-Tenant Scoping**: Platform access requires database session authentication via `envoytrade_session` HTTP-only cookies and bcrypt (cost 12) passwords. All HTTP endpoints are strictly isolated to the authenticated user via context-driven store scoping (`UserFromContext(ctx)`) so accounts, groups, and orders cannot be viewed or manipulated across tenants.
 - **Reconciliation Backstop**: A background reconciler periodically audits order and position states between the local database and Kite Connect to resolve drift and detect out-of-band updates.
 
 ---
@@ -178,15 +179,44 @@ The Groups view provides group-level governance over trade copy links between ma
 
 ---
 
-### 1. Database Setup
+### 1. Database Setup & Seeding
 
-Create a PostgreSQL database and configure the connection string:
+Start PostgreSQL via Podman / Docker:
 
 ```bash
-export DATABASE_URL="postgres://postgres:postgres@localhost:5432/envoytrade?sslmode=disable"
+make db-up
 ```
 
-Database migrations are embedded in the Go binary (`internal/store/postgres/migrations/`) and are applied automatically upon server startup.
+Or configure an existing PostgreSQL instance:
+
+```bash
+export DATABASE_URL="postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable"
+```
+
+Database migrations are embedded in the Go binary (`internal/store/postgres/migrations/`) and apply automatically on server startup.
+
+#### Seeding Mock Data for Testing
+
+To populate the database with representative test users, master accounts, follower groups, positions, holdings, margins, and fills:
+
+```bash
+make db-seed
+```
+
+To wipe and reset all database tables:
+
+```bash
+make db-flush
+```
+
+#### Mock Login Credentials
+
+When testing locally, use these pre-seeded accounts on the web login page:
+
+| Role / Scope | Email | Username | Password | Accessible Data |
+|---|---|---|---|---|
+| **Primary Trader** | `trader@envoytrade.com` | `trader` | `password123` | Pre-linked to `MASTER01` & `MASTER02` groups, 8 followers, active positions, and trade fills. |
+| **Clean Tenant** | `bob@envoytrade.com` | `bob` | `password123` | Isolated empty tenant for testing account onboarding and zero-state flows. |
 
 ---
 

@@ -7,6 +7,7 @@ import (
 	"envoytrade/internal/store/postgres/sqlcgen"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // PositionSyncParam represents one position row to sync.
@@ -18,8 +19,9 @@ type HoldingSyncParam = domain.HoldingSyncParam
 // MarginSyncParam represents account margin and summary metrics to sync.
 type MarginSyncParam = domain.MarginSyncParam
 
-// SyncAccountPositions upserts all positions for an account.
+// SyncAccountPositions upserts all positions for an account and prunes stale positions.
 func (s *Store) SyncAccountPositions(ctx context.Context, accountID uuid.UUID, positions []PositionSyncParam) error {
+	seenKeys := make([]string, 0, len(positions))
 	for _, p := range positions {
 		act := p.Action
 		if act == "" {
@@ -42,12 +44,24 @@ func (s *Store) SyncAccountPositions(ctx context.Context, accountID uuid.UUID, p
 		if err != nil {
 			return err
 		}
+		seenKeys = append(seenKeys, p.Product+":"+p.Instrument)
 	}
-	return nil
+
+	if len(seenKeys) == 0 {
+		_, err := s.pool.Exec(ctx, "DELETE FROM account_positions WHERE account_id = $1", accountID)
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM account_positions
+		WHERE account_id = $1
+		  AND (product || ':' || instrument) != ALL($2)
+	`, accountID, seenKeys)
+	return err
 }
 
-// SyncAccountHoldings upserts all holdings for an account.
+// SyncAccountHoldings upserts all holdings for an account and prunes stale holdings.
 func (s *Store) SyncAccountHoldings(ctx context.Context, accountID uuid.UUID, holdings []HoldingSyncParam) error {
+	seenInstruments := make([]string, 0, len(holdings))
 	for _, h := range holdings {
 		act := h.Action
 		if act == "" {
@@ -65,8 +79,19 @@ func (s *Store) SyncAccountHoldings(ctx context.Context, accountID uuid.UUID, ho
 		if err != nil {
 			return err
 		}
+		seenInstruments = append(seenInstruments, h.Instrument)
 	}
-	return nil
+
+	if len(seenInstruments) == 0 {
+		_, err := s.pool.Exec(ctx, "DELETE FROM account_holdings WHERE account_id = $1", accountID)
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM account_holdings
+		WHERE account_id = $1
+		  AND instrument != ALL($2)
+	`, accountID, seenInstruments)
+	return err
 }
 
 // SyncAccountMargins upserts the aggregated margins and metrics for an account.
@@ -75,12 +100,28 @@ func (s *Store) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, m M
 	if status == "" {
 		status = "online"
 	}
-	return s.queries.UpsertAccountMargins(ctx, sqlcgen.UpsertAccountMarginsParams{
-		AccountID:    accountID,
-		NetQty:       int32(m.NetQty),
-		TotalMtm:     m.TotalMtm,
-		RealizedPnl:  m.RealizedPnl,
-		AccountValue: m.AccountValue,
-		Status:       status,
-	})
+	cash := decimal.Zero
+	if m.AvailableCash != nil {
+		cash = *m.AvailableCash
+	}
+	margin := decimal.Zero
+	if m.AvailableMargin != nil {
+		margin = *m.AvailableMargin
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO account_margins
+		  (account_id, net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		ON CONFLICT (account_id)
+		DO UPDATE SET
+		  net_qty = EXCLUDED.net_qty,
+		  total_mtm = EXCLUDED.total_mtm,
+		  realized_pnl = EXCLUDED.realized_pnl,
+		  account_value = EXCLUDED.account_value,
+		  available_cash = EXCLUDED.available_cash,
+		  available_margin = EXCLUDED.available_margin,
+		  status = EXCLUDED.status,
+		  updated_at = now();
+	`, accountID, m.NetQty, m.TotalMtm, m.RealizedPnl, m.AccountValue, cash, margin, status)
+	return err
 }

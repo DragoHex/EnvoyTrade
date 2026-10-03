@@ -7,6 +7,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -85,7 +86,8 @@ func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 func seedAccountWithSecret(t *testing.T, s *postgres.Store, role string, apiSecret string) (uuid.UUID, string) {
 	t.Helper()
 	id := uuid.New()
-	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", apiSecret, "127.0.0.1"); err != nil {
+	ip := fmt.Sprintf("10.0.%d.%d", id[0], id[1])
+	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", apiSecret, ip); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	return id, id.String()
@@ -536,6 +538,120 @@ func TestUpdateFollowerOrderPlaced_IncrementsAttemptCountAndSetsBrokerOrderID(t 
 	}
 }
 
+func TestUpdateFollowerOrderPlaced_ConsumesStashedUpdateInSameTx(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+
+	fillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID: master, BrokerOrderID: "1", Exchange: "NSE", Tradingsymbol: "INFY",
+		InstrumentToken: 1, TransactionType: "BUY", Product: "MIS", OrderType: "MARKET",
+		FilledQuantity: 100, AveragePrice: decimal.NewFromInt(100), Status: "COMPLETE",
+		OrderTimestamp: time.Now(), RawPayload: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+	orderID, err := s.InsertFollowerOrder(ctx, domain.FollowerOrder{
+		MasterFillID: fillID, FollowerID: follower,
+		IdempotencyTag: domain.IdempotencyTag(fillID, follower),
+		IntendedQty:    50, LotSize: 1, SizingReason: domain.ReasonOK,
+	})
+	if err != nil {
+		t.Fatalf("InsertFollowerOrder: %v", err)
+	}
+
+	// 1. Stash postback before placement response commits
+	expectedPrice := decimal.NewFromFloat(123.45)
+	if err := s.StashPendingOrderUpdate(ctx, "F-STASH-1", domain.TerminalComplete, 50, expectedPrice, []byte(`{"status":"COMPLETE"}`)); err != nil {
+		t.Fatalf("StashPendingOrderUpdate: %v", err)
+	}
+
+	// 2. Worker placement returns and calls UpdateFollowerOrderPlaced
+	if err := s.UpdateFollowerOrderPlaced(ctx, orderID, "F-STASH-1", 50); err != nil {
+		t.Fatalf("UpdateFollowerOrderPlaced: %v", err)
+	}
+
+	// 3. Verify follower order was immediately marked COMPLETE with stashed price & qty (0ms delay)
+	got, err := s.GetFollowerOrder(ctx, orderID)
+	if err != nil {
+		t.Fatalf("GetFollowerOrder: %v", err)
+	}
+	if got.BrokerOrderID != "F-STASH-1" {
+		t.Errorf("BrokerOrderID = %q, want F-STASH-1", got.BrokerOrderID)
+	}
+	if got.TerminalStatus != domain.TerminalComplete {
+		t.Errorf("TerminalStatus = %q, want %q", got.TerminalStatus, domain.TerminalComplete)
+	}
+	if got.FilledQty != 50 {
+		t.Errorf("FilledQty = %d, want 50", got.FilledQty)
+	}
+	if !got.AveragePrice.Equal(expectedPrice) {
+		t.Errorf("AveragePrice = %v, want %v", got.AveragePrice, expectedPrice)
+	}
+
+	// 4. Verify stashed row was deleted
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM pending_order_updates WHERE broker_order_id = $1`, "F-STASH-1").Scan(&count); err != nil {
+		t.Fatalf("query pending_order_updates count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("pending_order_updates count = %d, want 0 (must be consumed)", count)
+	}
+
+	// 5. Verify audit event was written
+	events, err := s.OrderEventsByFollowerOrder(ctx, orderID)
+	if err != nil {
+		t.Fatalf("OrderEventsByFollowerOrder: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected status_update audit event, got none")
+	}
+	if events[len(events)-1].EventType != "status_update" {
+		t.Errorf("last event type = %q, want status_update", events[len(events)-1].EventType)
+	}
+}
+
+func TestSweepPendingOrderUpdates(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+
+	// Insert stale update (>24h old) and fresh update (<24h old)
+	_, err := pool.Exec(ctx, `
+		INSERT INTO pending_order_updates (broker_order_id, status, filled_quantity, average_price, raw_payload, received_at)
+		VALUES ($1, 'COMPLETE', 10, 100, '{}', now() - INTERVAL '25 hours')`, "STALE-1")
+	if err != nil {
+		t.Fatalf("insert stale pending update: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO pending_order_updates (broker_order_id, status, filled_quantity, average_price, raw_payload, received_at)
+		VALUES ($1, 'COMPLETE', 10, 100, '{}', now())`, "FRESH-1")
+	if err != nil {
+		t.Fatalf("insert fresh pending update: %v", err)
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour)
+	deleted, err := s.SweepPendingOrderUpdates(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("SweepPendingOrderUpdates: %v", err)
+	}
+
+	foundStale := false
+	for _, id := range deleted {
+		if id == "STALE-1" {
+			foundStale = true
+		}
+		if id == "FRESH-1" {
+			t.Errorf("fresh pending order update FRESH-1 was unexpectedly swept")
+		}
+	}
+	if !foundStale {
+		t.Errorf("SweepPendingOrderUpdates did not return STALE-1, got %v", deleted)
+	}
+}
+
 func TestUpdateFollowerOrderFailed_SetsTerminalStatusAndLastError(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -728,7 +844,7 @@ func TestSetAccountStatus_Updates(t *testing.T) {
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 
-	if err := s.SetAccountStatus(ctx, master, "error"); err != nil {
+	if err := s.SetAccountStatus(ctx, master, domain.AccountStatusError); err != nil {
 		t.Fatalf("SetAccountStatus: %v", err)
 	}
 
@@ -741,11 +857,22 @@ func TestSetAccountStatus_Updates(t *testing.T) {
 	}
 }
 
+func TestSetAccountStatus_Invalid(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+
+	err := s.SetAccountStatus(ctx, master, domain.AccountStatus("invalid_value"))
+	if !errors.Is(err, domain.ErrInvalidAccountStatus) {
+		t.Fatalf("SetAccountStatus invalid status: err = %v, want ErrInvalidAccountStatus", err)
+	}
+}
+
 func TestSetAccountStatus_NotFound(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	err := s.SetAccountStatus(ctx, uuid.New(), "error")
+	err := s.SetAccountStatus(ctx, uuid.New(), domain.AccountStatusError)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("SetAccountStatus unknown id: err = %v, want ErrNotFound", err)
 	}

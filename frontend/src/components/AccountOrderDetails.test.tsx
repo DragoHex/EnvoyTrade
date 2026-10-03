@@ -713,4 +713,148 @@ it('locks column header widths with fixed table layout so headers do not shift a
     expect(holdingBtn).toHaveClass('order-tab-active')
     expect(closedPosBtn).not.toHaveClass('order-tab-active')
   })
+
+  it('periodically reloads orders and positions data every 3s, but skips reloading when on holdings tab', async () => {
+    vi.useFakeTimers()
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, openCount: 0, closedCount: 0, pendingMetric: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 1, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'NIFTY26SEP', qty: 50, avgPrice: '100', ltp: '105', mtm: '250', action: 'exit' }],
+      closedPositions: [],
+      holdings: [{ instrument: 'INFY', sellableQuantity: 10, buyAveragePrice: '1500', ltp: '1550', pnl: '500', action: 'exit' }],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    try {
+      render(() => <AccountOrderDetails accountId="acc-timer" />)
+
+      // Initial fetch for open_positions
+      expect(getOrdersSpy).toHaveBeenCalledTimes(1)
+      expect(getOrdersSpy).toHaveBeenLastCalledWith('acc-timer', 'open_positions', 1, 10)
+
+      // Advance by 3000ms -> should refetch open_positions
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(2)
+
+      // Switch to holdings tab
+      const holdingBtn = screen.getByRole('tab', { name: /Holding/i })
+      fireEvent.click(holdingBtn)
+
+      // Switching tabs triggers resource fetch for holdings
+      expect(getOrdersSpy).toHaveBeenCalledTimes(3)
+      expect(getOrdersSpy).toHaveBeenLastCalledWith('acc-timer', 'holdings', 1, 10)
+
+      // Advance by 3000ms and 6000ms -> should NOT refetch while on holdings tab
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(3)
+
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(3)
+
+      // Switch back to open_positions tab
+      const openPosBtn = screen.getByRole('tab', { name: /Open Position/i })
+      fireEvent.click(openPosBtn)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(4)
+
+      // Advance by 3000ms -> should refetch again since it's not holdings
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not flicker or unmount table rows on periodic poll when incoming data is identical', async () => {
+    vi.useFakeTimers()
+    const sampleData = (): api.AccountOrdersResponse => ({
+      summary: { netQty: 10, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 100, realizedPnl: 0, accountValue: 10000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'TCS', qty: 10, avgPrice: '3500.00', ltp: '3550.00', mtm: '500.00', action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockImplementation(async () => sampleData())
+
+    try {
+      render(() => <AccountOrderDetails accountId="acc-diff-identical" />)
+      expect(await screen.findByText('TCS')).toBeInTheDocument()
+
+      const row = screen.getByText('TCS').closest('tr')
+      const container = row?.closest('.order-table-container')
+      expect(row).toBeInTheDocument()
+      expect(container).not.toHaveClass('is-fetching')
+
+      // Trigger 3 periodic reloads
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.advanceTimersByTimeAsync(3000)
+
+      expect(getOrdersSpy).toHaveBeenCalledTimes(4) // 1 initial + 3 polls
+
+      // Verify row is still the exact same DOM node (not unmounted or recreated)
+      expect(row?.isConnected).toBe(true)
+      expect(screen.getByText('TCS').closest('tr')).toBe(row)
+
+      // Verify no is-fetching artifacting
+      expect(container).not.toHaveClass('is-fetching')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('updates row content in-place without unmounting table rows when incoming data changes', async () => {
+    vi.useFakeTimers()
+    let currentLtp = '3550.00'
+    let currentMtm = '500.00'
+
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockImplementation(async () => ({
+      summary: { netQty: 10, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: Number(currentMtm), realizedPnl: 0, accountValue: 10000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'TCS', qty: 10, avgPrice: '3500.00', ltp: currentLtp, mtm: currentMtm, action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }))
+
+    try {
+      render(() => <AccountOrderDetails accountId="acc-diff-changed" />)
+      expect(await screen.findByText('TCS')).toBeInTheDocument()
+      expect(screen.getByText('3550.00')).toBeInTheDocument()
+
+      const row = screen.getByText('TCS').closest('tr')
+      const container = row?.closest('.order-table-container')
+
+      // Data changes on broker
+      currentLtp = '3600.00'
+      currentMtm = '1000.00'
+
+      // Advance by 3000ms
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(2)
+
+      // Cell text updated to new LTP
+      expect(screen.getByText('3600.00')).toBeInTheDocument()
+      expect(screen.queryByText('3550.00')).not.toBeInTheDocument()
+
+      // The tr DOM node is STILL the exact same node (Index kept the element, updated children)
+      expect(row?.isConnected).toBe(true)
+      expect(screen.getByText('TCS').closest('tr')).toBe(row)
+
+      // Container did NOT flash with is-fetching during background poll
+      expect(container).not.toHaveClass('is-fetching')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 });

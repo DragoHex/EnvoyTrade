@@ -14,6 +14,8 @@ type OrderParams struct {
 	Product         string // CNC|MIS|NRML (Kite), or broker-native equivalent
 	OrderType       string // MARKET|LIMIT|etc (broker-native)
 	Quantity        int
+	Price           float64
+	TriggerPrice    float64
 	Tag             string // idempotency tag, sent as broker's order tag field
 }
 

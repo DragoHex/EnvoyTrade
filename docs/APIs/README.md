@@ -9,18 +9,20 @@ prefer expanding an existing endpoint over adding a new one.
 - Base path: `/api/v1`.
 - JSON request/response bodies.
 - Errors: `{"error": "human readable message"}` with a non-2xx status.
-- Auth: not designed yet, out of scope for this contract pass.
+- Auth: Database-backed session cookie (`envoytrade_session`), with fallback to `Authorization: Bearer <token>`. See [`auth.md`](./auth.md).
 - IDs: account/master/follower IDs are the `accounts.id` UUID from the existing Go store.
 
 ## Endpoints by resource
 
 | File | Endpoints | Backs |
 |---|---|---|
+| [`auth.md`](./auth.md) | `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Authentication wall and session management |
 | [`groups.md`](./groups.md) | `GET /groups`, `GET /groups/{masterId}` | Dashboard page |
 | [`accounts.md`](./accounts.md) | `GET /accounts`, `POST /accounts`, `PATCH /accounts/{id}` | Accounts page, and the Dashboard `CopyToggle`/Stop-Copy (via the same `PATCH`) |
 | [`orders.md`](./orders.md) | `GET /accounts/{id}/orders` | Dashboard account expanded order, position, and holding drawer |
 | [`actions.md`](./actions.md) | `POST /accounts/{id}/actions` | Dashboard Rebalance / Square Off / Exit Open Orders buttons |
 | [`analytics.md`](./analytics.md) | `GET /analytics/pnl`, `GET /analytics/trades` | Analytics page |
+| [`proxy_ips.md`](./proxy_ips.md) | `GET /proxy-ips`, `GET /proxy-ips/available` | Proxy IP pool management and auto-assignment in Account drawer |
 
 No endpoint is duplicated across files — e.g. the copy-enable toggle is **not** a separate
 `/follow-links/{id}` resource, it's a field on the existing account `PATCH`; the three action buttons

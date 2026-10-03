@@ -5,8 +5,10 @@ import solid from 'vite-plugin-solid'
 export default defineConfig({
   plugins: [solid()],
   server: {
+    allowedHosts: true,
     proxy: {
       '/api': 'http://localhost:8080',
+      '/broker-callback': 'http://localhost:8080',
     },
   },
   test: {

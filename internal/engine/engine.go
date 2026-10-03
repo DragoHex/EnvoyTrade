@@ -6,6 +6,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"envoytrade/internal/domain"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // Store is everything the engine needs from persistence. Defined here
@@ -95,17 +97,33 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 }
 
 func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, link domain.FollowLink) error {
-	// Lot size comes from the instrument master, never from the fill
-	// itself — an F&O contract's lot size can change over its life, so a
-	// signal must never carry its own (possibly stale) claim about it. A
-	// symbol missing from the instrument master resolves to lot size 0,
-	// which SizeOrder already treats as ReasonBadInstrument.
-	lotSize, err := e.store.InstrumentLotSize(ctx, fill.Exchange, fill.Tradingsymbol)
-	if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return fmt.Errorf("lookup instrument lot size: %w", err)
+	var (
+		qty     int
+		reason  domain.SizingReason
+		lotSize int
+	)
+
+	one := decimal.NewFromInt(1)
+	if link.CapitalRatio.Equal(one) {
+		// Fast-path (main flow): 1:1 ratio forwards master quantity directly.
+		// Bypasses local DB instrument validation and calculation.
+		qty = fill.FilledQuantity
+		if link.MaxQtyPerOrder > 0 && qty > link.MaxQtyPerOrder {
+			qty = link.MaxQtyPerOrder
+			reason = domain.ReasonCapped
+		} else {
+			reason = domain.ReasonOK
+		}
+	} else {
+		// Scaled ratio path (ratio != 1): requires exchange lot size to round down to integer lot multiples.
+		var err error
+		lotSize, err = e.store.InstrumentLotSize(ctx, fill.Exchange, fill.Tradingsymbol)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("lookup instrument lot size: %w", err)
+		}
+		qty, reason = domain.SizeOrder(fill.FilledQuantity, link.CapitalRatio, lotSize, link.MaxQtyPerOrder)
 	}
 
-	qty, reason := domain.SizeOrder(fill.FilledQuantity, link.CapitalRatio, lotSize, link.MaxQtyPerOrder)
 	tag := domain.IdempotencyTag(fill.ID, link.FollowerID)
 
 	e.log().Debug("engine: sized follower order",
@@ -114,6 +132,7 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 		"intended_qty", qty,
 		"lot_size", lotSize,
 		"sizing_reason", reason,
+		"fast_path", link.CapitalRatio.Equal(one),
 	)
 
 	orderID, err := e.store.InsertFollowerOrder(ctx, domain.FollowerOrder{
@@ -147,7 +166,37 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 			"order_id", orderID,
 			"reason", reason,
 		)
+		if err := e.store.UpdateFollowerOrderFailed(ctx, orderID, "SKIPPED", reason.String()); err != nil {
+			e.log().Warn("engine: failed to mark zero-qty follower order as skipped",
+				"order_id", orderID,
+				"error", err,
+			)
+		}
 		return nil
+	}
+
+	price, _ := fill.Price.Float64()
+	triggerPrice, _ := fill.TriggerPrice.Float64()
+
+	// If price or trigger price not set, inspect RawPayload if present
+	if (price <= 0 || triggerPrice <= 0) && len(fill.RawPayload) > 0 {
+		var raw struct {
+			Price        float64 `json:"price"`
+			TriggerPrice float64 `json:"trigger_price"`
+		}
+		if json.Unmarshal(fill.RawPayload, &raw) == nil {
+			if price <= 0 && raw.Price > 0 {
+				price = raw.Price
+			}
+			if triggerPrice <= 0 && raw.TriggerPrice > 0 {
+				triggerPrice = raw.TriggerPrice
+			}
+		}
+	}
+
+	// Fallback to market execution price (AveragePrice) if LIMIT order still has no price
+	if fill.OrderType == "LIMIT" && price <= 0 {
+		price, _ = fill.AveragePrice.Float64()
 	}
 
 	job := domain.Job{
@@ -161,6 +210,8 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 		Product:         fill.Product,
 		OrderType:       fill.OrderType,
 		Quantity:        qty,
+		Price:           price,
+		TriggerPrice:    triggerPrice,
 	}
 	if !e.dispatcher.Dispatch(link.FollowerID, job) {
 		e.log().Error("engine: follower worker channel full, dead-lettered",

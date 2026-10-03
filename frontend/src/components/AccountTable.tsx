@@ -3,7 +3,20 @@ import { AccountRow } from './AccountRow'
 import type { ActionType, GroupFollower } from '../api'
 
 export function AccountTable(props: {
-  master: { masterId: string; name?: string; brokerAccountId: string; status: 'ok' | 'error'; active: boolean }
+  master: {
+    masterId: string
+    name?: string
+    brokerAccountId: string
+    status: 'ok' | 'error'
+    active: boolean
+    netQty?: number
+    openPositionsCount?: number
+    closedPositionsCount?: number
+    openOrdersCount?: number
+    totalMtm?: number | string
+    availableCash?: number | string
+    availableMargin?: number | string
+  }
   followers: GroupFollower[]
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
   onToggleMasterActive: (next: boolean) => Promise<void> | void
@@ -30,23 +43,24 @@ export function AccountTable(props: {
   }
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <th></th>
-          <th>Name</th>
-          <th>Account ID</th>
-          <th>Net Qty</th>
-          <th>Positions (O/C)</th>
-          <th>Open Orders</th>
-          <th>Total MTM</th>
-          <th>Available Cash</th>
-          <th>Available Margin</th>
-          <th>Status</th>
-          <th></th>
-          <th class="th-expand-col"></th>
-        </tr>
-      </thead>
+    <div class="account-table-container">
+      <table class="account-table">
+        <thead>
+          <tr>
+            <th class="col-toggle"></th>
+            <th class="col-name">Name</th>
+            <th class="col-account-id">Account ID</th>
+            <th class="col-net-qty">Net Qty</th>
+            <th class="col-positions">Positions (O/C)</th>
+            <th class="col-open-orders">Open Orders</th>
+            <th class="col-mtm">Total MTM</th>
+            <th class="col-cash">Available Cash</th>
+            <th class="col-margin">Available Margin</th>
+            <th class="col-status">Status</th>
+            <th class="col-actions"></th>
+            <th class="col-expand th-expand-col"></th>
+          </tr>
+        </thead>
       <tbody>
         <AccountRow
           follower={{
@@ -55,6 +69,13 @@ export function AccountTable(props: {
             brokerAccountId: `${props.master.brokerAccountId} (Master)`,
             enabled: props.master.active,
             status: props.master.status,
+            netQty: props.master.netQty,
+            openPositionsCount: props.master.openPositionsCount,
+            closedPositionsCount: props.master.closedPositionsCount,
+            openOrdersCount: props.master.openOrdersCount,
+            totalMtm: props.master.totalMtm,
+            availableCash: props.master.availableCash,
+            availableMargin: props.master.availableMargin,
           }}
           isMaster
           actionsDisabled={!props.master.active}
@@ -84,5 +105,6 @@ export function AccountTable(props: {
         </Index>
       </tbody>
     </table>
+  </div>
   )
 }

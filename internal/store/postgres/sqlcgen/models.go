@@ -29,6 +29,7 @@ type Account struct {
 	TokenExpiresAt      pgtype.Timestamptz
 	AuthStatus          string
 	AuthError           string
+	UserID              *uuid.UUID
 }
 
 type AccountHolding struct {
@@ -107,6 +108,34 @@ type Group struct {
 	MasterID  uuid.UUID
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+	UserID    *uuid.UUID
+}
+
+type User struct {
+	ID           uuid.UUID
+	Email        string
+	Username     string
+	Name         string
+	Phone        string
+	Address      string
+	GSTNumber    string
+	PasswordHash string
+	TotpSecret   *string
+	TotpEnabled  bool
+	Role         string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type Session struct {
+	ID         int64
+	TokenHash  string
+	UserID     uuid.UUID
+	IpAddress  *string
+	UserAgent  *string
+	ExpiresAt  pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
 }
 
 type Instrument struct {

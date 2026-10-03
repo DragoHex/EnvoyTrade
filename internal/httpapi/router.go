@@ -21,11 +21,18 @@ type routerConfig struct {
 	postbackHandler http.Handler
 	logger          *slog.Logger
 	syncer          PortfolioSyncer
+	tickerMgr       TickerManager
 }
 
 // PortfolioSyncer provides live portfolio synchronization for an account.
 type PortfolioSyncer interface {
 	SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error
+}
+
+// TickerManager manages dynamic start and stop of master WebSocket tickers.
+type TickerManager interface {
+	StartMaster(ctx context.Context, masterID uuid.UUID) error
+	StopMaster(masterID uuid.UUID) error
 }
 
 // WithPostbackHandler mounts a webhook handler at POST /broker-callback.
@@ -39,6 +46,13 @@ func WithPostbackHandler(h http.Handler) Option {
 func WithPortfolioSyncer(syncer PortfolioSyncer) Option {
 	return func(c *routerConfig) {
 		c.syncer = syncer
+	}
+}
+
+// WithTickerManager configures a TickerManager for dynamic WebSocket ticker control.
+func WithTickerManager(tm TickerManager) Option {
+	return func(c *routerConfig) {
+		c.tickerMgr = tm
 	}
 }
 
@@ -59,7 +73,14 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer}
+	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer, tickerMgr: cfg.tickerMgr}
+
+	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)
+	mux.HandleFunc("POST /api/v1/auth/login", h.postLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", h.postLogout)
+	mux.HandleFunc("GET /api/v1/auth/me", h.getMe)
+	mux.HandleFunc("PUT /api/v1/user/profile", h.putUserProfile)
+	mux.HandleFunc("POST /api/v1/user/password", h.postUserPassword)
 
 	mux.HandleFunc("GET /api/v1/groups", h.getGroups)
 	mux.HandleFunc("POST /api/v1/groups", h.postGroup)
@@ -74,15 +95,20 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}/group", h.deleteAccountGroup)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/actions", h.postAction)
 	mux.HandleFunc("GET /api/v1/accounts/{id}/orders", h.getAccountOrders)
+	mux.HandleFunc("GET /api/v1/proxy-ips", h.getProxyIPs)
+	mux.HandleFunc("GET /api/v1/proxy-ips/available", h.getAvailableProxyIPs)
 
 	if cfg.postbackHandler != nil {
 		mux.Handle("POST /broker-callback", cfg.postbackHandler)
 	}
 
+	var handler http.Handler = mux
+	handler = authMiddleware(handler, store, cfg.logger)
+
 	if cfg.logger != nil {
-		return loggingMiddleware(mux, cfg.logger)
+		return loggingMiddleware(handler, cfg.logger)
 	}
-	return mux
+	return handler
 }
 
 type statusRecorder struct {
@@ -139,12 +165,15 @@ type Store interface {
 	AccountsStore
 	ActionsStore
 	OrdersStore
+	AuthStore
+	ProxyStore
 }
 
 type handlers struct {
-	store  Store
-	engine Engine
-	syncer PortfolioSyncer
+	store     Store
+	engine    Engine
+	syncer    PortfolioSyncer
+	tickerMgr TickerManager
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

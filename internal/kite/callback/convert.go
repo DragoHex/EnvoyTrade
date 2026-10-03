@@ -28,6 +28,10 @@ func IsTerminal(status string) bool {
 // account the order belongs to), never trusted from the payload.
 func ToMasterFill(o kiteconnect.Order, masterID uuid.UUID) domain.MasterFill {
 	raw, _ := json.Marshal(o)
+	price := o.Price
+	if o.OrderType == "LIMIT" && price <= 0 && o.AveragePrice > 0 {
+		price = o.AveragePrice
+	}
 	return domain.MasterFill{
 		MasterID:        masterID,
 		BrokerOrderID:   o.OrderID,
@@ -38,6 +42,8 @@ func ToMasterFill(o kiteconnect.Order, masterID uuid.UUID) domain.MasterFill {
 		Product:         o.Product,
 		OrderType:       o.OrderType,
 		FilledQuantity:  int(o.FilledQuantity),
+		Price:           decimal.NewFromFloat(price),
+		TriggerPrice:    decimal.NewFromFloat(o.TriggerPrice),
 		AveragePrice:    decimal.NewFromFloat(o.AveragePrice),
 		Status:          o.Status,
 		OrderTimestamp:  o.OrderTimestamp.Time,

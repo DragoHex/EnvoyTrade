@@ -2,16 +2,15 @@ module envoytrade
 
 go 1.27.1
 
-replace github.com/zerodha/gokiteconnect/v4 => ./gokiteconnect
-
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx-shopspring-decimal v0.0.0-20220624020537-1d36b5a1853e
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
-	github.com/zerodha/gokiteconnect/v4 v4.0.0
+	github.com/zerodha/gokiteconnect/v4 v4.4.3
 	go.uber.org/goleak v1.3.0
+	golang.org/x/crypto v0.54.0
 )
 
 require (
@@ -36,6 +35,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gocarina/gocsv v0.0.0-20180809181117-b8c38cb1ba36 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -67,7 +67,6 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

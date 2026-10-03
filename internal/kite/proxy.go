@@ -1,10 +1,13 @@
 package kite
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
+
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
 // ProxyConfig is what the vendor dashboard hands you per account.
@@ -42,8 +45,24 @@ func RESTClientFor(cfg ProxyConfig) (*http.Client, error) {
 	return &http.Client{
 		Transport: &http.Transport{
 			Proxy:               http.ProxyURL(proxyURL),
+			TLSClientConfig:     &tls.Config{InsecureSkipVerify: false},
 			MaxIdleConnsPerHost: 4,
 		},
 		Timeout: 10 * time.Second,
 	}, nil
+}
+
+// NewLiveBroker creates a live kite.Broker client for Kite Connect API calls,
+// routing through the specified proxy if configured.
+func NewLiveBroker(apiKey, accessToken string, proxyCfg *ProxyConfig) (*Broker, error) {
+	kc := kiteconnect.New(apiKey)
+	kc.SetAccessToken(accessToken)
+	if proxyCfg != nil && proxyCfg.Host != "" {
+		httpClient, err := RESTClientFor(*proxyCfg)
+		if err != nil {
+			return nil, fmt.Errorf("create proxy http client: %w", err)
+		}
+		kc.SetHTTPClient(httpClient)
+	}
+	return NewBroker(kc), nil
 }

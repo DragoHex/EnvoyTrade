@@ -1,5 +1,47 @@
-// Thin fetch wrapper over docs/APIs/{groups,accounts,actions}.md — one
+// Thin fetch wrapper over docs/APIs/{groups,accounts,actions,auth}.md — one
 // function per endpoint the Dashboard page uses, nothing speculative.
+
+export interface User {
+  id: string
+  email: string
+  username: string
+  name: string
+  role: string
+  phone?: string
+  address?: string
+  gstNumber?: string
+}
+
+export interface AuthResponse {
+  user: User
+  token?: string
+}
+
+export interface RegisterRequest {
+  email: string
+  username: string
+  password: string
+  name?: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface UpdateProfileRequest {
+  email: string
+  username: string
+  name?: string
+  phone?: string
+  address?: string
+  gstNumber?: string
+}
+
+export interface UpdatePasswordRequest {
+  oldPassword: string
+  newPassword: string
+}
 
 export interface GroupSummary {
   id: string
@@ -35,6 +77,13 @@ export interface GroupDetail {
   masterAccountId: string
   masterName?: string
   masterActive: boolean
+  masterNetQty?: number
+  masterOpenPositionsCount?: number
+  masterClosedPositionsCount?: number
+  masterOpenOrdersCount?: number
+  masterTotalMtm?: number | string
+  masterAvailableCash?: number | string
+  masterAvailableMargin?: number | string
   followers: GroupFollower[]
 }
 
@@ -89,6 +138,25 @@ export interface PatchGroupRequest {
 
 const BASE = '/api/v1'
 
+let onUnauthorizedCallback: (() => void) | null = null
+
+export function setOnUnauthorized(cb: (() => void) | null) {
+  onUnauthorizedCallback = cb
+}
+
+function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const options: RequestInit = {
+    ...init,
+    credentials: 'include',
+  }
+  return fetch(input, options).then((res) => {
+    if (res.status === 401 && onUnauthorizedCallback) {
+      onUnauthorizedCallback()
+    }
+    return res
+  })
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
@@ -97,12 +165,56 @@ async function json<T>(res: Response): Promise<T> {
   return res.json()
 }
 
+// Auth endpoints
+export function register(body: RegisterRequest): Promise<AuthResponse> {
+  return apiFetch(`${BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json(r))
+}
+
+export function login(body: LoginRequest): Promise<AuthResponse> {
+  return apiFetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json(r))
+}
+
+export function logout(): Promise<{ status: string }> {
+  return apiFetch(`${BASE}/auth/logout`, {
+    method: 'POST',
+  }).then((r) => json(r))
+}
+
+export function getMe(): Promise<AuthResponse> {
+  return apiFetch(`${BASE}/auth/me`).then((r) => json(r))
+}
+
+export function updateProfile(body: UpdateProfileRequest): Promise<{ user: User }> {
+  return apiFetch(`${BASE}/user/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json(r))
+}
+
+export function updatePassword(body: UpdatePasswordRequest): Promise<{ status: string }> {
+  return apiFetch(`${BASE}/user/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json(r))
+}
+
+// Group & Account endpoints
 export function getGroups(): Promise<GroupSummary[]> {
-  return fetch(`${BASE}/groups`).then((r) => json(r))
+  return apiFetch(`${BASE}/groups`).then((r) => json(r))
 }
 
 export function createGroup(body: CreateGroupRequest): Promise<{ id: string; name: string; masterId: string }> {
-  return fetch(`${BASE}/groups`, {
+  return apiFetch(`${BASE}/groups`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -110,7 +222,7 @@ export function createGroup(body: CreateGroupRequest): Promise<{ id: string; nam
 }
 
 export function patchGroup(id: string, body: PatchGroupRequest): Promise<{ status: string }> {
-  return fetch(`${BASE}/groups/${id}`, {
+  return apiFetch(`${BASE}/groups/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -118,13 +230,13 @@ export function patchGroup(id: string, body: PatchGroupRequest): Promise<{ statu
 }
 
 export function deleteGroup(id: string): Promise<void> {
-  return fetch(`${BASE}/groups/${id}`, { method: 'DELETE' }).then((r) => {
+  return apiFetch(`${BASE}/groups/${id}`, { method: 'DELETE' }).then((r) => {
     if (!r.ok) return json(r)
   })
 }
 
 export function getGroupDetail(id: string): Promise<GroupDetail> {
-  return fetch(`${BASE}/groups/${id}`).then((r) => json(r))
+  return apiFetch(`${BASE}/groups/${id}`).then((r) => json(r))
 }
 
 export function patchAccount(
@@ -139,7 +251,7 @@ export function patchAccount(
     | { apiKey?: string; apiSecret?: string }
     | { password?: string; totpSecret?: string },
 ): Promise<Record<string, unknown>> {
-  return fetch(`${BASE}/accounts/${id}`, {
+  return apiFetch(`${BASE}/accounts/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -148,7 +260,7 @@ export function patchAccount(
 
 export function getAccounts(ids?: string[]): Promise<Account[]> {
   const query = ids && ids.length > 0 ? `?ids=${ids.join(',')}` : ''
-  return fetch(`${BASE}/accounts${query}`).then((r) => json(r))
+  return apiFetch(`${BASE}/accounts${query}`).then((r) => json(r))
 }
 
 export function getAccount(id: string): Promise<Account> {
@@ -159,7 +271,7 @@ export function getAccount(id: string): Promise<Account> {
 }
 
 export function createAccount(body: CreateAccountRequest): Promise<Account> {
-  return fetch(`${BASE}/accounts`, {
+  return apiFetch(`${BASE}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -167,13 +279,13 @@ export function createAccount(body: CreateAccountRequest): Promise<Account> {
 }
 
 export function deleteAccount(id: string): Promise<void> {
-  return fetch(`${BASE}/accounts/${id}`, { method: 'DELETE' }).then((r) => {
+  return apiFetch(`${BASE}/accounts/${id}`, { method: 'DELETE' }).then((r) => {
     if (!r.ok) return json(r)
   })
 }
 
 export function removeAccountFromGroup(id: string): Promise<void> {
-  return fetch(`${BASE}/accounts/${id}/group`, { method: 'DELETE' }).then((r) => {
+  return apiFetch(`${BASE}/accounts/${id}/group`, { method: 'DELETE' }).then((r) => {
     if (!r.ok) return json(r)
   })
 }
@@ -182,7 +294,7 @@ export function addAccountToGroup(
   groupId: string,
   body: { accountId: string; capitalRatio: string; maxQtyPerOrder?: number },
 ): Promise<void> {
-  return fetch(`${BASE}/groups/${groupId}/followers`, {
+  return apiFetch(`${BASE}/groups/${groupId}/followers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -192,7 +304,7 @@ export function addAccountToGroup(
 }
 
 export function postAction(id: string, type: ActionType): Promise<{ type: string; status: string }> {
-  return fetch(`${BASE}/accounts/${id}/actions`, {
+  return apiFetch(`${BASE}/accounts/${id}/actions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type }),
@@ -239,6 +351,7 @@ export interface PositionItem {
   avgPrice: string
   ltp: number | string
   mtm: number | string
+  pnl?: number | string
   action?: string
 }
 
@@ -289,5 +402,33 @@ export function getAccountOrders(
   if (page !== undefined && page > 0) params.set('page', String(page))
   if (limit !== undefined && limit > 0) params.set('limit', String(limit))
   const qs = params.toString() ? `?${params.toString()}` : ''
-  return fetch(`${BASE}/accounts/${accountId}/orders${qs}`).then((r) => json(r))
+  return apiFetch(`${BASE}/accounts/${accountId}/orders${qs}`).then((r) => json(r))
 }
+
+export interface ProxyIP {
+  ipAddress: string
+  ipType: 'ipv4' | 'ipv6'
+  host: string
+  port: number
+  validFrom: string
+  validUntil: string
+  plan: string
+  isAssigned?: boolean
+  assignedAccountId?: string | null
+  assignedAccountName?: string | null
+}
+
+export interface AvailableProxyIPsResponse {
+  ipv4: ProxyIP[]
+  ipv6: ProxyIP[]
+}
+
+export function fetchProxyIPs(): Promise<ProxyIP[]> {
+  return apiFetch(`${BASE}/proxy-ips`).then((r) => json(r))
+}
+
+export function fetchAvailableProxyIPs(accountId?: string): Promise<AvailableProxyIPsResponse> {
+  const qs = accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''
+  return apiFetch(`${BASE}/proxy-ips/available${qs}`).then((r) => json(r))
+}
+

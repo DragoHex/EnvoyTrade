@@ -37,21 +37,35 @@ type groupSummaryResponse struct {
 }
 
 type groupFollowerResponse struct {
-	AccountID       string `json:"accountId"`
-	Name            string `json:"name"`
-	BrokerAccountID string `json:"brokerAccountId"`
-	Enabled         bool   `json:"enabled"`
-	Status          string `json:"status"`
+	AccountID            string           `json:"accountId"`
+	Name                 string           `json:"name"`
+	BrokerAccountID      string           `json:"brokerAccountId"`
+	Enabled              bool             `json:"enabled"`
+	Status               string           `json:"status"`
+	NetQty               int              `json:"netQty"`
+	OpenPositionsCount   int              `json:"openPositionsCount"`
+	ClosedPositionsCount int              `json:"closedPositionsCount"`
+	OpenOrdersCount      int              `json:"openOrdersCount"`
+	TotalMtm             decimal.Decimal  `json:"totalMtm"`
+	AvailableCash        *decimal.Decimal `json:"availableCash,omitempty"`
+	AvailableMargin      *decimal.Decimal `json:"availableMargin,omitempty"`
 }
 
 type groupDetailResponse struct {
-	ID              string                  `json:"id"`
-	Name            string                  `json:"name"`
-	MasterID        string                  `json:"masterId"`
-	MasterAccountID string                  `json:"masterAccountId"`
-	MasterName      string                  `json:"masterName"`
-	MasterActive    bool                    `json:"masterActive"`
-	Followers       []groupFollowerResponse `json:"followers"`
+	ID                         string                  `json:"id"`
+	Name                       string                  `json:"name"`
+	MasterID                   string                  `json:"masterId"`
+	MasterAccountID            string                  `json:"masterAccountId"`
+	MasterName                 string                  `json:"masterName"`
+	MasterActive               bool                    `json:"masterActive"`
+	MasterNetQty               int                     `json:"masterNetQty"`
+	MasterOpenPositionsCount   int                     `json:"masterOpenPositionsCount"`
+	MasterClosedPositionsCount int                     `json:"masterClosedPositionsCount"`
+	MasterOpenOrdersCount      int                     `json:"masterOpenOrdersCount"`
+	MasterTotalMtm             decimal.Decimal         `json:"masterTotalMtm"`
+	MasterAvailableCash        *decimal.Decimal        `json:"masterAvailableCash,omitempty"`
+	MasterAvailableMargin      *decimal.Decimal        `json:"masterAvailableMargin,omitempty"`
+	Followers                  []groupFollowerResponse `json:"followers"`
 }
 
 func (h *handlers) getGroups(w http.ResponseWriter, r *http.Request) {
@@ -149,21 +163,35 @@ func (h *handlers) getGroupDetail(w http.ResponseWriter, r *http.Request) {
 	followers := make([]groupFollowerResponse, len(detail.Followers))
 	for i, f := range detail.Followers {
 		followers[i] = groupFollowerResponse{
-			AccountID:       f.AccountID.String(),
-			Name:            f.Name,
-			BrokerAccountID: f.BrokerAccountID,
-			Enabled:         f.Enabled,
-			Status:          f.Status,
+			AccountID:            f.AccountID.String(),
+			Name:                 f.Name,
+			BrokerAccountID:      f.BrokerAccountID,
+			Enabled:              f.Enabled,
+			Status:               f.Status,
+			NetQty:               f.NetQty,
+			OpenPositionsCount:   f.OpenPositionsCount,
+			ClosedPositionsCount: f.ClosedPositionsCount,
+			OpenOrdersCount:      f.OpenOrdersCount,
+			TotalMtm:             f.TotalMtm,
+			AvailableCash:        f.AvailableCash,
+			AvailableMargin:      f.AvailableMargin,
 		}
 	}
 	writeJSON(w, http.StatusOK, groupDetailResponse{
-		ID:              detail.GroupID.String(),
-		Name:            detail.GroupName,
-		MasterID:        detail.MasterID.String(),
-		MasterAccountID: detail.MasterAccountID,
-		MasterName:      detail.MasterName,
-		MasterActive:    detail.MasterActive,
-		Followers:       followers,
+		ID:                         detail.GroupID.String(),
+		Name:                       detail.GroupName,
+		MasterID:                   detail.MasterID.String(),
+		MasterAccountID:            detail.MasterAccountID,
+		MasterName:                 detail.MasterName,
+		MasterActive:               detail.MasterActive,
+		MasterNetQty:               detail.MasterNetQty,
+		MasterOpenPositionsCount:   detail.MasterOpenPositionsCount,
+		MasterClosedPositionsCount: detail.MasterClosedPositionsCount,
+		MasterOpenOrdersCount:      detail.MasterOpenOrdersCount,
+		MasterTotalMtm:             detail.MasterTotalMtm,
+		MasterAvailableCash:        detail.MasterAvailableCash,
+		MasterAvailableMargin:      detail.MasterAvailableMargin,
+		Followers:                  followers,
 	})
 }
 

@@ -39,6 +39,7 @@ type Store interface {
 	PendingFollowerOrders(ctx context.Context, cutoff time.Time) ([]domain.FollowerOrder, error)
 	UpdateFollowerOrderStatus(ctx context.Context, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal) (int64, error)
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
+	SweepPendingOrderUpdates(ctx context.Context, cutoff time.Time) ([]string, error)
 }
 
 // Alerter receives notifications about drift and unresolvable states.
@@ -74,8 +75,8 @@ type Config struct {
 // DefaultConfig provides standard operational intervals.
 func DefaultConfig() Config {
 	return Config{
-		PollInterval:     30 * time.Second,
-		PendingThreshold: 2 * time.Minute,
+		PollInterval:     10 * time.Second,
+		PendingThreshold: 15 * time.Second,
 		PollingWindow:    15 * time.Minute,
 	}
 }
@@ -146,34 +147,11 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 		}
 	}
 
-	// 2. Poll master orders & backfill any missed fills (WS gap fallback)
 	now := time.Now()
-	windowStart := now.Add(-p.cfg.PollingWindow)
+
+	// 2. Poll master orders & backfill any missed fills (WS gap fallback)
 	for _, m := range masters {
-		orders, err := p.masterReader.GetMasterOrders(ctx, m.ID)
-		if err != nil {
-			p.alerter.Alert(ctx, "failed to read master orders", map[string]any{
-				"master_id": m.ID,
-				"error":     err.Error(),
-			})
-			continue
-		}
-		for _, o := range orders {
-			if !callback.IsTerminal(o.Status) {
-				continue
-			}
-			if !o.OrderTimestamp.Time.IsZero() && o.OrderTimestamp.Time.Before(windowStart) {
-				continue
-			}
-			fill := callback.ToMasterFill(o, m.ID)
-			if err := p.masterConsumer.Handle(ctx, fill); err != nil {
-				p.alerter.Alert(ctx, "failed to handle master fill from recon", map[string]any{
-					"master_id":       m.ID,
-					"broker_order_id": o.OrderID,
-					"error":           err.Error(),
-				})
-			}
-		}
+		_ = p.ReconcileMaster(ctx, m.ID)
 	}
 
 	// 3. Inspect stuck follower orders older than threshold
@@ -257,6 +235,51 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	// 4. Sweep stale pending order updates (>24h old)
+	staleCutoff := now.Add(-24 * time.Hour)
+	swept, err := p.store.SweepPendingOrderUpdates(ctx, staleCutoff)
+	if err != nil {
+		p.log().Warn("recon: sweep pending order updates failed", "error", err)
+	} else if len(swept) > 0 {
+		p.alerter.Alert(ctx, "stale unmatched pending order updates swept", map[string]any{
+			"count":     len(swept),
+			"order_ids": swept,
+		})
+	}
+
+	return nil
+}
+
+// ReconcileMaster checks and backfills recent fills for a single master account (Design Doc §4, §6).
+func (p *Poller) ReconcileMaster(ctx context.Context, masterID uuid.UUID) error {
+	now := time.Now()
+	windowStart := now.Add(-p.cfg.PollingWindow)
+
+	orders, err := p.masterReader.GetMasterOrders(ctx, masterID)
+	if err != nil {
+		p.alerter.Alert(ctx, "failed to read master orders", map[string]any{
+			"master_id": masterID,
+			"error":     err.Error(),
+		})
+		return err
+	}
+
+	for _, o := range orders {
+		if !callback.IsTerminal(o.Status) {
+			continue
+		}
+		if !o.OrderTimestamp.Time.IsZero() && o.OrderTimestamp.Time.Before(windowStart) {
+			continue
+		}
+		fill := callback.ToMasterFill(o, masterID)
+		if err := p.masterConsumer.Handle(ctx, fill); err != nil {
+			p.alerter.Alert(ctx, "failed to handle master fill from recon", map[string]any{
+				"master_id":       masterID,
+				"broker_order_id": o.OrderID,
+				"error":           err.Error(),
+			})
+		}
+	}
 	return nil
 }
 
