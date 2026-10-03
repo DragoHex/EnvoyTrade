@@ -105,6 +105,66 @@ func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
 	if api.placedVariety.Tag != params.Tag {
 		t.Errorf("Tag = %q, want %q", api.placedVariety.Tag, params.Tag)
 	}
+	if api.placedVariety.MarketProtection != kiteconnect.MarketProtectionAuto {
+		t.Errorf("MarketProtection for MARKET = %v, want %v", api.placedVariety.MarketProtection, kiteconnect.MarketProtectionAuto)
+	}
+}
+
+func TestBroker_PlaceOrder_LimitOrder_MapsPriceAndTriggerPrice(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-limit-1"}
+	b := kite.NewBroker(api)
+
+	params := broker.OrderParams{
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL26OCT11000CE",
+		TransactionType: "SELL",
+		Product:         "NRML",
+		OrderType:       "LIMIT",
+		Quantity:        1,
+		Price:           26.5,
+		TriggerPrice:    25.0,
+		Tag:             "idempotent-tag-limit",
+	}
+
+	resp, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if resp.OrderID != "kite-limit-1" {
+		t.Errorf("OrderID = %q, want kite-limit-1", resp.OrderID)
+	}
+	if api.placedVariety.Price != 26.5 {
+		t.Errorf("Price = %v, want 26.5", api.placedVariety.Price)
+	}
+	if api.placedVariety.TriggerPrice != 25.0 {
+		t.Errorf("TriggerPrice = %v, want 25.0", api.placedVariety.TriggerPrice)
+	}
+	if api.placedVariety.MarketProtection != 0 {
+		t.Errorf("MarketProtection for LIMIT = %v, want 0", api.placedVariety.MarketProtection)
+	}
+}
+
+func TestBroker_PlaceOrder_SLMOrder_SetsMarketProtectionAuto(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-slm-1"}
+	b := kite.NewBroker(api)
+
+	params := broker.OrderParams{
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL26OCT11000CE",
+		TransactionType: "SELL",
+		Product:         "NRML",
+		OrderType:       "SL-M",
+		Quantity:        1,
+		TriggerPrice:    25.0,
+	}
+
+	_, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if api.placedVariety.MarketProtection != kiteconnect.MarketProtectionAuto {
+		t.Errorf("MarketProtection for SL-M = %v, want %v", api.placedVariety.MarketProtection, kiteconnect.MarketProtectionAuto)
+	}
 }
 
 func TestBroker_PlaceOrder_PropagatesError(t *testing.T) {

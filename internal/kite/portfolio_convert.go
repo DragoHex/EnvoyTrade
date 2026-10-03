@@ -117,13 +117,21 @@ func ConvertHolding(accountID uuid.UUID, h kiteconnect.Holding) ConvertedHolding
 
 // ConvertPosition maps kiteconnect.Position to ConvertedPosition.
 func ConvertPosition(accountID uuid.UUID, p kiteconnect.Position) ConvertedPosition {
+	buyPrice := p.BuyPrice
+	if buyPrice == 0 && p.Quantity > 0 {
+		buyPrice = p.AveragePrice
+	}
+	sellPrice := p.SellPrice
+	if sellPrice == 0 && p.Quantity < 0 {
+		sellPrice = p.AveragePrice
+	}
 	return ConvertedPosition{
 		AccountID:    accountID,
 		Product:      p.Product,
 		Instrument:   p.Tradingsymbol,
 		Quantity:     p.Quantity,
-		BuyPrice:     decimal.NewFromFloat(p.BuyPrice),
-		SellPrice:    decimal.NewFromFloat(p.SellPrice),
+		BuyPrice:     decimal.NewFromFloat(buyPrice),
+		SellPrice:    decimal.NewFromFloat(sellPrice),
 		BuyQuantity:  p.BuyQuantity,
 		SellQuantity: p.SellQuantity,
 		Ltp:          decimal.NewFromFloat(p.LastPrice),

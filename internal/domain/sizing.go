@@ -27,6 +27,24 @@ const (
 	ReasonInvalidRatio
 )
 
+// String returns the string representation of a SizingReason.
+func (r SizingReason) String() string {
+	switch r {
+	case ReasonOK:
+		return "ok"
+	case ReasonBelowOneLot:
+		return "below_one_lot"
+	case ReasonCapped:
+		return "capped"
+	case ReasonBadInstrument:
+		return "bad_instrument"
+	case ReasonInvalidRatio:
+		return "invalid_ratio"
+	default:
+		return "unknown"
+	}
+}
+
 // SizeOrder computes the quantity a follower should place for a given
 // master fill quantity, follower capital ratio, instrument lot size, and
 // optional per-link cap. It never exceeds the master's intent: the result

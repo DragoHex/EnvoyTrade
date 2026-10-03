@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"envoytrade/internal/crypto"
@@ -20,13 +21,15 @@ type PortfolioStore interface {
 	SyncAccountHoldings(ctx context.Context, accountID uuid.UUID, holdings []domain.HoldingSyncParam) error
 	SyncAccountPositions(ctx context.Context, accountID uuid.UUID, positions []domain.PositionSyncParam) error
 	SyncAccountMargins(ctx context.Context, accountID uuid.UUID, m domain.MarginSyncParam) error
+	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
 }
 
 // PortfolioSyncer orchestrates login, token verification, and data fetching.
 type PortfolioSyncer struct {
-	Store      PortfolioStore
-	APIFactory func(apiKey, accessToken string) (API, error)
-	LoginFunc  func(ctx context.Context, userID, password, totpSecret, apiKey, apiSecret string) (string, error)
+	Store            PortfolioStore
+	APIFactory       func(apiKey, accessToken string) (API, error)
+	LoginFunc        func(ctx context.Context, userID, password, totpSecret, apiKey, apiSecret string) (string, error)
+	OnTokenRefreshed func(ctx context.Context, accountID uuid.UUID) error
 }
 
 // NextKiteExpiry returns the next 06:00 AM IST cutoff for Kite access tokens.
@@ -46,6 +49,23 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	authInfo, err := s.Store.AccountAuthInfo(ctx, accountID)
 	if err != nil {
 		return fmt.Errorf("load account auth info: %w", err)
+	}
+
+	var proxyHTTPClient *http.Client
+	if authInfo.IPAddress != "" {
+		pIP, err := s.Store.ProxyIPByAddress(ctx, authInfo.IPAddress)
+		if err == nil {
+			proxyCfg := ProxyConfig{
+				Scheme:       "https",
+				Host:         pIP.Host,
+				Port:         pIP.Port,
+				ClientID:     pIP.Username,
+				ClientSecret: pIP.Password,
+			}
+			if client, err := RESTClientFor(proxyCfg); err == nil {
+				proxyHTTPClient = client
+			}
+		}
 	}
 
 	accessToken := authInfo.AccessToken
@@ -68,7 +88,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		loginFn := s.LoginFunc
 		if loginFn == nil {
 			loginFn = func(ctx context.Context, u, p, t, k, sec string) (string, error) {
-				return HeadlessLogin(ctx, nil, u, p, t, k, sec)
+				return HeadlessLogin(ctx, proxyHTTPClient, u, p, t, k, sec)
 			}
 		}
 
@@ -83,6 +103,10 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 			return fmt.Errorf("persist new access token: %w", err)
 		}
 		accessToken = newToken
+
+		if s.OnTokenRefreshed != nil {
+			_ = s.OnTokenRefreshed(ctx, accountID)
+		}
 	}
 
 	apiFactory := s.APIFactory
@@ -90,6 +114,9 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		apiFactory = func(apiKey, token string) (API, error) {
 			kc := kiteconnect.New(apiKey)
 			kc.SetAccessToken(token)
+			if proxyHTTPClient != nil {
+				kc.SetHTTPClient(proxyHTTPClient)
+			}
 			return kc, nil
 		}
 	}
@@ -155,12 +182,18 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 
 	// Calculate and persist margin metrics
 	summary := CalculatePositionMetrics(positions.Net, margins)
+	accValue := summary.AvailableMargin
+	if accValue.IsZero() && !summary.AvailableCash.IsZero() {
+		accValue = summary.AvailableCash
+	}
 	marginParam := domain.MarginSyncParam{
-		NetQty:       summary.NetQty,
-		TotalMtm:     summary.TotalMtm,
-		RealizedPnl:  summary.RealizedPnl,
-		AccountValue: summary.AvailableCash.Add(summary.AvailableMargin),
-		Status:       "online",
+		NetQty:          summary.NetQty,
+		TotalMtm:        summary.TotalMtm,
+		RealizedPnl:     summary.RealizedPnl,
+		AccountValue:    accValue,
+		AvailableCash:   &summary.AvailableCash,
+		AvailableMargin: &summary.AvailableMargin,
+		Status:          "online",
 	}
 	if err := s.Store.SyncAccountMargins(ctx, accountID, marginParam); err != nil {
 		return fmt.Errorf("sync margins: %w", err)

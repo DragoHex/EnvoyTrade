@@ -170,6 +170,8 @@ func (p *Pool) place(ctx context.Context, job domain.Job, b broker.Broker, store
 		Product:         job.Product,
 		OrderType:       job.OrderType,
 		Quantity:        job.Quantity,
+		Price:           job.Price,
+		TriggerPrice:    job.TriggerPrice,
 		Tag:             job.IdempotencyTag,
 	}
 
@@ -255,7 +257,11 @@ func (p *Pool) place(ctx context.Context, job domain.Job, b broker.Broker, store
 }
 
 func (p *Pool) recordFailure(ctx context.Context, job domain.Job, store Store, cause error) {
-	_ = store.UpdateFollowerOrderFailed(ctx, job.FollowerOrderID, "", cause.Error())
+	terminalStatus := domain.TerminalRejected
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) || strings.Contains(cause.Error(), "pool shutdown") {
+		terminalStatus = domain.TerminalDeadLettered
+	}
+	_ = store.UpdateFollowerOrderFailed(ctx, job.FollowerOrderID, terminalStatus, cause.Error())
 	orderID := job.FollowerOrderID
 	_ = store.AppendOrderEvent(ctx, domain.OrderEvent{
 		FollowerOrderID: &orderID,

@@ -23,6 +23,8 @@ type fakeStore struct {
 	pendingErr   error
 	updatedOrder map[string]string // brokerOrderID -> status
 	events       []domain.OrderEvent
+	sweptIDs     []string
+	sweepErr     error
 }
 
 func (s *fakeStore) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error) {
@@ -52,6 +54,12 @@ func (s *fakeStore) AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) 
 	defer s.mu.Unlock()
 	s.events = append(s.events, ev)
 	return nil
+}
+
+func (s *fakeStore) SweepPendingOrderUpdates(ctx context.Context, cutoff time.Time) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sweptIDs, s.sweepErr
 }
 
 type fakeMasterReader struct {
@@ -255,3 +263,76 @@ func TestPoller_HandlesReaderErrorsGracefully(t *testing.T) {
 		t.Fatalf("expected 1 alert for master reader failure, got %d", alerter.count())
 	}
 }
+
+func TestPoller_SweepsStalePendingOrderUpdatesAndAlerts(t *testing.T) {
+	store := &fakeStore{
+		sweptIDs: []string{"STALE-ORDER-1", "STALE-ORDER-2"},
+	}
+	masterReader := &fakeMasterReader{}
+	followerReader := &fakeFollowerReader{}
+	consumer := &fakeConsumer{}
+	alerter := &fakeAlerter{}
+
+	poller := recon.NewPoller(store, masterReader, followerReader, consumer, alerter, recon.DefaultConfig(), nil)
+	if err := poller.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if alerter.count() != 1 {
+		t.Fatalf("expected 1 alert for swept stale orders, got %d", alerter.count())
+	}
+	if alerter.alerts[0] != "stale unmatched pending order updates swept" {
+		t.Errorf("alert msg = %q, want 'stale unmatched pending order updates swept'", alerter.alerts[0])
+	}
+}
+
+func TestDefaultConfig_HasTightenedThresholds(t *testing.T) {
+	cfg := recon.DefaultConfig()
+	if cfg.PendingThreshold > 15*time.Second {
+		t.Errorf("PendingThreshold = %v, want <= 15s", cfg.PendingThreshold)
+	}
+	if cfg.PollInterval > 10*time.Second {
+		t.Errorf("PollInterval = %v, want <= 10s", cfg.PollInterval)
+	}
+}
+
+func TestPoller_ReconcileMaster_OnlyReconcilesSpecifiedMaster(t *testing.T) {
+	master1 := uuid.New()
+	master2 := uuid.New()
+
+	masterReader := &fakeMasterReader{
+		orders: map[uuid.UUID][]kiteconnect.Order{
+			master1: {
+				{OrderID: "M1-ORDER", Status: domain.TerminalComplete, Exchange: "NSE", TradingSymbol: "RELIANCE", FilledQuantity: 100},
+			},
+			master2: {
+				{OrderID: "M2-ORDER", Status: domain.TerminalComplete, Exchange: "NSE", TradingSymbol: "TCS", FilledQuantity: 50},
+			},
+		},
+	}
+	followerReader := &fakeFollowerReader{}
+	consumer := &fakeConsumer{}
+	alerter := &fakeAlerter{}
+	store := &fakeStore{}
+
+	poller := recon.NewPoller(store, masterReader, followerReader, consumer, alerter, recon.DefaultConfig(), nil)
+
+	// Reconcile ONLY master1
+	if err := poller.ReconcileMaster(context.Background(), master1); err != nil {
+		t.Fatalf("ReconcileMaster: %v", err)
+	}
+
+	consumer.mu.Lock()
+	defer consumer.mu.Unlock()
+	if len(consumer.handled) != 1 {
+		t.Fatalf("handled fills count = %d, want 1", len(consumer.handled))
+	}
+	if consumer.handled[0].BrokerOrderID != "M1-ORDER" {
+		t.Errorf("handled order ID = %q, want 'M1-ORDER'", consumer.handled[0].BrokerOrderID)
+	}
+	if consumer.handled[0].MasterID != master1 {
+		t.Errorf("handled master ID = %s, want %s", consumer.handled[0].MasterID, master1)
+	}
+}
+
+

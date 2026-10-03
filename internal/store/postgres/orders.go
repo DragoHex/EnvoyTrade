@@ -121,9 +121,10 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					Product:    r.Product,
 					Instrument: r.Instrument,
 					Qty:        int(r.Quantity),
-					AvgPrice:   fmt.Sprintf("%.2f/%.2f", r.BuyPrice.InexactFloat64(), r.SellPrice.InexactFloat64()),
+					AvgPrice:   formatPositionAvgPrice(r.Quantity, r.BuyPrice, r.SellPrice),
 					Ltp:        r.Ltp,
 					Mtm:        r.Mtm,
+					Pnl:        r.Pnl,
 					Action:     r.Action,
 				})
 			}
@@ -141,9 +142,10 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					Product:    r.Product,
 					Instrument: r.Instrument,
 					Qty:        int(r.Quantity),
-					AvgPrice:   fmt.Sprintf("%.2f/%.2f", r.BuyPrice.InexactFloat64(), r.SellPrice.InexactFloat64()),
+					AvgPrice:   formatPositionAvgPrice(r.Quantity, r.BuyPrice, r.SellPrice),
 					Ltp:        r.Ltp,
 					Mtm:        r.Mtm,
+					Pnl:        r.Pnl,
 					Action:     r.Action,
 				})
 			}
@@ -254,17 +256,26 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 	}
 
 	// 3. Margins & summary metrics
-	margins, err := s.queries.GetAccountMargins(ctx, accountID)
+	var netQty int32
+	var totalMtm, realizedPnl, accountValue, availableCash, availableMargin decimal.Decimal
+	var marginStatus string
+	err = s.pool.QueryRow(ctx, `
+		SELECT net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status
+		FROM account_margins
+		WHERE account_id = $1
+	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus)
 	if err == nil {
 		detail.Summary = domain.AccountSummaryMetrics{
-			NetQty:               int(margins.NetQty),
+			NetQty:               int(netQty),
 			OpenPositionsCount:   int(openPosCount),
 			ClosedPositionsCount: int(closedPosCount),
 			PendingOrdersCount:   int(openOrdersCount),
-			TotalMtm:             margins.TotalMtm,
-			RealizedPnl:          margins.RealizedPnl,
-			AccountValue:         margins.AccountValue,
-			Status:               margins.Status,
+			TotalMtm:             totalMtm,
+			RealizedPnl:          realizedPnl,
+			AccountValue:         accountValue,
+			AvailableCash:        &availableCash,
+			AvailableMargin:      &availableMargin,
+			Status:               marginStatus,
 		}
 	} else {
 		detail.Summary = domain.AccountSummaryMetrics{
@@ -379,4 +390,14 @@ func transactionTypeLetter(tx string) string {
 		return "B"
 	}
 	return "S"
+}
+
+func formatPositionAvgPrice(qty int32, buyPrice, sellPrice decimal.Decimal) string {
+	if qty > 0 {
+		return fmt.Sprintf("%.2f", buyPrice.InexactFloat64())
+	}
+	if qty < 0 {
+		return fmt.Sprintf("%.2f", sellPrice.InexactFloat64())
+	}
+	return fmt.Sprintf("%.2f/%.2f", buyPrice.InexactFloat64(), sellPrice.InexactFloat64())
 }

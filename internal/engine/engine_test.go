@@ -5,6 +5,7 @@ package engine_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -84,7 +85,8 @@ func newTestStore(t *testing.T) *postgres.Store {
 func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", "test-secret", "127.0.0.1"); err != nil {
+	ip := fmt.Sprintf("10.0.%d.%d", id[0], id[1])
+	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", "test-secret", ip); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	return id
@@ -414,7 +416,7 @@ func TestHandleMasterFill_UnknownInstrumentIsBadInstrumentNotDispatched(t *testi
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(1), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
 
 	fill := domain.MasterFill{
 		MasterID: master, BrokerOrderID: uuid.NewString(), Exchange: "NFO",
@@ -455,6 +457,61 @@ func TestHandleMasterFill_UnknownInstrumentIsBadInstrumentNotDispatched(t *testi
 	}
 	if got.IntendedQty != 0 {
 		t.Fatalf("IntendedQty = %d, want 0", got.IntendedQty)
+	}
+}
+
+// 1:1 fast-path: for ratio=1.0, the engine bypasses instrument master lookup entirely
+// and directly forwards the master's filled quantity.
+func TestHandleMasterFill_OneToOneFastPath_BypassesInstrumentMaster(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(1), Enabled: true})
+
+	// Fill on an instrument NOT seeded in the database
+	fill := domain.MasterFill{
+		MasterID: master, BrokerOrderID: uuid.NewString(), Exchange: "MCX",
+		Tradingsymbol: "UNSEEDED_CRUDEOIL", InstrumentToken: 999, TransactionType: "BUY",
+		Product: "NRML", OrderType: "MARKET", FilledQuantity: 25,
+		AveragePrice: decimal.NewFromInt(6000), Status: "COMPLETE",
+		OrderTimestamp: time.Now(), RawPayload: []byte(`{}`),
+	}
+	id, err := s.InsertMasterFill(ctx, fill)
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+	fill.ID = id
+
+	disp := newFakeDispatcher()
+	e := engine.New(s, disp)
+	if err := e.HandleMasterFill(ctx, fill); err != nil {
+		t.Fatalf("HandleMasterFill: %v", err)
+	}
+
+	orders, err := s.FollowerOrdersByMasterFill(ctx, fill.ID)
+	if err != nil {
+		t.Fatalf("FollowerOrdersByMasterFill: %v", err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("got %d follower_orders, want 1", len(orders))
+	}
+	if disp.jobCount() != 1 {
+		t.Fatalf("got %d dispatched jobs, want 1 (1:1 fast-path dispatches directly)", disp.jobCount())
+	}
+	if disp.jobs[0].Quantity != 25 {
+		t.Fatalf("dispatched quantity = %d, want 25", disp.jobs[0].Quantity)
+	}
+
+	got, err := s.GetFollowerOrder(ctx, orders[0].ID)
+	if err != nil {
+		t.Fatalf("GetFollowerOrder: %v", err)
+	}
+	if got.SizingReason != domain.ReasonOK {
+		t.Fatalf("SizingReason = %v, want ReasonOK", got.SizingReason)
+	}
+	if got.IntendedQty != 25 {
+		t.Fatalf("IntendedQty = %d, want 25", got.IntendedQty)
 	}
 }
 

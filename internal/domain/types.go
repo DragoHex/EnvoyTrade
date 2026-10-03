@@ -34,6 +34,8 @@ type MasterFill struct {
 	Product         string
 	OrderType       string
 	FilledQuantity  int
+	Price           decimal.Decimal
+	TriggerPrice    decimal.Decimal
 	AveragePrice    decimal.Decimal
 	Status          string
 	OrderTimestamp  time.Time
@@ -181,11 +183,13 @@ type HoldingSyncParam struct {
 
 // MarginSyncParam represents account margin and summary metrics to sync.
 type MarginSyncParam struct {
-	NetQty       int
-	TotalMtm     decimal.Decimal
-	RealizedPnl  decimal.Decimal
-	AccountValue decimal.Decimal
-	Status       string
+	NetQty          int
+	TotalMtm        decimal.Decimal
+	RealizedPnl     decimal.Decimal
+	AccountValue    decimal.Decimal
+	AvailableCash   *decimal.Decimal
+	AvailableMargin *decimal.Decimal
+	Status          string
 }
 
 // Group models a trading group with a designated master account.
@@ -243,6 +247,8 @@ type Job struct {
 	Product         string
 	OrderType       string
 	Quantity        int
+	Price           float64
+	TriggerPrice    float64
 }
 
 // GroupSummary is one row of the Dashboard's group list: a master account
@@ -259,26 +265,38 @@ type GroupSummary struct {
 	Active          bool
 }
 
-// GroupFollower is one follower row inside a GroupDetail. MTM/cash/margin/
-// net-qty/positions are intentionally absent — they require broker data
-// (gokiteconnect's GetMargins/GetPositions) not wired yet (docs/APIs/groups.md).
+// GroupFollower is one follower row inside a GroupDetail with its summary metrics.
 type GroupFollower struct {
-	AccountID       uuid.UUID
-	Name            string
-	BrokerAccountID string
-	Enabled         bool
-	Status          string
+	AccountID            uuid.UUID
+	Name                 string
+	BrokerAccountID      string
+	Enabled              bool
+	Status               string
+	NetQty               int
+	OpenPositionsCount   int
+	ClosedPositionsCount int
+	OpenOrdersCount      int
+	TotalMtm             decimal.Decimal
+	AvailableCash        *decimal.Decimal
+	AvailableMargin      *decimal.Decimal
 }
 
 // GroupDetail is the full Dashboard GroupCard payload for one group.
 type GroupDetail struct {
-	GroupID         uuid.UUID
-	GroupName       string
-	MasterID        uuid.UUID
-	MasterAccountID string
-	MasterName      string
-	MasterActive    bool
-	Followers       []GroupFollower
+	GroupID                    uuid.UUID
+	GroupName                  string
+	MasterID                   uuid.UUID
+	MasterAccountID            string
+	MasterName                 string
+	MasterActive               bool
+	MasterNetQty               int
+	MasterOpenPositionsCount   int
+	MasterClosedPositionsCount int
+	MasterOpenOrdersCount      int
+	MasterTotalMtm             decimal.Decimal
+	MasterAvailableCash        *decimal.Decimal
+	MasterAvailableMargin      *decimal.Decimal
+	Followers                  []GroupFollower
 }
 
 // OrderEvent is one append-only transition-log row — the SEBI audit
@@ -316,6 +334,7 @@ type PositionItem struct {
 	AvgPrice   string          `json:"avgPrice"`
 	Ltp        decimal.Decimal `json:"ltp"`
 	Mtm        decimal.Decimal `json:"mtm"`
+	Pnl        decimal.Decimal `json:"pnl"`
 	Action     string          `json:"action,omitempty"`
 }
 

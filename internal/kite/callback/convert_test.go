@@ -75,6 +75,33 @@ func TestToMasterFill_TruncatesFractionalQuantity(t *testing.T) {
 	}
 }
 
+func TestToMasterFill_MapsPriceAndTriggerPrice(t *testing.T) {
+	o := sampleOrder()
+	o.OrderType = "LIMIT"
+	o.Price = 26.5
+	o.TriggerPrice = 25.0
+
+	got := callback.ToMasterFill(o, uuid.New())
+	if !got.Price.Equal(decimal.NewFromFloat(26.5)) {
+		t.Errorf("Price = %v, want 26.5", got.Price)
+	}
+	if !got.TriggerPrice.Equal(decimal.NewFromFloat(25.0)) {
+		t.Errorf("TriggerPrice = %v, want 25.0", got.TriggerPrice)
+	}
+}
+
+func TestToMasterFill_LimitOrder_FallsBackToAveragePriceWhenPriceIsZero(t *testing.T) {
+	o := sampleOrder()
+	o.OrderType = "LIMIT"
+	o.Price = 0.0
+	o.AveragePrice = 27.5
+
+	got := callback.ToMasterFill(o, uuid.New())
+	if !got.Price.Equal(decimal.NewFromFloat(27.5)) {
+		t.Errorf("Price = %v, want 27.5 (fell back to AveragePrice)", got.Price)
+	}
+}
+
 func TestToOrderUpdate_MapsStatusFields(t *testing.T) {
 	got := callback.ToOrderUpdate(sampleOrder())
 

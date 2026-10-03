@@ -62,6 +62,18 @@ var userScopingSchema string
 //go:embed migrations/0013_user_profile_fields.sql
 var userProfileFieldsSchema string
 
+//go:embed migrations/0014_proxy_ips.sql
+var proxyIPsSchema string
+
+//go:embed migrations/0015_pending_order_updates.sql
+var pendingOrderUpdatesSchema string
+
+//go:embed migrations/0016_account_status_check.sql
+var accountStatusCheckSchema string
+
+//go:embed migrations/0017_account_margins_available.sql
+var accountMarginsAvailableSchema string
+
 const uniqueViolation = "23505"
 const foreignKeyViolation = "23503"
 
@@ -139,6 +151,18 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, userProfileFieldsSchema); err != nil {
 		return fmt.Errorf("0013_user_profile_fields: %w", err)
 	}
+	if _, err := s.pool.Exec(ctx, proxyIPsSchema); err != nil {
+		return fmt.Errorf("0014_proxy_ips: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, pendingOrderUpdatesSchema); err != nil {
+		return fmt.Errorf("0015_pending_order_updates: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, accountStatusCheckSchema); err != nil {
+		return fmt.Errorf("0016_account_status_check: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, accountMarginsAvailableSchema); err != nil {
+		return fmt.Errorf("0017_account_margins_available: %w", err)
+	}
 	return nil
 }
 
@@ -164,6 +188,9 @@ func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, ro
 		IpAddress:    ipAddress,
 		UserID:       userID,
 	})
+	if isIPUniqueViolation(err) {
+		return domain.ErrIPAlreadyAssigned
+	}
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
 	}
@@ -189,6 +216,9 @@ func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, 
 		EncryptedTotpSecret: encTotpSecret,
 		UserID:              userID,
 	})
+	if isIPUniqueViolation(err) {
+		return domain.ErrIPAlreadyAssigned
+	}
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
 	}
@@ -447,14 +477,98 @@ func (s *Store) FollowerOrdersByMasterFill(ctx context.Context, masterFillID int
 	return orders, nil
 }
 
+// StashPendingOrderUpdate records an early postback that arrived before
+// the follower_orders row received its broker_order_id.
+func (s *Store) StashPendingOrderUpdate(ctx context.Context, brokerOrderID, status string, filledQty int, avgPrice decimal.Decimal, rawPayload []byte) error {
+	query := `
+		INSERT INTO pending_order_updates (broker_order_id, status, filled_quantity, average_price, raw_payload, received_at)
+		VALUES ($1, $2, $3, $4, $5, now())
+		ON CONFLICT (broker_order_id) DO UPDATE SET
+			status = EXCLUDED.status,
+			filled_quantity = EXCLUDED.filled_quantity,
+			average_price = EXCLUDED.average_price,
+			raw_payload = EXCLUDED.raw_payload,
+			received_at = now()`
+	_, err := s.pool.Exec(ctx, query, brokerOrderID, status, filledQty, avgPrice, rawPayload)
+	return err
+}
+
 // UpdateFollowerOrderPlaced records a successful broker placement.
+// If an early postback was stashed in pending_order_updates, it is consumed in the
+// exact same transaction, applying terminal status and appending the audit event in 0ms.
 func (s *Store) UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	placedQty32 := int32(placedQty)
-	return s.queries.UpdateFollowerOrderPlaced(ctx, sqlcgen.UpdateFollowerOrderPlacedParams{
-		ID:            id,
-		BrokerOrderID: &brokerOrderID,
-		PlacedQty:     &placedQty32,
-	})
+	updateQuery := `
+		UPDATE follower_orders
+		SET broker_order_id = $2, placed_qty = $3, attempt_count = attempt_count + 1, updated_at = now()
+		WHERE id = $1`
+	if _, err := tx.Exec(ctx, updateQuery, id, brokerOrderID, placedQty32); err != nil {
+		return fmt.Errorf("update follower_orders placed: %w", err)
+	}
+
+	// Check if postback arrived early and was stashed
+	consumeQuery := `
+		DELETE FROM pending_order_updates
+		WHERE broker_order_id = $1
+		RETURNING status, filled_quantity, average_price, raw_payload`
+	var (
+		status     string
+		filledQty  int32
+		avgPrice   *decimal.Decimal
+		rawPayload []byte
+	)
+	row := tx.QueryRow(ctx, consumeQuery, brokerOrderID)
+	err = row.Scan(&status, &filledQty, &avgPrice, &rawPayload)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("check pending_order_updates: %w", err)
+	}
+
+	if err == nil {
+		applyQuery := `
+			UPDATE follower_orders
+			SET terminal_status = $2, filled_qty = $3, average_price = $4, updated_at = now()
+			WHERE id = $1`
+		if _, err := tx.Exec(ctx, applyQuery, id, status, filledQty, avgPrice); err != nil {
+			return fmt.Errorf("apply stashed follower_orders status: %w", err)
+		}
+
+		var followerID uuid.UUID
+		var masterFillID int64
+		if err := tx.QueryRow(ctx, `SELECT follower_id, master_fill_id FROM follower_orders WHERE id = $1`, id).Scan(&followerID, &masterFillID); err == nil {
+			eventQuery := `
+				INSERT INTO order_events (follower_order_id, master_fill_id, account_id, event_type, payload)
+				VALUES ($1, $2, $3, 'status_update', $4)`
+			_, _ = tx.Exec(ctx, eventQuery, id, masterFillID, followerID, rawPayload)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// SweepPendingOrderUpdates deletes pending order updates older than cutoff, returning
+// the deleted broker order IDs for alerting.
+func (s *Store) SweepPendingOrderUpdates(ctx context.Context, cutoff time.Time) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `DELETE FROM pending_order_updates WHERE received_at < $1 RETURNING broker_order_id`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var deleted []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		deleted = append(deleted, id)
+	}
+	return deleted, rows.Err()
 }
 
 // UpdateFollowerOrderFailed records a terminal failure — no retry in
@@ -557,6 +671,11 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
 }
 
+func isIPUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "idx_accounts_ip_address_unique"
+}
+
 func isForeignKeyViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation
@@ -598,7 +717,7 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 			ApiKey:          r.ApiKey,
 			ApiSecret:       r.ApiSecret,
 			Active:          r.Active,
-			Status:          r.Status,
+			Status:          statusFromAccountStatus(r.Status),
 			IPAddress:       r.IpAddress,
 			AuthStatus:      r.AuthStatus,
 			AuthError:       r.AuthError,
@@ -651,13 +770,15 @@ func nullableMaxQtyPtr(v *int) *int32 {
 	return &v32
 }
 
-// SetAccountStatus updates an account's free-text status column — the
-// Accounts page's edit form. Returns domain.ErrNotFound if id has no
-// accounts row.
-func (s *Store) SetAccountStatus(ctx context.Context, id uuid.UUID, status string) error {
+// SetAccountStatus updates an account's status column.
+// Returns domain.ErrNotFound if id has no accounts row, or domain.ErrInvalidAccountStatus if status is invalid.
+func (s *Store) SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error {
+	if !status.IsValid() {
+		return domain.ErrInvalidAccountStatus
+	}
 	rowsAffected, err := s.queries.SetAccountStatus(ctx, sqlcgen.SetAccountStatusParams{
 		ID:     id,
-		Status: status,
+		Status: string(status),
 	})
 	if err != nil {
 		return err
@@ -722,6 +843,12 @@ func (s *Store) SetAccountIPAddress(ctx context.Context, id uuid.UUID, ip string
 		ID:        id,
 		IpAddress: ip,
 	})
+	if isIPUniqueViolation(err) {
+		return domain.ErrIPAlreadyAssigned
+	}
+	if isUniqueViolation(err) {
+		return domain.ErrDuplicate
+	}
 	if err != nil {
 		return err
 	}

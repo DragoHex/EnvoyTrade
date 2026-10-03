@@ -44,7 +44,12 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		Product:         params.Product,
 		OrderType:       params.OrderType,
 		Quantity:        params.Quantity,
+		Price:           params.Price,
+		TriggerPrice:    params.TriggerPrice,
 		Tag:             params.Tag,
+	}
+	if p.OrderType == kiteconnect.OrderTypeMarket || p.OrderType == kiteconnect.OrderTypeSLM {
+		p.MarketProtection = kiteconnect.MarketProtectionAuto
 	}
 
 	resp, err := b.api.PlaceOrder(variety, p)
