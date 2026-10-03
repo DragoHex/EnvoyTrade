@@ -33,9 +33,10 @@ type AccountsStore interface {
 	SetAccountEncryptedCredentials(ctx context.Context, id uuid.UUID, encPassword, encTotpSecret string) error
 	CreateFollowLink(ctx context.Context, link domain.FollowLink) error
 	UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, capitalRatio decimal.Decimal, maxQtyPerOrder *int) error
-	SetAccountStatus(ctx context.Context, id uuid.UUID, status string) error
+	SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error
+	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
 }
 
 type accountResponse struct {
@@ -208,6 +209,16 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if validIP != "" {
+		if _, err := h.store.ProxyIPByAddress(r.Context(), validIP); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeError(w, http.StatusBadRequest, "IP address is not registered in proxy pool")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to check proxy IP")
+			return
+		}
+	}
 
 	var capitalRatio decimal.Decimal
 	var masterID uuid.UUID
@@ -268,6 +279,10 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = h.store.CreateAccountWithCredentials(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiKey, req.ApiSecret, validIP, encPass, encTotp)
+	if errors.Is(err, domain.ErrIPAlreadyAssigned) {
+		writeError(w, http.StatusConflict, "IP address "+validIP+" is already assigned to another account")
+		return
+	}
 	if errors.Is(err, domain.ErrDuplicate) {
 		writeError(w, http.StatusConflict, "an account with this brokerAccountId already exists")
 		return
@@ -390,6 +405,16 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		if writePatchStoreError(w, h.store.SetAccountActive(r.Context(), id, *req.Active)) {
 			return
 		}
+		if h.tickerMgr != nil {
+			role, _ := h.store.AccountRole(r.Context(), id)
+			if role == "master" {
+				if *req.Active {
+					_ = h.tickerMgr.StartMaster(r.Context(), id)
+				} else {
+					_ = h.tickerMgr.StopMaster(id)
+				}
+			}
+		}
 		resp["active"] = *req.Active
 		updated = true
 	}
@@ -411,10 +436,15 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		updated = true
 	}
 	if req.Status != nil {
-		if writePatchStoreError(w, h.store.SetAccountStatus(r.Context(), id, *req.Status)) {
+		status, err := domain.ParseAccountStatus(*req.Status)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		resp["status"] = *req.Status
+		if writePatchStoreError(w, h.store.SetAccountStatus(r.Context(), id, status)) {
+			return
+		}
+		resp["status"] = status.ToAPI()
 		updated = true
 	}
 	if req.IP != nil || req.IPAddress != nil {
@@ -436,7 +466,22 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if writePatchStoreError(w, h.store.SetAccountIPAddress(r.Context(), id, validIP)) {
+		if validIP != "" {
+			if _, err := h.store.ProxyIPByAddress(r.Context(), validIP); err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					writeError(w, http.StatusBadRequest, "IP address is not registered in proxy pool")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed to check proxy IP")
+				return
+			}
+		}
+		setErr := h.store.SetAccountIPAddress(r.Context(), id, validIP)
+		if errors.Is(setErr, domain.ErrIPAlreadyAssigned) {
+			writeError(w, http.StatusConflict, "IP address "+validIP+" is already assigned to another account")
+			return
+		}
+		if writePatchStoreError(w, setErr) {
 			return
 		}
 		resp["ip"] = validIP
@@ -564,6 +609,9 @@ func (h *handlers) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to delete account")
 	default:
+		if h.tickerMgr != nil {
+			_ = h.tickerMgr.StopMaster(id)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

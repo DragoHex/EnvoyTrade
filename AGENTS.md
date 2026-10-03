@@ -50,7 +50,7 @@ export TESTCONTAINERS_RYUK_DISABLED=true
 go test -tags integration ./...
 ```
 
-`./gokiteconnect` is a **vendored third-party SDK** (`github.com/zerodha/gokiteconnect/v4`, aliased via a `replace` in `go.mod`). Never edit it — it's consumed as-is for reference and by `internal/kite`. If its shape is a problem, work around it from the service side.
+`github.com/zerodha/gokiteconnect/v4` is consumed directly from Go modules (upgraded to `v4.4.3`). `./gokiteconnect` is a local checkout kept as reference only — never edit it. If its shape is a problem, work around it from the service side.
 
 ## Architecture
 

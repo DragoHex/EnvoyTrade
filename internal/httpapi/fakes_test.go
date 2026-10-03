@@ -77,6 +77,13 @@ type stubStore struct {
 	ordersDetailTab   string
 	ordersDetailPage  int
 	ordersDetailLimit int
+
+	proxyIPs         []domain.ProxyIP
+	proxyIPsErr      error
+	availableIPs     []domain.ProxyIP
+	availableIPsErr  error
+	proxyIPByAddr    domain.ProxyIP
+	proxyIPByAddrErr error
 }
 
 type createAccountCall struct {
@@ -121,7 +128,7 @@ type updateFollowLinkTermsCall struct {
 
 type setStatusCall struct {
 	ID     uuid.UUID
-	Status string
+	Status domain.AccountStatus
 }
 
 type setEnabledCall struct {
@@ -260,7 +267,7 @@ func (s *stubStore) UpdateFollowLinkTerms(_ context.Context, followerID uuid.UUI
 	return s.updateFollowLinkTermsErr
 }
 
-func (s *stubStore) SetAccountStatus(_ context.Context, id uuid.UUID, status string) error {
+func (s *stubStore) SetAccountStatus(_ context.Context, id uuid.UUID, status domain.AccountStatus) error {
 	s.setStatusArgs = append(s.setStatusArgs, setStatusCall{id, status})
 	return s.setStatusErr
 }
@@ -335,6 +342,40 @@ func (s *stubStore) UpdateUserPassword(_ context.Context, _ uuid.UUID, _ string)
 
 func (s *stubStore) DeleteOtherSessions(_ context.Context, _ uuid.UUID, _ string) error {
 	return nil
+}
+
+func (s *stubStore) ListProxyIPs(_ context.Context) ([]domain.ProxyIP, error) {
+	if s.proxyIPsErr != nil {
+		return nil, s.proxyIPsErr
+	}
+	return s.proxyIPs, nil
+}
+
+func (s *stubStore) AvailableProxyIPs(_ context.Context, _ string, _ *uuid.UUID) ([]domain.ProxyIP, error) {
+	if s.availableIPsErr != nil {
+		return nil, s.availableIPsErr
+	}
+	return s.availableIPs, nil
+}
+
+func (s *stubStore) ProxyIPByAddress(_ context.Context, ipAddress string) (domain.ProxyIP, error) {
+	if s.proxyIPByAddrErr != nil {
+		return domain.ProxyIP{}, s.proxyIPByAddrErr
+	}
+	if s.proxyIPByAddr.IPAddress != "" {
+		return s.proxyIPByAddr, nil
+	}
+	for _, p := range s.proxyIPs {
+		if p.IPAddress == ipAddress {
+			return p, nil
+		}
+	}
+	for _, p := range s.availableIPs {
+		if p.IPAddress == ipAddress {
+			return p, nil
+		}
+	}
+	return domain.ProxyIP{IPAddress: ipAddress, Host: "dc46-mum-01.algoip.in", Port: 443}, nil
 }
 
 // stubActionEngine is a hand-written fake satisfying httpapi.Engine.

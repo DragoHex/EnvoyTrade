@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
 	"envoytrade/internal/httpapi"
@@ -103,14 +104,20 @@ func run(logger *slog.Logger) error {
 	masterFillQueue := memchan.New[domain.MasterFill](1024)
 	orderUpdateQueue := memchan.New[domain.OrderUpdate](1024)
 
+	syncer := &kite.PortfolioSyncer{
+		Store: store,
+	}
+
 	// Consumers draining queues into store and engine
 	masterFillConsumer := &listener.MasterFillConsumer{
 		Store:  store,
 		Engine: eng,
+		Syncer: syncer,
 		Logger: logger.With("component", "master_fill_consumer"),
 	}
 	followerStatusConsumer := &listener.FollowerStatusConsumer{
 		Store:  store,
+		Syncer: syncer,
 		Logger: logger.With("component", "follower_status_consumer"),
 	}
 
@@ -152,6 +159,23 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	// Dynamic multi-master WebSocket ticker manager
+	tickerManager := kite.NewTickerManager(store, masterFillQueue, poller, logger.With("component", "ticker_manager"))
+	defer tickerManager.Shutdown()
+
+	if err := tickerManager.SyncActiveMasters(ctx); err != nil {
+		logger.Error("sync active masters tickers failed", "error", err)
+	}
+
+	// Auto-restart master ticker on headless token refresh
+	syncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+		role, err := store.AccountRole(refreshCtx, accountID)
+		if err == nil && role == "master" {
+			return tickerManager.RestartMaster(refreshCtx, accountID)
+		}
+		return nil
+	}
+
 	// Periodic session expiration cleaner
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
@@ -170,9 +194,27 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	syncer := &kite.PortfolioSyncer{
-		Store: store,
-	}
+	// Periodic portfolio sync for active authenticated accounts to keep MTM and positions fresh
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				accs, err := store.Accounts(ctx, nil)
+				if err != nil {
+					continue
+				}
+				for _, a := range accs {
+					if a.Active && a.AuthStatus == "authenticated" {
+						_ = syncer.SyncAccountPortfolio(ctx, a.ID)
+					}
+				}
+			}
+		}
+	}()
 
 	router := httpapi.NewRouter(
 		store,
@@ -180,6 +222,7 @@ func run(logger *slog.Logger) error {
 		httpapi.WithPostbackHandler(postbackHandler),
 		httpapi.WithLogger(logger.With("component", "httpapi")),
 		httpapi.WithPortfolioSyncer(syncer),
+		httpapi.WithTickerManager(tickerManager),
 	)
 
 	server := &http.Server{
@@ -220,7 +263,28 @@ func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.
 			return 0, err
 		}
 		for _, f := range detail.Followers {
-			pool.Register(ctx, f.AccountID, &fake.Broker{}, store, 16)
+			var b broker.Broker = &fake.Broker{}
+			authInfo, err := store.AccountAuthInfo(ctx, f.AccountID)
+			if err == nil && authInfo.ApiKey != "" && authInfo.AccessToken != "" {
+				var proxyCfg *kite.ProxyConfig
+				if authInfo.IPAddress != "" {
+					pIP, err := store.ProxyIPByAddress(ctx, authInfo.IPAddress)
+					if err == nil {
+						proxyCfg = &kite.ProxyConfig{
+							Scheme:       "https",
+							Host:         pIP.Host,
+							Port:         pIP.Port,
+							ClientID:     pIP.Username,
+							ClientSecret: pIP.Password,
+						}
+					}
+				}
+				liveBroker, err := kite.NewLiveBroker(authInfo.ApiKey, authInfo.AccessToken, proxyCfg)
+				if err == nil {
+					b = liveBroker
+				}
+			}
+			pool.Register(ctx, f.AccountID, b, store, 16)
 			count++
 		}
 	}
@@ -232,8 +296,16 @@ type serverMasterReader struct {
 }
 
 func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error) {
-	// Placeholder until live master session is authenticated
-	return nil, nil
+	authInfo, err := r.store.AccountAuthInfo(ctx, masterID)
+	if err != nil {
+		return nil, err
+	}
+	if authInfo.ApiKey == "" || authInfo.AccessToken == "" {
+		return nil, nil
+	}
+	kc := kiteconnect.New(authInfo.ApiKey)
+	kc.SetAccessToken(authInfo.AccessToken)
+	return kc.GetOrders()
 }
 
 type serverFollowerReader struct {
@@ -241,9 +313,34 @@ type serverFollowerReader struct {
 }
 
 func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]kiteconnect.Order, error) {
-	// Placeholder until live follower session is authenticated
-	return nil, nil
+	authInfo, err := r.store.AccountAuthInfo(ctx, followerID)
+	if err != nil {
+		return nil, err
+	}
+	if authInfo.ApiKey == "" || authInfo.AccessToken == "" {
+		return nil, nil
+	}
+	kc := kiteconnect.New(authInfo.ApiKey)
+	kc.SetAccessToken(authInfo.AccessToken)
+	if authInfo.IPAddress != "" {
+		pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress)
+		if err == nil {
+			proxyCfg := kite.ProxyConfig{
+				Scheme:       "https",
+				Host:         pIP.Host,
+				Port:         pIP.Port,
+				ClientID:     pIP.Username,
+				ClientSecret: pIP.Password,
+			}
+			if client, err := kite.RESTClientFor(proxyCfg); err == nil {
+				kc.SetHTTPClient(client)
+			}
+		}
+	}
+	return kc.GetOrderHistory(brokerOrderID)
 }
+
+
 
 // setupLogger initializes structured slog output to a file (default: /var/log/envoytrade/app.log)
 // or falls back to stdout if unwritable.

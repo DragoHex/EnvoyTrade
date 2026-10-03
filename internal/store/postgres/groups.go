@@ -9,16 +9,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 )
 
-// statusFromAccountStatus maps the free-text accounts.status column to the
-// "ok"|"error" rollup docs/APIs/groups.md documents — "active" is the only
-// healthy value the schema defines today (0001_fanout.sql's DEFAULT).
+// statusFromAccountStatus maps the accounts.status column to the "ok"|"error" rollup.
 func statusFromAccountStatus(accountStatus string) string {
-	if accountStatus == "active" {
-		return "ok"
+	status, err := domain.ParseAccountStatus(accountStatus)
+	if err != nil {
+		return "error"
 	}
-	return "error"
+	return status.ToAPI()
 }
 
 // Groups lists every group with follower-count and status rollup,
@@ -86,13 +86,104 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 	if err != nil {
 		return domain.GroupDetail{}, err
 	}
+
+	accountIDs := make([]uuid.UUID, 0, 1+len(rows))
+	accountIDs = append(accountIDs, info.MasterID)
 	for _, r := range rows {
+		accountIDs = append(accountIDs, r.ID)
+	}
+
+	type accountMetricsRow struct {
+		netQty               int
+		totalMtm             decimal.Decimal
+		availableCash        *decimal.Decimal
+		availableMargin      *decimal.Decimal
+		openPositionsCount   int
+		closedPositionsCount int
+		openOrdersCount      int
+	}
+
+	metricsMap := make(map[uuid.UUID]accountMetricsRow, len(accountIDs))
+	mRows, err := s.pool.Query(ctx, `
+		SELECT 
+			a.id,
+			COALESCE(m.net_qty, 0),
+			COALESCE(m.total_mtm, 0),
+			m.available_cash,
+			m.available_margin,
+			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity != 0),
+			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity = 0),
+			CASE 
+				WHEN a.role = 'master' THEN 
+					(SELECT COUNT(*) FROM master_fills mf WHERE mf.master_id = a.id AND mf.status NOT IN ('COMPLETE', 'REJECTED', 'CANCELLED'))
+				ELSE 
+					(SELECT COUNT(*) FROM follower_orders fo WHERE fo.follower_id = a.id AND fo.terminal_status IS NULL AND fo.intended_qty > 0)
+			END
+		FROM accounts a
+		LEFT JOIN account_margins m ON m.account_id = a.id
+		WHERE a.id = ANY($1::uuid[])
+	`, accountIDs)
+	if err != nil {
+		return domain.GroupDetail{}, err
+	}
+	defer mRows.Close()
+
+	for mRows.Next() {
+		var accID uuid.UUID
+		var m accountMetricsRow
+		var netQty int32
+		var totalMtm decimal.Decimal
+		var availCash, availMargin *decimal.Decimal
+		var openPos, closedPos, openOrders int64
+		if err := mRows.Scan(
+			&accID,
+			&netQty,
+			&totalMtm,
+			&availCash,
+			&availMargin,
+			&openPos,
+			&closedPos,
+			&openOrders,
+		); err != nil {
+			return domain.GroupDetail{}, err
+		}
+		m.netQty = int(netQty)
+		m.totalMtm = totalMtm
+		m.availableCash = availCash
+		m.availableMargin = availMargin
+		m.openPositionsCount = int(openPos)
+		m.closedPositionsCount = int(closedPos)
+		m.openOrdersCount = int(openOrders)
+		metricsMap[accID] = m
+	}
+	if err := mRows.Err(); err != nil {
+		return domain.GroupDetail{}, err
+	}
+
+	masterM := metricsMap[info.MasterID]
+	detail.MasterNetQty = masterM.netQty
+	detail.MasterOpenPositionsCount = masterM.openPositionsCount
+	detail.MasterClosedPositionsCount = masterM.closedPositionsCount
+	detail.MasterOpenOrdersCount = masterM.openOrdersCount
+	detail.MasterTotalMtm = masterM.totalMtm
+	detail.MasterAvailableCash = masterM.availableCash
+	detail.MasterAvailableMargin = masterM.availableMargin
+
+	for _, r := range rows {
+		fMetrics := metricsMap[r.ID]
 		detail.Followers = append(detail.Followers, domain.GroupFollower{
-			AccountID:       r.ID,
-			Name:            r.Name,
-			BrokerAccountID: r.BrokerUserID,
-			Enabled:         r.Enabled,
-			Status:          statusFromAccountStatus(r.Status),
+			AccountID:            r.ID,
+			Name:                 r.Name,
+			BrokerAccountID:      r.BrokerUserID,
+			Enabled:              r.Enabled,
+			Status:               statusFromAccountStatus(r.Status),
+			NetQty:               fMetrics.netQty,
+			OpenPositionsCount:   fMetrics.openPositionsCount,
+			ClosedPositionsCount: fMetrics.closedPositionsCount,
+			OpenOrdersCount:      fMetrics.openOrdersCount,
+			TotalMtm:             fMetrics.totalMtm,
+			AvailableCash:        fMetrics.availableCash,
+			AvailableMargin:      fMetrics.availableMargin,
 		})
 	}
 	return detail, nil

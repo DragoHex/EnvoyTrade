@@ -91,6 +91,20 @@ func TestGroupDetail_ReturnsMasterAndFollowers(t *testing.T) {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
 
+	cash := decimal.NewFromInt(60000)
+	margin := decimal.NewFromInt(150000)
+	if err := s.SyncAccountMargins(ctx, follower, domain.MarginSyncParam{
+		NetQty:          75,
+		TotalMtm:        decimal.NewFromFloat(1250.50),
+		RealizedPnl:     decimal.NewFromFloat(500),
+		AccountValue:    decimal.NewFromInt(210000),
+		AvailableCash:   &cash,
+		AvailableMargin: &margin,
+		Status:          "online",
+	}); err != nil {
+		t.Fatalf("SyncAccountMargins: %v", err)
+	}
+
 	detail, err := s.GroupDetail(ctx, master)
 	if err != nil {
 		t.Fatalf("GroupDetail: %v", err)
@@ -106,6 +120,15 @@ func TestGroupDetail_ReturnsMasterAndFollowers(t *testing.T) {
 	}
 	if !detail.Followers[0].Enabled {
 		t.Errorf("follower Enabled = false, want true")
+	}
+	if detail.Followers[0].NetQty != 75 {
+		t.Errorf("follower NetQty = %d, want 75", detail.Followers[0].NetQty)
+	}
+	if !detail.Followers[0].TotalMtm.Equal(decimal.NewFromFloat(1250.50)) {
+		t.Errorf("follower TotalMtm = %v, want 1250.50", detail.Followers[0].TotalMtm)
+	}
+	if detail.Followers[0].AvailableCash == nil || !detail.Followers[0].AvailableCash.Equal(cash) {
+		t.Errorf("follower AvailableCash = %v, want %v", detail.Followers[0].AvailableCash, cash)
 	}
 }
 

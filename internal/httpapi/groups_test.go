@@ -11,6 +11,7 @@ import (
 	"envoytrade/internal/httpapi"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 func TestGetGroups_ReturnsGroupsAsJSON(t *testing.T) {
@@ -50,12 +51,33 @@ func TestGetGroups_ReturnsGroupsAsJSON(t *testing.T) {
 func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	master := uuid.New()
 	follower := uuid.New()
+	cash := decimal.NewFromInt(50000)
+	margin := decimal.NewFromInt(120000)
 	store := &stubStore{
 		detail: domain.GroupDetail{
-			MasterID:        master,
-			MasterAccountID: "ZX1234",
+			MasterID:                   master,
+			MasterAccountID:            "ZX1234",
+			MasterNetQty:               100,
+			MasterOpenPositionsCount:   2,
+			MasterClosedPositionsCount: 1,
+			MasterOpenOrdersCount:      3,
+			MasterTotalMtm:             decimal.NewFromFloat(1500.50),
+			MasterAvailableCash:        &cash,
+			MasterAvailableMargin:      &margin,
 			Followers: []domain.GroupFollower{
-				{AccountID: follower, BrokerAccountID: "ZY5678", Enabled: true, Status: "ok"},
+				{
+					AccountID:            follower,
+					BrokerAccountID:      "ZY5678",
+					Enabled:              true,
+					Status:               "ok",
+					NetQty:               50,
+					OpenPositionsCount:   1,
+					ClosedPositionsCount: 0,
+					OpenOrdersCount:      1,
+					TotalMtm:             decimal.NewFromFloat(750.25),
+					AvailableCash:        &cash,
+					AvailableMargin:      &margin,
+				},
 			},
 		},
 	}
@@ -72,6 +94,12 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
 	}
+	if got["masterNetQty"] != float64(100) {
+		t.Errorf("masterNetQty = %v, want 100", got["masterNetQty"])
+	}
+	if got["masterOpenPositionsCount"] != float64(2) {
+		t.Errorf("masterOpenPositionsCount = %v, want 2", got["masterOpenPositionsCount"])
+	}
 	followers, ok := got["followers"].([]any)
 	if !ok || len(followers) != 1 {
 		t.Fatalf("followers = %v, want 1 entry", got["followers"])
@@ -82,6 +110,12 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	}
 	if f0["enabled"] != true {
 		t.Errorf("enabled = %v, want true", f0["enabled"])
+	}
+	if f0["netQty"] != float64(50) {
+		t.Errorf("netQty = %v, want 50", f0["netQty"])
+	}
+	if f0["openPositionsCount"] != float64(1) {
+		t.Errorf("openPositionsCount = %v, want 1", f0["openPositionsCount"])
 	}
 }
 

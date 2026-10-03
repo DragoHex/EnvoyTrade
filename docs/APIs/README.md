@@ -22,6 +22,7 @@ prefer expanding an existing endpoint over adding a new one.
 | [`orders.md`](./orders.md) | `GET /accounts/{id}/orders` | Dashboard account expanded order, position, and holding drawer |
 | [`actions.md`](./actions.md) | `POST /accounts/{id}/actions` | Dashboard Rebalance / Square Off / Exit Open Orders buttons |
 | [`analytics.md`](./analytics.md) | `GET /analytics/pnl`, `GET /analytics/trades` | Analytics page |
+| [`proxy_ips.md`](./proxy_ips.md) | `GET /proxy-ips`, `GET /proxy-ips/available` | Proxy IP pool management and auto-assignment in Account drawer |
 
 No endpoint is duplicated across files — e.g. the copy-enable toggle is **not** a separate
 `/follow-links/{id}` resource, it's a field on the existing account `PATCH`; the three action buttons

@@ -167,8 +167,26 @@ func TestPatchAccount_Status_UpdatesAccountStatus(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	if len(store.setStatusArgs) != 1 || store.setStatusArgs[0] != (setStatusCall{id, "error"}) {
+	if len(store.setStatusArgs) != 1 || store.setStatusArgs[0] != (setStatusCall{id, domain.AccountStatusError}) {
 		t.Errorf("setStatusArgs = %+v, want [{%v error}]", store.setStatusArgs, id)
+	}
+}
+
+func TestPatchAccount_InvalidStatus_Returns400(t *testing.T) {
+	id := uuid.New()
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"status": "invalid_status_xyz"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+id.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setStatusArgs) != 0 {
+		t.Errorf("expected no SetAccountStatus calls on invalid input, got %d", len(store.setStatusArgs))
 	}
 }
 
