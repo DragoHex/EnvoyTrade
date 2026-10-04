@@ -9,7 +9,7 @@ import { RoleIcon } from './RoleIcon'
 import { AccountHoldingsRow } from './AccountHoldingsRow'
 
 // AccountsTable lists accounts with quick-action toggles and row-level
-// edit/remove/delete buttons (docs/UI-PLAN.md §3).
+// edit/remove/delete buttons (docs/plans/UI-PLAN.md §3).
 export function AccountsTable(props: {
   accounts: Account[]
   emptyMessage?: string

@@ -1,7 +1,7 @@
 # EnvoyTrade Dashboard API — contract index
 
 Contract only — nothing here is implemented yet (no `main.go`, no router, no `internal/admin` exists in
-the Go backend as of this writing). This documents the API surface `docs/UI-PLAN.md` needs, kept lean:
+the Go backend as of this writing). This documents the API surface `docs/plans/UI-PLAN.md` needs, kept lean:
 prefer expanding an existing endpoint over adding a new one.
 
 ## Conventions

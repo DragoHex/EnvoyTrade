@@ -1,6 +1,6 @@
 # EnvoyTrade V1 — Architecture
 
-Companion to [PLAN.md](./PLAN.md). This document captures the system's structure and the
+Companion to [PLAN.md](./plans/PLAN.md). This document captures the system's structure and the
 interactions between its components. It is derived from, not a substitute for, the plan —
 see PLAN.md for rationale and alternatives considered.
 

@@ -9,7 +9,7 @@ import { BrokerLogo, SUPPORTED_BROKERS } from './BrokerLogo'
 import { isValidIP } from '../utils/ip'
 
 // AccountDetailDrawer is the Accounts page's create/edit form
-// (docs/UI-PLAN.md's field table). account=null means create mode;
+// (docs/plans/UI-PLAN.md's field table). account=null means create mode;
 // otherwise it edits that account. Role is fixed at create time and
 // locked thereafter (follow_links.master_id can't be reassigned here).
 export function AccountDetailDrawer(props: {
