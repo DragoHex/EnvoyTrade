@@ -46,11 +46,18 @@ const KITE_CONFIG: BrokerConfig = {
   Logo: KiteLogo,
 }
 
+const TESTBROKER_CONFIG: BrokerConfig = {
+  id: 'testbroker',
+  name: 'Test Broker (Mock)',
+  Logo: (props) => <FallbackBrokerLogo name="TEST" size={props.size} />,
+}
+
 export const SUPPORTED_BROKERS: BrokerConfig[] = [KITE_CONFIG]
 
 export const BROKER_REGISTRY: Record<string, BrokerConfig> = {
   kite: KITE_CONFIG,
   zerodha: KITE_CONFIG,
+  testbroker: TESTBROKER_CONFIG,
 }
 
 export function getBrokerConfig(brokerId?: string): BrokerConfig {

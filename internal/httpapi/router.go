@@ -1,5 +1,5 @@
 // Package httpapi is the stdlib net/http admin API backing the Dashboard
-// page (docs/UI-PLAN.md). Interfaces are declared here, the consumer,
+// page (docs/plans/UI-PLAN.md). Interfaces are declared here, the consumer,
 // satisfied structurally by *postgres.Store and *engine.Engine — same
 // seam rule as the rest of the repo (AGENTS.md "The seam rule").
 package httpapi

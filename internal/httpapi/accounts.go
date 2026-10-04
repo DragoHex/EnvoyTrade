@@ -182,10 +182,12 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "malformed JSON body")
 		return
 	}
-	if req.Broker != "kite" {
-		writeError(w, http.StatusBadRequest, `broker must be "kite"`)
+	broker := strings.ToLower(strings.TrimSpace(req.Broker))
+	if broker != "kite" && broker != "testbroker" {
+		writeError(w, http.StatusBadRequest, `broker must be "kite" or "testbroker"`)
 		return
 	}
+	req.Broker = broker
 	if req.Role != "master" && req.Role != "follower" {
 		writeError(w, http.StatusBadRequest, `role must be "master" or "follower"`)
 		return

@@ -1,9 +1,9 @@
 -- name: CreateAccount :exec
-INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: CreateAccountWithCredentials :exec
-INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+INSERT INTO accounts (id, name, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 -- name: AccountByBrokerUserID :one
 SELECT id, role, api_secret FROM accounts WHERE broker_user_id = $1;
@@ -52,7 +52,8 @@ SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
 LEFT JOIN groups g ON (g.id = f.group_id OR (a.role = 'master' AND g.master_id = a.id))
-WHERE sqlc.narg('ids')::uuid[] IS NULL OR a.id = ANY(sqlc.narg('ids')::uuid[])
+WHERE (sqlc.narg('ids')::uuid[] IS NULL OR a.id = ANY(sqlc.narg('ids')::uuid[]))
+  AND (sqlc.narg('user_id')::uuid IS NULL OR a.user_id = sqlc.narg('user_id')::uuid)
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC;
 
 -- name: UpdateFollowLinkTerms :execrows

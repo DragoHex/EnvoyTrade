@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"envoytrade/internal/crypto"
@@ -114,7 +116,13 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		apiFactory = func(apiKey, token string) (API, error) {
 			kc := kiteconnect.New(apiKey)
 			kc.SetAccessToken(token)
-			if proxyHTTPClient != nil {
+			if strings.EqualFold(authInfo.Broker, "testbroker") {
+				tbURL := os.Getenv("TESTBROKER_URL")
+				if tbURL == "" {
+					tbURL = "http://localhost:8089"
+				}
+				kc.SetBaseURI(tbURL)
+			} else if proxyHTTPClient != nil {
 				kc.SetHTTPClient(proxyHTTPClient)
 			}
 			return kc, nil

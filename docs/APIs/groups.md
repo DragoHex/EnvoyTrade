@@ -65,7 +65,7 @@ Full `AccountTable` data for one group — one response backs the whole `GroupCa
 ## `POST /api/v1/groups/{masterId}/followers`
 
 Attach an existing follower-role account to a group — the group-management page's "Add account to
-group" action (`docs/UI-PLAN.md`'s Accounts page).
+group" action (`docs/plans/UI-PLAN.md`'s Accounts page).
 
 **Request**:
 ```json

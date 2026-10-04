@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-EnvoyTrade is a copy-trade platform on Zerodha Kite Connect: one master trading account, N follower accounts, strictly 1-master-per-follower. Single Go binary, single Postgres. `docs/PLAN.md` is the full V1 implementation plan (package layout, data model, Kite integration details, milestones); `docs/ARCHITECTURE.md` covers system/deployment diagrams. Read `docs/PLAN.md` before extending scope — it documents *why*, not just what.
+EnvoyTrade is a copy-trade platform on Zerodha Kite Connect: one master trading account, N follower accounts, strictly 1-master-per-follower. Single Go binary, single Postgres. `docs/plans/PLAN.md` is the full V1 implementation plan (package layout, data model, Kite integration details, milestones); `docs/ARCHITECTURE.md` covers system/deployment diagrams. Read `docs/plans/PLAN.md` before extending scope — it documents *why*, not just what.
 
 The core V1 copy-trade pipeline is wired in `cmd/server/main.go`:
 - **Fan-out mechanism** (`internal/engine`): master fill → lot-sized, idempotent follower orders.
@@ -14,7 +14,7 @@ The core V1 copy-trade pipeline is wired in `cmd/server/main.go`:
 - **Admin HTTP API & Authentication** (`internal/httpapi`, `internal/auth`): dashboard groups, accounts, and actions protected behind session authentication (`envoytrade_session` HTTP-only cookie, SHA-256 token hashing, bcrypt cost 12 passwords). Whitelists `POST /broker-callback` and health checks. Automatically scopes account/group queries by tenant via `domain.UserFromContext(ctx)`.
 - **Structured logging** (`slog`): zero-dependency JSON/text logging across server lifecycle, HTTP middleware, engine, worker pool, listener, and recon. Defaults to `/var/log/envoytrade/app.log` (configurable via `LOG_FILE`, `LOG_FORMAT`, `LOG_LEVEL`, `LOG_TO_STDOUT`) with graceful fallback to `stdout` when unprivileged.
 
-Remaining future scope per `docs/PLAN.md`: interactive daily auth web flow / refresh-token daemon, multi-account session management, kill switch panic button, and full metrics/tracing.
+Remaining future scope per `docs/plans/PLAN.md`: interactive daily auth web flow / refresh-token daemon, multi-account session management, kill switch panic button, and full metrics/tracing.
 
 ## Commands
 
@@ -142,7 +142,7 @@ listener.FollowerStatusConsumer.Handle (drains queue.Consumer[domain.OrderUpdate
 
 ## UI color palette
 
-Source of truth for `docs/UI-PLAN.md` — reuse for any future UI work, don't re-derive.
+Source of truth for `docs/plans/UI-PLAN.md` — reuse for any future UI work, don't re-derive.
 
 | Role | Light | Dark | Hex meaning |
 |---|---|---|---|

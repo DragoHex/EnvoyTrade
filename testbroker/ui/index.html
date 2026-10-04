@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EnvoyTrade Paper Broker (Mock)</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1c24;
+      --surface-border: #2a2c34;
+      --text-main: #f0f0f2;
+      --text-muted: #8b8f9e;
+      --accent: #06d896;
+      --accent-hover: #04b488;
+      --danger: #f85149;
+      --danger-hover: #da3633;
+      --warning: #e3b341;
+      --brand: #44475b;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.4;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    header {
+      background-color: var(--surface);
+      border-bottom: 1px solid var(--surface-border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-mode { background: #262935; color: var(--accent); border: 1px solid #363b4e; }
+    .badge-ws { background: rgba(6, 216, 150, 0.1); color: var(--accent); border: 1px solid rgba(6, 216, 150, 0.3); }
+
+    .header-right { display: flex; align-items: center; gap: 10px; }
+    .select-sm, .input-sm {
+      background: #12141a;
+      border: 1px solid var(--surface-border);
+      color: var(--text-main);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    /* Layout */
+    .container {
+      display: grid;
+      grid-template-columns: 320px 1fr 340px;
+      gap: 12px;
+      padding: 12px;
+      flex: 1;
+      overflow: hidden;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--surface-border);
+      font-weight: 600;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #171922;
+    }
+    .panel-body {
+      padding: 14px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    /* Forms */
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; font-weight: 600; }
+    input, select {
+      width: 100%;
+      background: #12141a;
+      border: 1px solid var(--surface-border);
+      color: var(--text-main);
+      padding: 7px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .side-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .btn-side {
+      padding: 8px;
+      border: 1px solid var(--surface-border);
+      border-radius: 4px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #12141a;
+      color: var(--text-muted);
+      text-align: center;
+    }
+    .btn-side.active-buy {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+    .btn-side.active-sell {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+    .btn-primary {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--accent);
+      color: #000;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--surface-border);
+      background: #14161e;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      white-space: nowrap;
+    }
+    tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+    .tag-buy { color: var(--accent); font-weight: 700; }
+    .tag-sell { color: var(--danger); font-weight: 700; }
+    .status-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .status-COMPLETE { background: rgba(6, 216, 150, 0.15); color: var(--accent); }
+    .status-OPEN { background: rgba(227, 179, 65, 0.15); color: var(--warning); }
+    .status-REJECTED { background: rgba(248, 81, 73, 0.15); color: var(--danger); }
+    .status-CANCELLED { background: rgba(139, 143, 158, 0.15); color: var(--text-muted); }
+
+    .btn-action {
+      padding: 3px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--surface-border);
+      background: #242733;
+      color: var(--text-main);
+      cursor: pointer;
+      font-size: 11px;
+      margin-right: 4px;
+    }
+    .btn-action:hover { background: #2f3445; }
+    .btn-action.btn-fill { color: var(--accent); border-color: rgba(6, 216, 150, 0.4); }
+    .btn-action.btn-reject { color: var(--danger); border-color: rgba(248, 81, 73, 0.4); }
+
+    /* User Selector Pill */
+    .user-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      background: #262935;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .role-master { color: #bb86fc; }
+    .role-follower { color: var(--accent); }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #1f2330;
+      border: 1px solid var(--accent);
+      color: var(--text-main);
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      display: none;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <div class="logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+          <polyline points="16 7 22 7 22 13"></polyline>
+        </svg>
+        <span>EnvoyTrade Mock Broker</span>
+      </div>
+      <span class="badge badge-mode" id="badge-mode">Mode: INSTANT</span>
+      <span class="badge badge-ws" id="badge-users">Users: ...</span>
+    </div>
+    <div class="header-right">
+      <label style="margin:0; font-size:11px;">EXECUTION MODE:</label>
+      <select id="mode-select" class="select-sm" onchange="setExecutionMode(this.value)">
+        <option value="instant">Instant Fill</option>
+        <option value="manual">Manual (Hold OPEN)</option>
+        <option value="delayed">Delayed (300ms)</option>
+      </select>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- PANEL 1: Quick Trade Pad -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>⚡ Quick Trade Pad</span>
+        <span id="pad-ltp" style="color:var(--accent); font-family:var(--font-mono); font-weight:700;">LTP: --</span>
+      </div>
+      <div class="panel-body">
+        <div class="form-group">
+          <label>Place Trade As User</label>
+          <select id="trade-user" onchange="onUserSelectChange()"></select>
+        </div>
+
+        <div class="side-btns">
+          <div id="btn-buy" class="btn-side active-buy" onclick="setSide('BUY')">BUY</div>
+          <div id="btn-sell" class="btn-side" onclick="setSide('SELL')">SELL</div>
+        </div>
+
+        <div class="form-group">
+          <label>Instrument</label>
+          <select id="trade-inst" onchange="onInstrumentChange()"></select>
+        </div>
+
+        <div class="form-group" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label>Product</label>
+            <select id="trade-product">
+              <option value="NRML">NRML</option>
+              <option value="MIS">MIS</option>
+              <option value="CNC">CNC</option>
+            </select>
+          </div>
+          <div>
+            <label>Order Type</label>
+            <select id="trade-ordertype" onchange="onOrderTypeChange()">
+              <option value="MARKET">MARKET</option>
+              <option value="LIMIT">LIMIT</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label>Quantity</label>
+            <input type="number" id="trade-qty" value="75" step="75" min="1">
+          </div>
+          <div>
+            <label>Price</label>
+            <input type="number" id="trade-price" value="0" step="0.05" disabled>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Order Tag (Optional)</label>
+          <input type="text" id="trade-tag" placeholder="e.g. manual-test">
+        </div>
+
+        <button class="btn-primary" id="btn-submit" onclick="submitQuickOrder()">SUBMIT ORDER</button>
+      </div>
+    </div>
+
+    <!-- PANEL 2: Live Order Book -->
+    <div class="panel">
+      <div class="panel-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span>📋 Order Book</span>
+          <select id="filter-user" class="select-sm" onchange="loadOrders()">
+            <option value="">All Accounts</option>
+          </select>
+        </div>
+        <button class="btn-action" onclick="loadOrders()">↻ Refresh</button>
+      </div>
+      <div class="panel-body" style="padding:0;">
+        <table id="orders-table">
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Time</th>
+              <th>User</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Qty</th>
+              <th>Price</th>
+              <th>Avg Price</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="orders-tbody">
+            <tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:20px;">Loading orders...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PANEL 3: Instruments & Runtime Controls -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>📈 Market Watch & LTP Controls</span>
+      </div>
+      <div class="panel-body" style="padding:0;">
+        <table id="instruments-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Lot</th>
+              <th>LTP</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="instruments-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let currentSide = 'BUY';
+    let usersList = [];
+    let instrumentsList = [];
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 3000);
+    }
+
+    function setSide(side) {
+      currentSide = side;
+      document.getElementById('btn-buy').className = 'btn-side' + (side === 'BUY' ? ' active-buy' : '');
+      document.getElementById('btn-sell').className = 'btn-side' + (side === 'SELL' ? ' active-sell' : '');
+    }
+
+    function onOrderTypeChange() {
+      const type = document.getElementById('trade-ordertype').value;
+      const priceInput = document.getElementById('trade-price');
+      priceInput.disabled = (type === 'MARKET');
+      if (type === 'LIMIT' && parseFloat(priceInput.value) === 0) {
+        const inst = getSelectedInstrument();
+        if (inst) priceInput.value = inst.ltp;
+      }
+    }
+
+    function getSelectedInstrument() {
+      const key = document.getElementById('trade-inst').value;
+      return instrumentsList.find(i => (i.exchange + ':' + i.tradingsymbol) === key);
+    }
+
+    function onInstrumentChange() {
+      const inst = getSelectedInstrument();
+      if (!inst) return;
+      document.getElementById('pad-ltp').innerText = 'LTP: ' + inst.ltp.toFixed(2);
+      document.getElementById('trade-qty').step = inst.lot_size;
+      document.getElementById('trade-qty').value = inst.lot_size;
+      if (document.getElementById('trade-ordertype').value === 'LIMIT') {
+        document.getElementById('trade-price').value = inst.ltp;
+      }
+    }
+
+    async function loadMeta() {
+      try {
+        // Users
+        const uRes = await fetch('/api/users').then(r => r.json());
+        if (uRes.status === 'success') {
+          usersList = uRes.data;
+          const userSel = document.getElementById('trade-user');
+          const filterSel = document.getElementById('filter-user');
+          userSel.innerHTML = '';
+          filterSel.innerHTML = '<option value="">All Accounts</option>';
+
+          usersList.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.user_id;
+            opt.innerText = u.user_id + ' (' + u.role.toUpperCase() + ')';
+            userSel.appendChild(opt);
+
+            const fOpt = document.createElement('option');
+            fOpt.value = u.user_id;
+            fOpt.innerText = u.user_id + ' (' + u.role + ')';
+            filterSel.appendChild(fOpt);
+          });
+          document.getElementById('badge-users').innerText = 'Users: ' + usersList.length;
+        }
+
+        // Mode
+        const mRes = await fetch('/api/mode').then(r => r.json());
+        if (mRes.status === 'success') {
+          document.getElementById('mode-select').value = mRes.data.mode;
+          document.getElementById('badge-mode').innerText = 'Mode: ' + mRes.data.mode.toUpperCase();
+        }
+
+        // Instruments
+        await loadInstruments();
+      } catch (err) {
+        console.error('Failed to load meta:', err);
+      }
+    }
+
+    async function setExecutionMode(mode) {
+      await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      });
+      document.getElementById('badge-mode').innerText = 'Mode: ' + mode.toUpperCase();
+      showToast('Execution mode switched to ' + mode.toUpperCase());
+    }
+
+    async function loadInstruments() {
+      const iRes = await fetch('/api/instruments').then(r => r.json());
+      if (iRes.status !== 'success') return;
+      instrumentsList = iRes.data;
+
+      const instSel = document.getElementById('trade-inst');
+      const prevVal = instSel.value;
+      instSel.innerHTML = '';
+
+      const tbody = document.getElementById('instruments-tbody');
+      tbody.innerHTML = '';
+
+      instrumentsList.forEach(inst => {
+        const key = inst.exchange + ':' + inst.tradingsymbol;
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.innerText = inst.tradingsymbol + ' (' + inst.exchange + ')';
+        instSel.appendChild(opt);
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${inst.tradingsymbol}</strong><br><span style="color:var(--text-muted); font-size:10px;">${inst.exchange}</span></td>
+          <td>${inst.lot_size}</td>
+          <td><input type="number" id="ltp-${inst.exchange}-${inst.tradingsymbol}" value="${inst.ltp}" step="${inst.tick_size}" style="width:80px; padding:3px 5px; font-size:12px;"></td>
+          <td><button class="btn-action" onclick="updateLTP('${inst.exchange}', '${inst.tradingsymbol}')">Set</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      if (prevVal) instSel.value = prevVal;
+      onInstrumentChange();
+    }
+
+    async function updateLTP(exchange, symbol) {
+      const input = document.getElementById(`ltp-${exchange}-${symbol}`);
+      const ltp = parseFloat(input.value);
+      if (isNaN(ltp)) return;
+      const res = await fetch(`/api/instruments/${exchange}/${symbol}/ltp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ltp })
+      }).then(r => r.json());
+      if (res.status === 'success') {
+        showToast(`Updated LTP for ${symbol} to ${ltp}`);
+        await loadInstruments();
+      }
+    }
+
+    async function loadOrders() {
+      const filterUser = document.getElementById('filter-user').value;
+      let url = '/api/orders';
+      if (filterUser) url += '?user_id=' + encodeURIComponent(filterUser);
+
+      try {
+        const res = await fetch(url).then(r => r.json());
+        if (res.status !== 'success') return;
+
+        const tbody = document.getElementById('orders-tbody');
+        if (res.data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:20px;">No orders found</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = res.data.map(o => {
+          let actions = '';
+          if (o.status === 'OPEN') {
+            actions = `
+              <button class="btn-action btn-fill" onclick="fillOrder('${o.order_id}')">Fill</button>
+              <button class="btn-action btn-reject" onclick="rejectOrder('${o.order_id}')">Reject</button>
+              <button class="btn-action" onclick="cancelOrder('${o.order_id}')">Cancel</button>
+            `;
+          }
+          return `
+            <tr>
+              <td style="font-family:var(--font-mono); font-size:11px;">${o.order_id}</td>
+              <td style="color:var(--text-muted); font-size:11px;">${o.order_timestamp ? o.order_timestamp.split(' ')[1] : ''}</td>
+              <td><span class="user-pill">${o.user_id}</span></td>
+              <td><strong>${o.tradingsymbol}</strong></td>
+              <td><span class="tag-${o.transaction_type.toLowerCase()}">${o.transaction_type}</span></td>
+              <td>${o.quantity}</td>
+              <td>${o.price || 'MKT'}</td>
+              <td>${o.average_price ? o.average_price.toFixed(2) : '-'}</td>
+              <td><span class="status-badge status-${o.status}">${o.status}</span></td>
+              <td>${actions}</td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error('Error fetching orders:', err);
+      }
+    }
+
+    async function submitQuickOrder() {
+      const user = document.getElementById('trade-user').value;
+      const inst = getSelectedInstrument();
+      if (!inst) return;
+
+      const orderType = document.getElementById('trade-ordertype').value;
+      const qty = parseInt(document.getElementById('trade-qty').value, 10);
+      const price = parseFloat(document.getElementById('trade-price').value) || 0;
+      const product = document.getElementById('trade-product').value;
+      const tag = document.getElementById('trade-tag').value;
+
+      const payload = {
+        user_id: user,
+        exchange: inst.exchange,
+        tradingsymbol: inst.tradingsymbol,
+        transaction_type: currentSide,
+        product: product,
+        order_type: orderType,
+        quantity: qty,
+        price: price,
+        tag: tag
+      };
+
+      const res = await fetch('/api/quick-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+
+      if (res.status === 'success') {
+        showToast(`Order placed: ${res.data.order_id}`);
+        await loadOrders();
+      } else {
+        alert('Order Failed: ' + res.message);
+      }
+    }
+
+    async function fillOrder(orderID) {
+      const res = await fetch(`/api/orders/${orderID}/fill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: 0 })
+      }).then(r => r.json());
+      if (res.status === 'success') {
+        showToast('Order ' + orderID + ' filled');
+        await loadOrders();
+      }
+    }
+
+    async function rejectOrder(orderID) {
+      const reason = prompt('Enter rejection reason:', 'RMS: Margin insufficient') || 'Rejected';
+      const res = await fetch(`/api/orders/${orderID}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      }).then(r => r.json());
+      if (res.status === 'success') {
+        showToast('Order ' + orderID + ' rejected');
+        await loadOrders();
+      }
+    }
+
+    async function cancelOrder(orderID) {
+      const res = await fetch(`/api/orders/${orderID}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }).then(r => r.json());
+      if (res.status === 'success') {
+        showToast('Order ' + orderID + ' cancelled');
+        await loadOrders();
+      }
+    }
+
+    window.onload = async () => {
+      await loadMeta();
+      await loadOrders();
+      // Auto-poll orders every 1.5s
+      setInterval(loadOrders, 1500);
+    };
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-DATABASE_URL ?= postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable
+DATABASE_URL ?= postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable
 PORT ?= 8080
 FRONTEND_PORT ?= 5173
 DB_CONTAINER ?= envoytrade-db
@@ -6,8 +6,9 @@ DB_VOLUME ?= envoytrade-db-data
 BACKEND_LOG ?= /tmp/envoytrade-backend.log
 FRONTEND_LOG ?= /tmp/envoytrade-frontend.log
 CLOUDFLARED_LOG ?= /tmp/cloudflared.log
+TUNNEL_NAME ?= mytunnel
 
-.PHONY: build build-backend build-frontend run-backend run-frontend test test-integration install \
+.PHONY: build build-backend build-frontend run-backend run-frontend test test-integration e2e install \
 	db-up db-down db-seed db-flush seed flush \
 	backend-up backend-down frontend-up frontend-down tunnel-up tunnel-down \
 	up up-all all-up up-everything down down-all all-down down-everything \
@@ -15,17 +16,19 @@ CLOUDFLARED_LOG ?= /tmp/cloudflared.log
 
 build: build-backend build-frontend
 
+CONTAINER_CMD ?= $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo podman)
+
 # Data lives in the named volume $(DB_VOLUME), not the container, so
 # `db-down` (which removes the container) doesn't lose it. `db-up` reuses
 # an existing (stopped) container if present instead of erroring on
 # `--name` conflict.
 db-up:
-	podman start $(DB_CONTAINER) 2>/dev/null || podman run -d --name $(DB_CONTAINER) \
+	@$(CONTAINER_CMD) start $(DB_CONTAINER) 2>/dev/null || $(CONTAINER_CMD) run -d --name $(DB_CONTAINER) \
 		-e POSTGRES_DB=envoytrade -e POSTGRES_USER=envoytrade -e POSTGRES_PASSWORD=envoytrade \
-		-p 5432:5432 -v $(DB_VOLUME):/var/lib/postgresql/data postgres:16-alpine
+		-p 5434:5432 -v $(DB_VOLUME):/var/lib/postgresql/data postgres:16-alpine
 	@echo "Waiting for PostgreSQL to be ready..."
 	@for i in $$(seq 1 30); do \
-		if podman exec $(DB_CONTAINER) pg_isready -U envoytrade -d envoytrade >/dev/null 2>&1; then \
+		if $(CONTAINER_CMD) exec $(DB_CONTAINER) pg_isready -U envoytrade -d envoytrade >/dev/null 2>&1; then \
 			echo "PostgreSQL is ready."; \
 			exit 0; \
 		fi; \
@@ -34,7 +37,26 @@ db-up:
 	echo "Timeout waiting for PostgreSQL."; exit 1
 
 db-down:
-	podman rm -f $(DB_CONTAINER)
+	@echo "Stopping PostgreSQL..."
+	@stopped=0; \
+	for cmd in podman docker; do \
+		if command -v $$cmd >/dev/null 2>&1; then \
+			if $$cmd ps -a -q --filter name=^/$(DB_CONTAINER)$$ --filter name=^$(DB_CONTAINER)$$ 2>/dev/null | grep -q .; then \
+				$$cmd rm -f $(DB_CONTAINER) >/dev/null 2>&1 || true; \
+				stopped=1; \
+			fi; \
+			port_containers=$$($$cmd ps -q --filter publish=5434 2>/dev/null); \
+			if [ -n "$$port_containers" ]; then \
+				$$cmd rm -f $$port_containers >/dev/null 2>&1 || true; \
+				stopped=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$stopped -eq 1 ]; then \
+		echo "PostgreSQL container stopped."; \
+	else \
+		echo "PostgreSQL container is not running."; \
+	fi
 
 db-seed:
 	DATABASE_URL="$(DATABASE_URL)" CONTAINER_NAME="$(DB_CONTAINER)" ./scripts/seed_test_data.sh
@@ -100,7 +122,11 @@ backend-up: db-up check-log-dir
 backend-down:
 	@if lsof -ti :$(PORT) >/dev/null 2>&1; then \
 		echo "Stopping backend server on port $(PORT)..."; \
-		lsof -ti :$(PORT) | xargs -r kill; \
+		kill $$(lsof -ti :$(PORT)) 2>/dev/null || true; \
+		sleep 1; \
+		if lsof -ti :$(PORT) >/dev/null 2>&1; then \
+			kill -9 $$(lsof -ti :$(PORT)) 2>/dev/null || true; \
+		fi; \
 		echo "Backend server stopped."; \
 	else \
 		echo "Backend server is not running."; \
@@ -131,7 +157,11 @@ frontend-up:
 frontend-down:
 	@if lsof -ti :$(FRONTEND_PORT) >/dev/null 2>&1; then \
 		echo "Stopping frontend dev server on port $(FRONTEND_PORT)..."; \
-		lsof -ti :$(FRONTEND_PORT) | xargs -r kill; \
+		kill $$(lsof -ti :$(FRONTEND_PORT)) 2>/dev/null || true; \
+		sleep 1; \
+		if lsof -ti :$(FRONTEND_PORT) >/dev/null 2>&1; then \
+			kill -9 $$(lsof -ti :$(FRONTEND_PORT)) 2>/dev/null || true; \
+		fi; \
 		echo "Frontend dev server stopped."; \
 	else \
 		echo "Frontend dev server is not running."; \
@@ -139,14 +169,14 @@ frontend-down:
 
 # tunnel-up starts the cloudflared tunnel in the background
 tunnel-up:
-	@if pgrep -f "cloudflared tunnel.*run" >/dev/null 2>&1; then \
-		echo "Cloudflared tunnel is already running (PID: $$(pgrep -f "cloudflared tunnel.*run" | tr '\n' ' '))"; \
+	@if pgrep -f "cloudflared.*tunnel.*run" >/dev/null 2>&1; then \
+		echo "Cloudflared tunnel is already running (PID: $$(pgrep -f "cloudflared.*tunnel.*run" | tr '\n' ' '))"; \
 	else \
-		echo "Starting cloudflared tunnel..."; \
-		nohup cloudflared tunnel run > $(CLOUDFLARED_LOG) 2>&1 & \
+		echo "Starting cloudflared tunnel ($(TUNNEL_NAME))..."; \
+		nohup cloudflared tunnel run $(TUNNEL_NAME) > $(CLOUDFLARED_LOG) 2>&1 & \
 		for i in $$(seq 1 15); do \
-			if pgrep -f "cloudflared tunnel.*run" >/dev/null 2>&1; then \
-				echo "Cloudflared tunnel started (PID: $$(pgrep -f "cloudflared tunnel.*run" | tr '\n' ' '))"; \
+			if pgrep -f "cloudflared.*tunnel.*run" >/dev/null 2>&1; then \
+				echo "Cloudflared tunnel started (PID: $$(pgrep -f "cloudflared.*tunnel.*run" | tr '\n' ' '))"; \
 				echo "Tunnel logs: $(CLOUDFLARED_LOG)"; \
 				exit 0; \
 			fi; \
@@ -159,12 +189,12 @@ tunnel-up:
 
 # tunnel-down stops the cloudflared tunnel process
 tunnel-down:
-	@if pgrep -f "cloudflared tunnel.*run" >/dev/null 2>&1; then \
+	@if pgrep -f "cloudflared.*tunnel.*run" >/dev/null 2>&1; then \
 		echo "Stopping cloudflared tunnel..."; \
-		pkill -INT -f "cloudflared tunnel.*run" 2>/dev/null || true; \
+		pkill -INT -f "cloudflared.*tunnel.*run" 2>/dev/null || true; \
 		sleep 1; \
-		if pgrep -f "cloudflared tunnel.*run" >/dev/null 2>&1; then \
-			pkill -9 -f "cloudflared tunnel.*run" 2>/dev/null || true; \
+		if pgrep -f "cloudflared.*tunnel.*run" >/dev/null 2>&1; then \
+			pkill -9 -f "cloudflared.*tunnel.*run" 2>/dev/null || true; \
 		fi; \
 		echo "Cloudflared tunnel stopped."; \
 	else \
@@ -185,10 +215,19 @@ all-up: up-all
 up-everything: up-all
 
 # down-all brings down everything in reverse order: tunnel -> frontend -> backend -> db
-down-all: tunnel-down frontend-down backend-down db-down
+down-all:
+	@$(MAKE) tunnel-down || true
+	@$(MAKE) frontend-down || true
+	@$(MAKE) backend-down || true
+	@$(MAKE) db-down || true
 	@echo "All services stopped."
 
-down: backend-down frontend-down db-down
+down:
+	@$(MAKE) backend-down || true
+	@$(MAKE) frontend-down || true
+	@$(MAKE) db-down || true
+	@echo "All services stopped."
+
 all-down: down-all
 down-everything: down-all
 
@@ -215,9 +254,16 @@ test:
 # their own throwaway Postgres via testcontainers-go — this only points it
 # at podman's machine socket instead of Docker.
 test-integration:
-	DOCKER_HOST="$$(podman system connection list --format '{{.URI}}' 2>/dev/null | head -n 1 || echo "unix://$$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null)")" \
+	DOCKER_HOST="unix://$$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null)" \
 	TESTCONTAINERS_RYUK_DISABLED=true \
 	go test -tags integration ./...
 
+e2e:
+	go test -v -tags e2e -count=1 ./tests/e2e/...
+
 sqlc-generate:
-	sqlc generate
+	@if command -v sqlc >/dev/null 2>&1; then \
+		sqlc generate; \
+	else \
+		go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate; \
+	fi

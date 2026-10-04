@@ -9,6 +9,7 @@ SELECT g.id, g.name, g.master_id,
 FROM groups g
 JOIN accounts a ON a.id = g.master_id
 LEFT JOIN follow_links f ON f.group_id = g.id
+WHERE sqlc.narg('user_id')::uuid IS NULL OR g.user_id = sqlc.narg('user_id')::uuid
 GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active
 ORDER BY LOWER(g.name) ASC, g.id ASC;
 
@@ -19,7 +20,8 @@ SELECT g.id, g.name, g.master_id,
        a.active AS master_active
 FROM groups g
 JOIN accounts a ON a.id = g.master_id
-WHERE g.id = $1 OR g.master_id = $1
+WHERE (g.id = $1 OR g.master_id = $1)
+  AND (sqlc.narg('user_id')::uuid IS NULL OR g.user_id = sqlc.narg('user_id')::uuid)
 LIMIT 1;
 
 -- name: GroupFollowerRows :many
@@ -30,8 +32,8 @@ WHERE f.group_id = $1
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC;
 
 -- name: CreateGroup :exec
-INSERT INTO groups (id, name, master_id)
-VALUES ($1, $2, $3);
+INSERT INTO groups (id, name, master_id, user_id)
+VALUES ($1, $2, $3, $4);
 
 -- name: UpdateGroupName :execrows
 UPDATE groups SET name = $2, updated_at = now() WHERE id = $1;

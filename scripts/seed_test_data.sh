@@ -8,7 +8,7 @@
 #   ./scripts/seed_test_data.sh --migrate    # Force apply migrations before seeding
 #
 # Environment variables:
-#   DATABASE_URL   - Postgres connection string (default: postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable)
+#   DATABASE_URL   - Postgres connection string (default: postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable)
 #   CONTAINER_NAME - Container name if running in Podman/Docker (default: envoytrade-db)
 #   DB_USER        - Container postgres user (default: envoytrade)
 #   DB_NAME        - Container postgres database (default: envoytrade)
@@ -21,7 +21,7 @@ SEED_SQL="${SCRIPT_DIR}/seed_test_data.sql"
 FLUSH_SQL="${SCRIPT_DIR}/flush_data.sql"
 MIGRATIONS_DIR="${ROOT_DIR}/internal/store/postgres/migrations"
 
-DATABASE_URL="${DATABASE_URL:-postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable}"
+DATABASE_URL="${DATABASE_URL:-postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable}"
 CONTAINER_NAME="${CONTAINER_NAME:-envoytrade-db}"
 DB_USER="${DB_USER:-envoytrade}"
 DB_NAME="${DB_NAME:-envoytrade}"

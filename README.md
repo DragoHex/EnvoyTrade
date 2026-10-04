@@ -190,7 +190,7 @@ make db-up
 Or configure an existing PostgreSQL instance:
 
 ```bash
-export DATABASE_URL="postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable"
+export DATABASE_URL="postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable"
 ```
 
 Database migrations are embedded in the Go binary (`internal/store/postgres/migrations/`) and apply automatically on server startup.
@@ -279,10 +279,10 @@ npm run build
 │   └── server/                 # Server daemon entrypoint and process wiring
 ├── docs/
 │   ├── APIs/                   # REST API endpoint specifications
+│   ├── plans/                  # Architectural and feature plans (PLAN.md, UI-PLAN.md, E2E-INTEGRATION-PLAN.md, etc.)
 │   ├── ARCHITECTURE.md         # Architecture diagrams and system design
-│   ├── PLAN.md                 # Full V1 implementation plan
 │   ├── SCHEMA.md               # PostgreSQL schema and data relationships
-│   └── UI-PLAN.md              # Frontend UI specifications and component design
+│   └── TESTBROKER.md           # Paper trading mock broker specification
 ├── frontend/                   # SolidJS frontend application
 │   ├── src/
 │   │   ├── components/         # Reusable UI components (AccountOrderDetails, AccountTable, Modals)
