@@ -1,4 +1,4 @@
-import { createSignal, createResource, createMemo, Show, Index, onMount, onCleanup } from 'solid-js'
+import { createSignal, createResource, createMemo, createEffect, Show, Index, onCleanup } from 'solid-js'
 import { getAccountOrders } from '../api'
 import { isOrdersDataEqual } from '../utils/ordersDiff'
 import {
@@ -21,6 +21,7 @@ interface AccountOrderDetailsProps {
   accountName?: string
   brokerAccountId?: string
   onClose?: () => void
+  isExpanded?: boolean
 }
 
 function toNumber(val: unknown, fallback = 0): number {
@@ -55,17 +56,26 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   const [holdingSortDir, setHoldingSortDir] = createSignal<'asc' | 'desc'>('asc')
   const [isPolling, setIsPolling] = createSignal<boolean>(false)
 
+  const isExpanded = () => props.isExpanded ?? true
+
   const [ordersData, { mutate }] = createResource(
-    () => ({
-      accountId: props.accountId,
-      tab: activeTab(),
-      page: page(),
-      limit: 10,
-    }),
-    ({ accountId, tab, page, limit }) => getAccountOrders(accountId, tab, page, limit),
+    () => {
+      if (!isExpanded()) return null
+      return {
+        accountId: props.accountId,
+        tab: activeTab(),
+        page: page(),
+        limit: 10,
+      }
+    },
+    (params) => {
+      if (!params) return Promise.resolve(undefined as any)
+      return getAccountOrders(params.accountId, params.tab, params.page, params.limit)
+    },
   )
 
-  onMount(() => {
+  createEffect(() => {
+    if (!isExpanded()) return
     const timer = setInterval(async () => {
       if (activeTab() === 'holdings') return
       try {
@@ -83,7 +93,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
       } finally {
         setIsPolling(false)
       }
-    }, 3000)
+    }, 7000)
     onCleanup(() => clearInterval(timer))
   })
 

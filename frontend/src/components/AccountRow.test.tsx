@@ -1,4 +1,4 @@
-import { render, screen } from '@solidjs/testing-library'
+import { render, screen, fireEvent } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AccountRow } from './AccountRow'
@@ -299,5 +299,60 @@ describe('AccountRow', () => {
     await userEvent.click(expandBtn)
 
     expect(screen.getByTestId('account-details-expansion-row')).toBeInTheDocument()
+  })
+
+  it('polls orders only when expanded, not when folded', async () => {
+    vi.useFakeTimers()
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, openPositionsCount: 0, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      counts: { openPositions: 0, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 0, totalPages: 0 },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    try {
+      render(() => (
+        <AccountRow
+          follower={follower}
+          onToggleCopy={() => {}}
+          onRebalance={() => Promise.resolve()}
+          onSquareOff={() => {}}
+          onExitOpenOrders={() => {}}
+        />
+      ))
+
+      // 1. Folded by default: advancing timers should NOT trigger getAccountOrders
+      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(7000)
+      expect(getOrdersSpy).not.toHaveBeenCalled()
+
+      // 2. Expand the row
+      const expandBtn = screen.getByTestId('expand-row-btn')
+      fireEvent.click(expandBtn)
+
+      // Initial fetch on expand
+      expect(getOrdersSpy).toHaveBeenCalled()
+      const callsAfterExpand = getOrdersSpy.mock.calls.length
+
+      // Advance by 7000ms -> polling occurs while expanded
+      await vi.advanceTimersByTimeAsync(7000)
+      expect(getOrdersSpy.mock.calls.length).toBeGreaterThan(callsAfterExpand)
+
+      // 3. Fold/collapse the row again
+      fireEvent.click(expandBtn)
+      const callsAfterFold = getOrdersSpy.mock.calls.length
+
+      // Advance by 7000ms and 14000ms -> NO further calls while folded
+      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(7000)
+      expect(getOrdersSpy.mock.calls.length).toBe(callsAfterFold)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

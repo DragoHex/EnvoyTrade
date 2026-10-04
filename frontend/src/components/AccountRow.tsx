@@ -1,4 +1,4 @@
-import { createResource, createSignal, onCleanup, Show } from 'solid-js'
+import { createEffect, createResource, createSignal, onCleanup, Show } from 'solid-js'
 import { CopyToggle } from './CopyToggle'
 import { ConfirmActionModal } from './ConfirmActionModal'
 import { ResultToast, type ToastResult } from './ResultToast'
@@ -37,10 +37,18 @@ export function AccountRow(props: {
   onCleanup(() => clearTimeout(dismissTimer))
 
   // Fetch account orders/metrics on row expansion or if already expanded
-  const [ordersData] = createResource(
+  const [ordersData, { refetch: refetchOrders }] = createResource(
     () => (expanded() ? props.follower.accountId : null),
     (accId) => getAccountOrders(accId, 'open_positions'),
   )
+
+  createEffect(() => {
+    if (!expanded()) return
+    const timer = setInterval(() => {
+      refetchOrders()
+    }, 7000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const summary = () => ordersData()?.summary
 
@@ -173,6 +181,7 @@ export function AccountRow(props: {
               accountId={props.follower.accountId}
               accountName={props.follower.name}
               brokerAccountId={props.follower.brokerAccountId}
+              isExpanded={expanded()}
             />
           </td>
         </tr>
