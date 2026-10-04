@@ -1,0 +1,63 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: envoytrade-db
+    restart: unless-stopped
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-envoytrade}
+      POSTGRES_USER: ${POSTGRES_USER:-envoytrade}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required in .env}
+    ports:
+      - "${DB_PORT:-5434}:5432"
+    volumes:
+      - envoytrade-db-data:/var/lib/postgresql/data
+      - ./packaging/postgres/envoytrade-postgres.conf:/etc/postgresql/postgresql.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-envoytrade} -d ${POSTGRES_DB:-envoytrade}"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - envoytrade-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: envoytrade-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-envoytrade}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-envoytrade}?sslmode=disable"
+      PORT: "8080"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      LOG_TO_STDOUT: "true"
+    volumes:
+      - envoytrade-logs:/var/log/envoytrade
+    networks:
+      - envoytrade-net
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.web
+    container_name: envoytrade-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${PORT:-8080}:80"
+    networks:
+      - envoytrade-net
+
+volumes:
+  envoytrade-db-data:
+  envoytrade-logs:
+
+networks:
+  envoytrade-net:

@@ -1,3 +1,7 @@
 .kiro
 gokiteconnect/
 .DS_Store
+dist/
+artifacts/
+.env
+testbroker/bin/

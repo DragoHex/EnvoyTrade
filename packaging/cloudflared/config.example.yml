@@ -1,0 +1,14 @@
+# ==============================================================================
+# Cloudflare Tunnel Configuration for EnvoyTrade (cloudflared)
+# Place at: ~/.cloudflared/config.yml or /etc/cloudflared/config.yml
+# ==============================================================================
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: envoytrade.in
+    service: http://127.0.0.1:5173
+  - hostname: app.envoytrade.in
+    service: http://127.0.0.1:8080
+  - service: http_status:404
