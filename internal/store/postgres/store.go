@@ -23,56 +23,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-//go:embed migrations/0001_fanout.sql
-var fanoutSchema string
-
-//go:embed migrations/0002_instruments.sql
-var instrumentsSchema string
-
-//go:embed migrations/0003_account_api_secret.sql
-var accountAPISecretSchema string
-
-//go:embed migrations/0004_account_active.sql
-var accountActiveSchema string
-
-//go:embed migrations/0005_groups_and_names.sql
-var groupsAndNamesSchema string
-
-//go:embed migrations/0006_positions_and_holdings.sql
-var positionsAndHoldingsSchema string
-
-//go:embed migrations/0007_group_master_unique.sql
-var groupMasterUniqueSchema string
-
-//go:embed migrations/0008_account_ip_address.sql
-var accountIPAddressSchema string
-
-//go:embed migrations/0009_account_api_key.sql
-var accountAPIKeySchema string
-
-//go:embed migrations/0010_account_credentials.sql
-var accountCredentialsSchema string
-
-//go:embed migrations/0011_users_and_sessions.sql
-var usersAndSessionsSchema string
-
-//go:embed migrations/0012_user_scoping.sql
-var userScopingSchema string
-
-//go:embed migrations/0013_user_profile_fields.sql
-var userProfileFieldsSchema string
-
-//go:embed migrations/0014_proxy_ips.sql
-var proxyIPsSchema string
-
-//go:embed migrations/0015_pending_order_updates.sql
-var pendingOrderUpdatesSchema string
-
-//go:embed migrations/0016_account_status_check.sql
-var accountStatusCheckSchema string
-
-//go:embed migrations/0017_account_margins_available.sql
-var accountMarginsAvailableSchema string
+//go:embed migrations/0001_init.sql
+var initSchema string
 
 const uniqueViolation = "23505"
 const foreignKeyViolation = "23503"
@@ -108,60 +60,12 @@ func NewPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
 
-// Migrate applies the fan-out schema. Every statement is guarded
+// Migrate applies the database schema. Every statement is guarded
 // (IF NOT EXISTS / duplicate_object) so it's safe to call on every process
 // startup (cmd/server) as well as against a fresh database (tests).
 func (s *Store) Migrate(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, fanoutSchema); err != nil {
-		return fmt.Errorf("0001_fanout: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, instrumentsSchema); err != nil {
-		return fmt.Errorf("0002_instruments: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountAPISecretSchema); err != nil {
-		return fmt.Errorf("0003_account_api_secret: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountActiveSchema); err != nil {
-		return fmt.Errorf("0004_account_active: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, groupsAndNamesSchema); err != nil {
-		return fmt.Errorf("0005_groups_and_names: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, positionsAndHoldingsSchema); err != nil {
-		return fmt.Errorf("0006_positions_and_holdings: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, groupMasterUniqueSchema); err != nil {
-		return fmt.Errorf("0007_group_master_unique: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountIPAddressSchema); err != nil {
-		return fmt.Errorf("0008_account_ip_address: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountAPIKeySchema); err != nil {
-		return fmt.Errorf("0009_account_api_key: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountCredentialsSchema); err != nil {
-		return fmt.Errorf("0010_account_credentials: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, usersAndSessionsSchema); err != nil {
-		return fmt.Errorf("0011_users_and_sessions: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, userScopingSchema); err != nil {
-		return fmt.Errorf("0012_user_scoping: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, userProfileFieldsSchema); err != nil {
-		return fmt.Errorf("0013_user_profile_fields: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, proxyIPsSchema); err != nil {
-		return fmt.Errorf("0014_proxy_ips: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, pendingOrderUpdatesSchema); err != nil {
-		return fmt.Errorf("0015_pending_order_updates: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountStatusCheckSchema); err != nil {
-		return fmt.Errorf("0016_account_status_check: %w", err)
-	}
-	if _, err := s.pool.Exec(ctx, accountMarginsAvailableSchema); err != nil {
-		return fmt.Errorf("0017_account_margins_available: %w", err)
+	if _, err := s.pool.Exec(ctx, initSchema); err != nil {
+		return fmt.Errorf("0001_init: %w", err)
 	}
 	return nil
 }
@@ -723,14 +627,10 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 			AuthError:       r.AuthError,
 			Enabled:         r.Enabled,
 			GroupName:       r.GroupName,
+			GroupID:         r.GroupID,
 		}
-		if r.GroupID.Valid {
-			groupID := uuid.UUID(r.GroupID.Bytes)
-			a.GroupID = &groupID
-		}
-		if r.Role == "follower" && r.MasterID.Valid {
-			masterID := uuid.UUID(r.MasterID.Bytes)
-			a.MasterID = &masterID
+		if r.Role == "follower" {
+			a.MasterID = r.MasterID
 		}
 		if r.CapitalRatio.Valid {
 			a.CapitalRatio = &r.CapitalRatio.Decimal

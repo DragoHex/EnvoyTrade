@@ -45,7 +45,7 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*domain.User,
 		Name:         row.Name,
 		Phone:        row.Phone,
 		Address:      row.Address,
-		GSTNumber:    row.GSTNumber,
+		GSTNumber:    row.GstNumber,
 		PasswordHash: row.PasswordHash,
 		Role:         row.Role,
 		TotpSecret:   row.TotpSecret,
@@ -71,7 +71,7 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*domain
 		Name:         row.Name,
 		Phone:        row.Phone,
 		Address:      row.Address,
-		GSTNumber:    row.GSTNumber,
+		GSTNumber:    row.GstNumber,
 		PasswordHash: row.PasswordHash,
 		Role:         row.Role,
 		TotpSecret:   row.TotpSecret,
@@ -97,7 +97,7 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, er
 		Name:         row.Name,
 		Phone:        row.Phone,
 		Address:      row.Address,
-		GSTNumber:    row.GSTNumber,
+		GSTNumber:    row.GstNumber,
 		PasswordHash: row.PasswordHash,
 		Role:         row.Role,
 		TotpSecret:   row.TotpSecret,
@@ -116,7 +116,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, id uuid.UUID, email, user
 		Name:      name,
 		Phone:     phone,
 		Address:   address,
-		GSTNumber: gstNumber,
+		GstNumber: gstNumber,
 	})
 	if isUniqueViolation(err) {
 		return domain.ErrDuplicate
@@ -126,7 +126,10 @@ func (s *Store) UpdateUserProfile(ctx context.Context, id uuid.UUID, email, user
 
 // UpdateUserPassword updates the password hash for a given user.
 func (s *Store) UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
-	return s.queries.UpdateUserPassword(ctx, id, passwordHash)
+	return s.queries.UpdateUserPassword(ctx, sqlcgen.UpdateUserPasswordParams{
+		ID:           id,
+		PasswordHash: passwordHash,
+	})
 }
 
 // CountUsers returns the total count of users registered.
@@ -179,7 +182,7 @@ func (s *Store) GetSessionWithUser(ctx context.Context, tokenHash string) (*doma
 			Name:        row.Name,
 			Phone:       row.Phone,
 			Address:     row.Address,
-			GSTNumber:   row.GSTNumber,
+			GSTNumber:   row.GstNumber,
 			Role:        row.Role,
 			TotpEnabled: row.TotpEnabled,
 		},
@@ -203,7 +206,10 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 
 // DeleteOtherSessions invalidates all sessions for a user except the given token hash.
 func (s *Store) DeleteOtherSessions(ctx context.Context, userID uuid.UUID, tokenHash string) error {
-	_, err := s.queries.DeleteOtherSessions(ctx, userID, tokenHash)
+	_, err := s.queries.DeleteOtherSessions(ctx, sqlcgen.DeleteOtherSessionsParams{
+		UserID:    userID,
+		TokenHash: tokenHash,
+	})
 	return err
 }
 
