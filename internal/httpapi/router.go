@@ -7,6 +7,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -22,6 +23,7 @@ type routerConfig struct {
 	logger          *slog.Logger
 	syncer          PortfolioSyncer
 	tickerMgr       TickerManager
+	staticFS        fs.FS
 }
 
 // PortfolioSyncer provides live portfolio synchronization for an account.
@@ -102,13 +104,17 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 		mux.Handle("POST /broker-callback", cfg.postbackHandler)
 	}
 
+	if cfg.staticFS != nil {
+		mux.Handle("/", spaHandler(cfg.staticFS))
+	}
+
 	var handler http.Handler = mux
 	handler = authMiddleware(handler, store, cfg.logger)
 
 	if cfg.logger != nil {
-		return loggingMiddleware(handler, cfg.logger)
+		handler = loggingMiddleware(handler, cfg.logger)
 	}
-	return handler
+	return recoveryMiddleware(handler, cfg.logger)
 }
 
 type statusRecorder struct {

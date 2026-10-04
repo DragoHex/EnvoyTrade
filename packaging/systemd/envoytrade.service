@@ -1,0 +1,30 @@
+[Unit]
+Description=EnvoyTrade Copy-Trading Platform
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=envoytrade
+Group=envoytrade
+WorkingDirectory=/var/lib/envoytrade
+ExecStart=/usr/local/bin/envoytrade
+EnvironmentFile=/etc/envoytrade/envoytrade.env
+
+# Panic / Crash Recovery
+Restart=always
+RestartSec=2s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+# Hardening & Limits
+LimitNOFILE=65535
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

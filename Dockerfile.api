@@ -1,0 +1,28 @@
+# Headless Go Backend (No embedded UI)
+FROM golang:alpine AS builder
+
+ENV GOTOOLCHAIN=auto
+RUN apk add --no-cache ca-certificates git
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+COPY testbroker/ ./testbroker/
+RUN go mod download
+
+COPY . ./
+
+# Build without -tags embed_ui so no UI assets are compiled into the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/bin/envoytrade ./cmd/server
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+COPY --from=builder /app/bin/envoytrade /usr/local/bin/envoytrade
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/envoytrade"]

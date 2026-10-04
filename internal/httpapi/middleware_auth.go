@@ -3,6 +3,7 @@ package httpapi
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"envoytrade/internal/auth"
@@ -21,6 +22,12 @@ func authMiddleware(next http.Handler, store AuthStore, logger *slog.Logger) htt
 		if path == "/broker-callback" ||
 			path == "/api/v1/auth/login" ||
 			path == "/api/v1/auth/register" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Non-API routes (frontend pages, static assets) load freely
+		if !strings.HasPrefix(path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}

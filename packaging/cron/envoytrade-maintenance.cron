@@ -1,0 +1,16 @@
+# ==============================================================================
+# EnvoyTrade PostgreSQL Nightly Maintenance Cron Job
+#
+# TIMING RATIONALE:
+# - Indian Commodity Market (MCX) trades until 11:30 PM / 11:55 PM IST.
+# - Scheduled at 01:00 AM IST to run strictly after all equity and commodity
+#   markets have completed post-market settlement, avoiding trading day lockups.
+# ==============================================================================
+#
+# Option A: If server timezone is set to Asia/Kolkata (IST):
+# 01:00 AM IST daily
+0 1 * * * envoytrade /usr/local/bin/envoytrade-db-maintenance >> /var/log/envoytrade/maintenance.log 2>&1
+#
+# Option B: If server timezone is set to UTC:
+# 20:30 UTC = 01:00 AM IST next day
+# 30 20 * * * envoytrade /usr/local/bin/envoytrade-db-maintenance >> /var/log/envoytrade/maintenance.log 2>&1

@@ -271,6 +271,106 @@ npm run build
 
 ---
 
+## Deployment & Decommissioning
+
+Two ways to deploy EnvoyTrade. Choose one.
+
+### Option 1: Single Binary (Native Host / VPS)
+All-in-one executable. UI baked inside. Zero container overhead. Max speed.
+
+**Build:**
+```bash
+# Build for current machine (e.g. macOS or local host)
+make build-single-binary
+
+# Cross-compile for Linux VPS (amd64) from macOS
+make build-single-binary-linux
+# Outputs artifacts/envoytrade-linux-amd64.tar.gz
+```
+
+**Install & Run:**
+```bash
+make install-binary
+# Or from release tarball:
+# sudo ./install.sh
+```
+Smart script. Auto-detects OS:
+- **macOS**: Installs binary to `/usr/local/bin`, initializes config in `~/.envoytrade/envoytrade.env` from `.env.example`, loads LaunchAgent via `launchctl`.
+- **Linux**: Installs binary to `/usr/local/bin`, creates `envoytrade` user, initializes `/etc/envoytrade/envoytrade.env` from `.env.example`, enables and starts `systemd` service (`Restart=always`).
+
+**Configure Environment:**
+Package includes `.env.example` template (active `.env` never packaged for security). Edit config file with real database credentials:
+- macOS: `nano ~/.envoytrade/envoytrade.env`
+- Linux: `sudo nano /etc/envoytrade/envoytrade.env`
+- Restart service after edit: `sudo systemctl restart envoytrade` (Linux) or `launchctl kickstart -k gui/$(id -u)/com.envoytrade.server` (macOS).
+
+**Decommission & Cleanup:**
+```bash
+make decommission-binary
+# Or wipe config, logs, and backups:
+# sudo ./scripts/uninstall.sh --purge
+```
+Stops service. Removes binary and `/usr/local/bin/envoytrade-db-maintenance`. Deletes systemd unit or LaunchAgent plist. Removes maintenance cron. With `--purge`, wipes config and logs.
+
+---
+
+### Option 2: Docker Compose (3 Containers)
+Headless Go API + Nginx Web UI + PostgreSQL 16. UI assets NOT in Go binary.
+
+**Deploy:**
+```bash
+make deploy-compose
+# Or: ./scripts/deploy_compose.sh
+```
+Auto-creates `.env` with random password if missing. Builds headless Go API and Nginx UI. Starts PostgreSQL with shared canonical config. UI on `http://localhost:8080`.
+
+**Stop:**
+```bash
+make down-compose
+```
+Stops containers. Keeps database volume safe.
+
+**Decommission & Destroy:**
+```bash
+make decommission-compose
+# Or purge everything including Docker images:
+make purge-compose
+```
+Brings down stack. Deletes containers. Wipes database volumes. Wipes built images. Clean slate.
+
+---
+
+### Database Performance Tuning & Maintenance
+
+- **Canonical Postgres Configuration** (`packaging/postgres/envoytrade-postgres.conf`):
+  Shared identically across native Postgres and Docker Compose. Tuned for fast index scans and transaction safety:
+  - `shared_buffers = 1GB`, `work_mem = 32MB`, `maintenance_work_mem = 128MB`, `effective_cache_size = 3GB`.
+  - `synchronous_commit = on` (trade durability).
+  - Micro-autovacuum: `scale_factor = 0.05`, `analyze_scale_factor = 0.02`, `cost_limit = 500`. Frequent small sweeps eliminate bloat and prevent query latency spikes.
+- **Connection Isolation (Unix Socket vs TCP)**:
+  - Single binary on Linux VPS uses Unix Domain Sockets (`host=/var/run/postgresql`) for direct IPC with `<0.15ms` query latency.
+  - Docker Compose uses container bridge TCP (`db:5432`). macOS dev uses TCP loopback.
+- **1:00 AM IST Nightly Maintenance** (`scripts/db_maintenance.sh` / `packaging/cron/envoytrade-maintenance.cron`):
+  - Commodity market (MCX) trades until 11:30 PM / 11:55 PM IST.
+  - Nightly table `VACUUM ANALYZE`, compressed gzip backup, and 14-day retention run strictly at **01:00 AM IST** (20:30 UTC), outside all market hours.
+  - Trigger manually on demand:
+    ```bash
+    make db-maintenance
+    ```
+
+---
+
+### Automated Deployment Benchmark
+Compare both options live (spins up each, tests sanity, benchmarks memory & latency, cleans up):
+```bash
+make benchmark
+# Or: ./scripts/benchmark_comparison.sh
+```
+
+For full benchmark analysis, memory breakdown, and decision matrix, see [Deployment Benchmark & Decision Guide](file:///Users/msp/MSP/Projects/EnvoyTrade/docs/DEPLOYMENT-BENCHMARK.md).
+
+---
+
 ## Repository Structure
 
 ```

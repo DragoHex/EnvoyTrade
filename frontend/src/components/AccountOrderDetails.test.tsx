@@ -735,8 +735,8 @@ it('locks column header widths with fixed table layout so headers do not shift a
       expect(getOrdersSpy).toHaveBeenCalledTimes(1)
       expect(getOrdersSpy).toHaveBeenLastCalledWith('acc-timer', 'open_positions', 1, 10)
 
-      // Advance by 3000ms -> should refetch open_positions
-      await vi.advanceTimersByTimeAsync(3000)
+      // Advance by 7000ms -> should refetch open_positions
+      await vi.advanceTimersByTimeAsync(7000)
       expect(getOrdersSpy).toHaveBeenCalledTimes(2)
 
       // Switch to holdings tab
@@ -747,11 +747,11 @@ it('locks column header widths with fixed table layout so headers do not shift a
       expect(getOrdersSpy).toHaveBeenCalledTimes(3)
       expect(getOrdersSpy).toHaveBeenLastCalledWith('acc-timer', 'holdings', 1, 10)
 
-      // Advance by 3000ms and 6000ms -> should NOT refetch while on holdings tab
-      await vi.advanceTimersByTimeAsync(3000)
+      // Advance by 7000ms and 14000ms -> should NOT refetch while on holdings tab
+      await vi.advanceTimersByTimeAsync(7000)
       expect(getOrdersSpy).toHaveBeenCalledTimes(3)
 
-      await vi.advanceTimersByTimeAsync(3000)
+      await vi.advanceTimersByTimeAsync(7000)
       expect(getOrdersSpy).toHaveBeenCalledTimes(3)
 
       // Switch back to open_positions tab
@@ -759,8 +759,8 @@ it('locks column header widths with fixed table layout so headers do not shift a
       fireEvent.click(openPosBtn)
       expect(getOrdersSpy).toHaveBeenCalledTimes(4)
 
-      // Advance by 3000ms -> should refetch again since it's not holdings
-      await vi.advanceTimersByTimeAsync(3000)
+      // Advance by 7000ms -> should refetch again since it's not holdings
+      await vi.advanceTimersByTimeAsync(7000)
       expect(getOrdersSpy).toHaveBeenCalledTimes(5)
     } finally {
       vi.useRealTimers()
@@ -793,9 +793,9 @@ it('locks column header widths with fixed table layout so headers do not shift a
       expect(container).not.toHaveClass('is-fetching')
 
       // Trigger 3 periodic reloads
-      await vi.advanceTimersByTimeAsync(3000)
-      await vi.advanceTimersByTimeAsync(3000)
-      await vi.advanceTimersByTimeAsync(3000)
+      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(7000)
 
       expect(getOrdersSpy).toHaveBeenCalledTimes(4) // 1 initial + 3 polls
 
@@ -839,8 +839,8 @@ it('locks column header widths with fixed table layout so headers do not shift a
       currentLtp = '3600.00'
       currentMtm = '1000.00'
 
-      // Advance by 3000ms
-      await vi.advanceTimersByTimeAsync(3000)
+      // Advance by 7000ms
+      await vi.advanceTimersByTimeAsync(7000)
       expect(getOrdersSpy).toHaveBeenCalledTimes(2)
 
       // Cell text updated to new LTP

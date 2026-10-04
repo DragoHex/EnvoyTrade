@@ -529,12 +529,20 @@
         if (res.status !== 'success') return;
 
         const tbody = document.getElementById('orders-tbody');
-        if (res.data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:20px;">No orders found</td></tr>';
+        if (!res.data || res.data.length === 0) {
+          const emptyHtml = '<tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:20px;">No orders found</td></tr>';
+          if (tbody.innerHTML !== emptyHtml) tbody.innerHTML = emptyHtml;
           return;
         }
 
-        tbody.innerHTML = res.data.map(o => {
+        const orders = res.data.slice().sort((a, b) => {
+          const tA = a.order_timestamp || '';
+          const tB = b.order_timestamp || '';
+          if (tA !== tB) return tB.localeCompare(tA);
+          return (b.order_id || '').localeCompare(a.order_id || '');
+        });
+
+        const newHtml = orders.map(o => {
           let actions = '';
           if (o.status === 'OPEN') {
             actions = `
@@ -558,6 +566,10 @@
             </tr>
           `;
         }).join('');
+
+        if (tbody.innerHTML !== newHtml) {
+          tbody.innerHTML = newHtml;
+        }
       } catch (err) {
         console.error('Error fetching orders:', err);
       }
@@ -639,8 +651,8 @@
     window.onload = async () => {
       await loadMeta();
       await loadOrders();
-      // Auto-poll orders every 1.5s
-      setInterval(loadOrders, 1500);
+      // Auto-poll orders every 7s
+      setInterval(loadOrders, 7000);
     };
   </script>
 </body>

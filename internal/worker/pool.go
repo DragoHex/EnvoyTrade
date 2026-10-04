@@ -33,6 +33,11 @@ type Store interface {
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
 }
 
+// PortfolioSyncer provides live portfolio synchronization for an account.
+type PortfolioSyncer interface {
+	SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error
+}
+
 // Pool owns one goroutine and one bounded channel per registered
 // follower. It satisfies engine.Dispatcher structurally — engine never
 // imports this package, only the interface it declared.
@@ -46,6 +51,7 @@ type Pool struct {
 	MaxRetries        int
 	InitialBackoff    time.Duration
 	Logger            *slog.Logger
+	Syncer            PortfolioSyncer
 }
 
 // NewPool creates an empty pool. Followers are added with Register.
@@ -206,6 +212,11 @@ func (p *Pool) place(ctx context.Context, job domain.Job, b broker.Broker, store
 				EventType:       "api_response",
 				Payload:         []byte(fmt.Sprintf(`{"broker_order_id":%q,"quantity":%d}`, resp.OrderID, job.Quantity)),
 			})
+			if p.Syncer != nil {
+				go func(followerID uuid.UUID) {
+					_ = p.Syncer.SyncAccountPortfolio(context.Background(), followerID)
+				}(job.FollowerID)
+			}
 			return
 		}
 

@@ -12,7 +12,7 @@ CLOUDFLARED_LOG ?= /tmp/cloudflared.log
 TUNNEL_NAME ?= mytunnel
 
 .PHONY: build build-backend build-frontend run-backend run-frontend test test-integration e2e install \
-	db-up db-down db-seed db-flush seed flush \
+	db-up db-down db-seed db-flush seed flush db-maintenance \
 	backend-up backend-down frontend-up frontend-down tunnel-up tunnel-down \
 	up up-all all-up up-everything down down-all all-down down-everything \
 	check-log-dir setup-log-dir check-encryption-key sqlc-generate
@@ -28,7 +28,9 @@ CONTAINER_CMD ?= $(shell which podman 2>/dev/null || which docker 2>/dev/null ||
 db-up:
 	@$(CONTAINER_CMD) start $(DB_CONTAINER) 2>/dev/null || $(CONTAINER_CMD) run -d --name $(DB_CONTAINER) \
 		-e POSTGRES_DB=envoytrade -e POSTGRES_USER=envoytrade -e POSTGRES_PASSWORD=envoytrade \
-		-p 5434:5432 -v $(DB_VOLUME):/var/lib/postgresql/data postgres:16-alpine
+		-p 5434:5432 -v $(DB_VOLUME):/var/lib/postgresql/data \
+		-v $(PWD)/packaging/postgres/envoytrade-postgres.conf:/etc/postgresql/postgresql.conf:ro \
+		postgres:16-alpine -c config_file=/etc/postgresql/postgresql.conf
 	@echo "Waiting for PostgreSQL to be ready..."
 	@for i in $$(seq 1 30); do \
 		if $(CONTAINER_CMD) exec $(DB_CONTAINER) pg_isready -U envoytrade -d envoytrade >/dev/null 2>&1; then \
@@ -44,6 +46,7 @@ db-down:
 	@stopped=0; \
 	for cmd in podman docker; do \
 		if command -v $$cmd >/dev/null 2>&1; then \
+			$$cmd rm -f envoytrade-api envoytrade-web >/dev/null 2>&1 || true; \
 			if $$cmd ps -a -q --filter name=^/$(DB_CONTAINER)$$ --filter name=^$(DB_CONTAINER)$$ 2>/dev/null | grep -q .; then \
 				$$cmd rm -f $(DB_CONTAINER) >/dev/null 2>&1 || true; \
 				stopped=1; \
@@ -71,6 +74,9 @@ seed: db-seed
 flush: db-flush
 sync-instruments:
 	DB_CONTAINER="$(DB_CONTAINER)" python3 ./scripts/sync_instruments.py
+
+db-maintenance:
+	DATABASE_URL="$(DATABASE_URL)" CONTAINER_NAME="$(DB_CONTAINER)" ./scripts/db_maintenance.sh
 
 
 # ============================================================================
@@ -181,6 +187,9 @@ frontend-down:
 
 # tunnel-up starts the cloudflared tunnel in the background
 tunnel-up:
+	@if ! lsof -ti :$(PORT) >/dev/null 2>&1; then \
+		echo "Warning: Origin service is not running on port $(PORT). Incoming requests via tunnel will fail until backend/service is up."; \
+	fi
 	@if pgrep -f "cloudflared.*tunnel.*run" >/dev/null 2>&1; then \
 		echo "Cloudflared tunnel is already running (PID: $$(pgrep -f "cloudflared.*tunnel.*run" | tr '\n' ' '))"; \
 	else \
@@ -190,6 +199,7 @@ tunnel-up:
 			if pgrep -f "cloudflared.*tunnel.*run" >/dev/null 2>&1; then \
 				echo "Cloudflared tunnel started (PID: $$(pgrep -f "cloudflared.*tunnel.*run" | tr '\n' ' '))"; \
 				echo "Tunnel logs: $(CLOUDFLARED_LOG)"; \
+				echo "Access at:   https://app.envoytrade.in (or https://envoytrade.in)"; \
 				exit 0; \
 			fi; \
 			sleep 1; \
@@ -279,3 +289,42 @@ sqlc-generate:
 	else \
 		go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate; \
 	fi
+
+# ==============================================================================
+# DEPLOYMENT TARGETS (Option 1: Single Binary, Option 2: Docker Compose)
+# ==============================================================================
+
+# Option 1: Standalone Single Binary (Embedded UI, Native Process)
+package-binary:
+	@./scripts/build_binary.sh
+
+build-single-binary: package-binary
+
+package-binary-linux:
+	@GOOS=linux GOARCH=amd64 ./scripts/build_binary.sh
+
+build-single-binary-linux: package-binary-linux
+
+install-binary:
+	@./scripts/install.sh
+
+decommission-binary:
+	@./scripts/uninstall.sh
+
+# Option 2: Docker Compose (Headless API + Web Nginx + PostgreSQL)
+deploy-compose:
+	@./scripts/deploy_compose.sh
+
+down-compose:
+	@./scripts/decommission_compose.sh
+
+decommission-compose:
+	@./scripts/decommission_compose.sh --volumes
+
+purge-compose:
+	@./scripts/decommission_compose.sh --all
+
+# Automated Comparative Benchmark
+benchmark:
+	@./scripts/benchmark_comparison.sh
+

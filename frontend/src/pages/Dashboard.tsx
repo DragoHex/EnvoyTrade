@@ -1,4 +1,4 @@
-import { createResource, For, Show } from 'solid-js'
+import { createResource, For, Show, onMount, onCleanup } from 'solid-js'
 import { getGroupDetail, getGroups, patchAccount, postAction, type ActionType } from '../api'
 import { GroupCard } from '../components/GroupCard'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
@@ -6,6 +6,13 @@ import { EmptyState } from '../components/EmptyState'
 
 function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
+
+  onMount(() => {
+    const timer = setInterval(() => {
+      refetch()
+    }, 7000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const onToggleCopy = async (accountId: string, next: boolean) => {
     await patchAccount(accountId, { enabled: next })

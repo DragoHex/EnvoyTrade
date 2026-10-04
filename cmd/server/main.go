@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -38,6 +39,7 @@ import (
 	"envoytrade/internal/store/postgres"
 	"envoytrade/internal/testbroker"
 	"envoytrade/internal/ticker"
+	"envoytrade/frontend"
 	"envoytrade/internal/worker"
 
 	"github.com/google/uuid"
@@ -45,6 +47,8 @@ import (
 )
 
 func main() {
+	loadEnvFallback()
+
 	logger, cleanup, err := setupLogger()
 	if err != nil {
 		log.Fatalf("logger setup failed: %v", err)
@@ -56,6 +60,54 @@ func main() {
 	if err := run(logger); err != nil {
 		logger.Error("server stopped with error", "error", err)
 		os.Exit(1)
+	}
+}
+
+// loadEnvFallback checks standard system and user locations for envoytrade.env
+// if environment variables like DATABASE_URL are not already set.
+func loadEnvFallback() {
+	if os.Getenv("DATABASE_URL") != "" {
+		return
+	}
+
+	var candidates []string
+	if custom := os.Getenv("ENVOYTRADE_CONFIG"); custom != "" {
+		candidates = append(candidates, custom)
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".envoytrade", "envoytrade.env"))
+	}
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		candidates = append(candidates, filepath.Join(u.HomeDir, ".envoytrade", "envoytrade.env"))
+	}
+	candidates = append(candidates,
+		"/etc/envoytrade/envoytrade.env",
+		".env",
+	)
+
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, rawLine := range strings.Split(string(data), "\n") {
+			line := strings.TrimSpace(rawLine)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				k := strings.TrimSpace(parts[0])
+				v := strings.TrimSpace(parts[1])
+				v = strings.Trim(v, `"'`)
+				if os.Getenv(k) == "" {
+					os.Setenv(k, v)
+				}
+			}
+		}
+		if os.Getenv("DATABASE_URL") != "" {
+			break
+		}
 	}
 }
 
@@ -131,6 +183,7 @@ func run(logger *slog.Logger) error {
 	syncer := &kite.PortfolioSyncer{
 		Store: store,
 	}
+	workerPool.Syncer = syncer
 
 	// Consumers draining queues into store and engine
 	masterFillConsumer := &listener.MasterFillConsumer{
@@ -245,14 +298,27 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	router := httpapi.NewRouter(
-		store,
-		eng,
+	var routerOpts []httpapi.Option
+	routerOpts = append(routerOpts,
 		httpapi.WithPostbackHandler(postbackHandler),
 		httpapi.WithLogger(logger.With("component", "httpapi")),
 		httpapi.WithPortfolioSyncer(syncer),
 		httpapi.WithTickerManager(tickerManager),
 	)
+
+	if frontend.HasEmbeddedUI() {
+		staticFS, err := frontend.Dist()
+		if err != nil {
+			logger.Error("failed to load embedded UI", "error", err)
+		} else {
+			logger.Info("mounting embedded UI")
+			routerOpts = append(routerOpts, httpapi.WithStaticFS(staticFS))
+		}
+	} else {
+		logger.Info("running in headless API mode (no embedded UI)")
+	}
+
+	router := httpapi.NewRouter(store, eng, routerOpts...)
 
 	server := &http.Server{
 		Addr:    ":" + addr,
