@@ -7,7 +7,31 @@ import (
 	"envoytrade/internal/crypto"
 )
 
+func init() {
+	if os.Getenv("ENCRYPTION_KEY") == "" {
+		_ = os.Setenv("ENCRYPTION_KEY", "test-key-32-bytes-long-for-test!")
+	}
+}
+
+func TestEncryptDecrypt_MissingKeyReturnsError(t *testing.T) {
+	curr := os.Getenv("ENCRYPTION_KEY")
+	t.Setenv("ENCRYPTION_KEY", "")
+
+	_, err := crypto.Encrypt("secret")
+	if err != crypto.ErrMissingEncryptionKey {
+		t.Fatalf("expected ErrMissingEncryptionKey, got %v", err)
+	}
+
+	_, err = crypto.Decrypt("some-ciphertext")
+	if err != crypto.ErrMissingEncryptionKey {
+		t.Fatalf("expected ErrMissingEncryptionKey, got %v", err)
+	}
+
+	t.Setenv("ENCRYPTION_KEY", curr)
+}
+
 func TestEncryptDecrypt_RoundTrip(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-key-32-bytes-long-for-test!")
 	orig := "super_secret_password_123!"
 	enc, err := crypto.Encrypt(orig)
 	if err != nil {

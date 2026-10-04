@@ -12,17 +12,17 @@ import (
 	"os"
 )
 
-// defaultDevKey is used only for development and local testing when ENCRYPTION_KEY is unset.
-const defaultDevKey = "envoytrade-master-dev-key-32b!!"
+// ErrMissingEncryptionKey is returned when ENCRYPTION_KEY environment variable is not set.
+var ErrMissingEncryptionKey = errors.New("crypto: ENCRYPTION_KEY environment variable is required")
 
-// getKey derives a 32-byte AES-256 key from ENCRYPTION_KEY or defaultDevKey.
-func getKey() []byte {
+// getKey derives a 32-byte AES-256 key from ENCRYPTION_KEY.
+func getKey() ([]byte, error) {
 	k := os.Getenv("ENCRYPTION_KEY")
 	if k == "" {
-		k = defaultDevKey
+		return nil, ErrMissingEncryptionKey
 	}
 	hash := sha256.Sum256([]byte(k))
-	return hash[:]
+	return hash[:], nil
 }
 
 // Encrypt encrypts plaintext using AES-256-GCM with a random 12-byte nonce
@@ -31,7 +31,10 @@ func Encrypt(plaintext string) (string, error) {
 	if plaintext == "" {
 		return "", nil
 	}
-	key := getKey()
+	key, err := getKey()
+	if err != nil {
+		return "", err
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("cipher init: %w", err)
@@ -56,12 +59,15 @@ func Decrypt(encodedCiphertext string) (string, error) {
 	if encodedCiphertext == "" {
 		return "", nil
 	}
+	key, err := getKey()
+	if err != nil {
+		return "", err
+	}
 	raw, err := base64.StdEncoding.DecodeString(encodedCiphertext)
 	if err != nil {
 		return "", fmt.Errorf("base64 decode: %w", err)
 	}
 
-	key := getKey()
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("cipher init: %w", err)

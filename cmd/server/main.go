@@ -67,6 +67,10 @@ func run(logger *slog.Logger) error {
 	if dbURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	encKey := os.Getenv("ENCRYPTION_KEY")
+	if encKey == "" {
+		return errors.New("ENCRYPTION_KEY is required")
+	}
 	addr := os.Getenv("PORT")
 	if addr == "" {
 		addr = "8080"
