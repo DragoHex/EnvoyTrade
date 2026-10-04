@@ -94,14 +94,29 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 
 	// Positions (net & day)
 	mux.HandleFunc("GET /portfolio/positions", func(w http.ResponseWriter, r *http.Request) {
+		userID := UserIDFromContext(r.Context())
+		if userID == "" {
+			writeKiteError(w, http.StatusForbidden, "TokenException", "User not found in context")
+			return
+		}
+		net, day := eng.GetPositions(userID)
 		writeKiteSuccess(w, map[string]any{
-			"net": []any{},
-			"day": []any{},
+			"net": net,
+			"day": day,
 		})
 	})
 
 	// Holdings
 	mux.HandleFunc("GET /portfolio/holdings", func(w http.ResponseWriter, r *http.Request) {
+		userID := UserIDFromContext(r.Context())
+		if userID == "" {
+			writeKiteError(w, http.StatusForbidden, "TokenException", "User not found in context")
+			return
+		}
+		if u, ok := cfg.Users[userID]; ok && len(u.Holdings) > 0 {
+			writeKiteSuccess(w, u.Holdings)
+			return
+		}
 		writeKiteSuccess(w, []any{})
 	})
 

@@ -325,3 +325,65 @@ func TestUpdateLTP(t *testing.T) {
 		t.Errorf("LTP = %f, want 26000", inst.LTP)
 	}
 }
+
+func TestGetPositions(t *testing.T) {
+	eng := newTestEngine()
+	eng.config.ExecutionMode = "instant"
+
+	// 1. Buy 150 NIFTY @ 25000 (2 lots)
+	_, err := eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "BUY", Product: "NRML", OrderType: "MARKET", Quantity: 150,
+	})
+	if err != nil {
+		t.Fatalf("buy 150 failed: %v", err)
+	}
+
+	net, day := eng.GetPositions("AB1234")
+	if len(net) != 1 || len(day) != 1 {
+		t.Fatalf("expected 1 position, got net=%d day=%d", len(net), len(day))
+	}
+	if net[0].Quantity != 150 {
+		t.Errorf("expected quantity 150, got %d", net[0].Quantity)
+	}
+	if net[0].BuyQuantity != 150 || net[0].SellQuantity != 0 {
+		t.Errorf("expected buyQty=150 sellQty=0, got %d/%d", net[0].BuyQuantity, net[0].SellQuantity)
+	}
+
+	// 2. Sell 75 NIFTY @ 25000 (1 lot) -> partial exit
+	_, err = eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "SELL", Product: "NRML", OrderType: "MARKET", Quantity: 75,
+	})
+	if err != nil {
+		t.Fatalf("sell 75 failed: %v", err)
+	}
+
+	net, _ = eng.GetPositions("AB1234")
+	if len(net) != 1 {
+		t.Fatalf("expected 1 position, got %d", len(net))
+	}
+	if net[0].Quantity != 75 {
+		t.Errorf("expected quantity 75, got %d", net[0].Quantity)
+	}
+	if net[0].BuyQuantity != 150 || net[0].SellQuantity != 75 {
+		t.Errorf("expected buyQty=150 sellQty=75, got %d/%d", net[0].BuyQuantity, net[0].SellQuantity)
+	}
+
+	// 3. Sell 75 NIFTY @ 25000 (1 lot) -> position fully closed
+	_, err = eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "SELL", Product: "NRML", OrderType: "MARKET", Quantity: 75,
+	})
+	if err != nil {
+		t.Fatalf("sell 75 failed: %v", err)
+	}
+
+	net, _ = eng.GetPositions("AB1234")
+	if len(net) != 1 {
+		t.Fatalf("expected 1 position, got %d", len(net))
+	}
+	if net[0].Quantity != 0 {
+		t.Errorf("expected quantity 0 (closed), got %d", net[0].Quantity)
+	}
+}

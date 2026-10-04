@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -87,6 +88,12 @@ func NewOrderEngine(cfg *Config) *OrderEngine {
 	for i := range cfg.Instruments {
 		inst := &cfg.Instruments[i]
 		e.instruments[inst.Exchange+":"+inst.Tradingsymbol] = inst
+	}
+	for i := range cfg.Orders {
+		o := cfg.Orders[i]
+		e.orders[o.OrderID] = &o
+		e.userOrders[o.UserID] = append(e.userOrders[o.UserID], o.OrderID)
+		e.history[o.OrderID] = []Order{o}
 	}
 	return e
 }
@@ -281,7 +288,7 @@ func (e *OrderEngine) CancelOrder(orderID string) error {
 	return nil
 }
 
-// GetOrders returns all orders for a user.
+// GetOrders returns all orders for a user, sorted latest first.
 func (e *OrderEngine) GetOrders(userID string) []*Order {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -289,12 +296,15 @@ func (e *OrderEngine) GetOrders(userID string) []*Order {
 	ids := e.userOrders[userID]
 	out := make([]*Order, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, e.orders[id])
+		if o := e.orders[id]; o != nil {
+			out = append(out, o)
+		}
 	}
+	sortOrdersLatestFirst(out)
 	return out
 }
 
-// GetAllOrders returns all orders across all users.
+// GetAllOrders returns all orders across all users, sorted latest first.
 func (e *OrderEngine) GetAllOrders() []*Order {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -303,7 +313,17 @@ func (e *OrderEngine) GetAllOrders() []*Order {
 	for _, o := range e.orders {
 		out = append(out, o)
 	}
+	sortOrdersLatestFirst(out)
 	return out
+}
+
+func sortOrdersLatestFirst(orders []*Order) {
+	sort.Slice(orders, func(i, j int) bool {
+		if orders[i].OrderTimestamp != orders[j].OrderTimestamp {
+			return orders[i].OrderTimestamp > orders[j].OrderTimestamp
+		}
+		return orders[i].OrderID > orders[j].OrderID
+	})
 }
 
 // GetOrder returns a single order by ID.
@@ -360,4 +380,171 @@ func contains(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// Position matches the Kite Connect position JSON shape.
+type Position struct {
+	Tradingsymbol     string  `json:"tradingsymbol"`
+	Exchange          string  `json:"exchange"`
+	InstrumentToken   int     `json:"instrument_token"`
+	Product           string  `json:"product"`
+	Quantity          int     `json:"quantity"`
+	OvernightQuantity int     `json:"overnight_quantity"`
+	Multiplier        float64 `json:"multiplier"`
+	AveragePrice      float64 `json:"average_price"`
+	ClosePrice        float64 `json:"close_price"`
+	LastPrice         float64 `json:"last_price"`
+	Value             float64 `json:"value"`
+	PnL               float64 `json:"pnl"`
+	M2M               float64 `json:"m2m"`
+	Unrealised        float64 `json:"unrealised"`
+	Realised          float64 `json:"realised"`
+	BuyQuantity       int     `json:"buy_quantity"`
+	BuyPrice          float64 `json:"buy_price"`
+	BuyValue          float64 `json:"buy_value"`
+	BuyM2MValue       float64 `json:"buy_m2m"`
+	SellQuantity      int     `json:"sell_quantity"`
+	SellPrice         float64 `json:"sell_price"`
+	SellValue         float64 `json:"sell_value"`
+	SellM2MValue      float64 `json:"sell_m2m"`
+	DayBuyQuantity    int     `json:"day_buy_quantity"`
+	DayBuyPrice       float64 `json:"day_buy_price"`
+	DayBuyValue       float64 `json:"day_buy_value"`
+	DaySellQuantity   int     `json:"day_sell_quantity"`
+	DaySellPrice      float64 `json:"day_sell_price"`
+	DaySellValue      float64 `json:"day_sell_value"`
+}
+
+// GetPositions aggregates all completed orders for a user into net and day positions.
+func (e *OrderEngine) GetPositions(userID string) (net []Position, day []Position) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	type accum struct {
+		exchange string
+		symbol   string
+		product  string
+		token    int
+		buyQty   int
+		buyVal   float64
+		sellQty  int
+		sellVal  float64
+	}
+
+	accums := make(map[string]*accum)
+	var keys []string
+
+	orderIDs := e.userOrders[userID]
+	for _, oid := range orderIDs {
+		o, ok := e.orders[oid]
+		if !ok || o.Status != "COMPLETE" || o.FilledQuantity <= 0 {
+			continue
+		}
+
+		key := o.Exchange + ":" + o.Tradingsymbol + ":" + o.Product
+		a, exists := accums[key]
+		if !exists {
+			a = &accum{
+				exchange: o.Exchange,
+				symbol:   o.Tradingsymbol,
+				product:  o.Product,
+				token:    o.InstrumentToken,
+			}
+			accums[key] = a
+			keys = append(keys, key)
+		}
+
+		val := float64(o.FilledQuantity) * o.AveragePrice
+		if o.TransactionType == "BUY" || o.TransactionType == "B" {
+			a.buyQty += o.FilledQuantity
+			a.buyVal += val
+		} else if o.TransactionType == "SELL" || o.TransactionType == "S" {
+			a.sellQty += o.FilledQuantity
+			a.sellVal += val
+		}
+	}
+
+	net = make([]Position, 0, len(keys))
+	day = make([]Position, 0, len(keys))
+
+	for _, k := range keys {
+		a := accums[k]
+		netQty := a.buyQty - a.sellQty
+
+		buyPrice := 0.0
+		if a.buyQty > 0 {
+			buyPrice = a.buyVal / float64(a.buyQty)
+		}
+		sellPrice := 0.0
+		if a.sellQty > 0 {
+			sellPrice = a.sellVal / float64(a.sellQty)
+		}
+
+		avgPrice := 0.0
+		if netQty > 0 {
+			avgPrice = buyPrice
+		} else if netQty < 0 {
+			avgPrice = sellPrice
+		}
+
+		ltp := avgPrice
+		if inst, ok := e.instruments[a.exchange+":"+a.symbol]; ok && inst.LTP > 0 {
+			ltp = inst.LTP
+		}
+
+		realised := 0.0
+		unrealised := 0.0
+		closedQty := a.buyQty
+		if a.sellQty < closedQty {
+			closedQty = a.sellQty
+		}
+
+		if closedQty > 0 && buyPrice > 0 && sellPrice > 0 {
+			realised = float64(closedQty) * (sellPrice - buyPrice)
+		}
+
+		if netQty > 0 {
+			unrealised = float64(netQty) * (ltp - buyPrice)
+		} else if netQty < 0 {
+			unrealised = float64(-netQty) * (sellPrice - ltp)
+		}
+
+		pnl := realised + unrealised
+		m2m := pnl
+
+		pos := Position{
+			Tradingsymbol:   a.symbol,
+			Exchange:        a.exchange,
+			InstrumentToken: a.token,
+			Product:         a.product,
+			Quantity:        netQty,
+			Multiplier:      1.0,
+			AveragePrice:    avgPrice,
+			LastPrice:       ltp,
+			Value:           float64(netQty) * ltp,
+			PnL:             pnl,
+			M2M:             m2m,
+			Unrealised:      unrealised,
+			Realised:        realised,
+			BuyQuantity:     a.buyQty,
+			BuyPrice:        buyPrice,
+			BuyValue:        a.buyVal,
+			BuyM2MValue:     a.buyVal,
+			SellQuantity:    a.sellQty,
+			SellPrice:       sellPrice,
+			SellValue:       a.sellVal,
+			SellM2MValue:    a.sellVal,
+			DayBuyQuantity:  a.buyQty,
+			DayBuyPrice:     buyPrice,
+			DayBuyValue:     a.buyVal,
+			DaySellQuantity: a.sellQty,
+			DaySellPrice:    sellPrice,
+			DaySellValue:    a.sellVal,
+		}
+
+		net = append(net, pos)
+		day = append(day, pos)
+	}
+
+	return net, day
 }

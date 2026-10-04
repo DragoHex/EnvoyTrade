@@ -14,17 +14,32 @@ type Config struct {
 	Users         map[string]UserConfig `json:"users"`          // keyed by broker user ID (e.g. "AB1234")
 	Instruments   []Instrument          `json:"instruments"`
 	Validation    ValidationConfig      `json:"validation"`
+	Orders        []Order               `json:"orders,omitempty"`
 
 	// tokenIndex is built on load for O(1) auth lookups: "api_key:access_token" -> userID
 	tokenIndex map[string]string
 }
 
+// Holding defines an equity holding in the mock.
+type Holding struct {
+	Tradingsymbol   string  `json:"tradingsymbol"`
+	Exchange        string  `json:"exchange"`
+	InstrumentToken int     `json:"instrument_token"`
+	ISIN            string  `json:"isin"`
+	Product         string  `json:"product"`
+	Quantity        int     `json:"quantity"`
+	AveragePrice    float64 `json:"average_price"`
+	LastPrice       float64 `json:"last_price"`
+	PnL             float64 `json:"pnl"`
+}
+
 // UserConfig defines a simulated broker account.
 type UserConfig struct {
-	APIKey      string `json:"api_key"`
-	APISecret   string `json:"api_secret"`
-	AccessToken string `json:"access_token"`
-	Role        string `json:"role"` // "master" | "follower"
+	APIKey      string    `json:"api_key"`
+	APISecret   string    `json:"api_secret"`
+	AccessToken string    `json:"access_token"`
+	Role        string    `json:"role"` // "master" | "follower"
+	Holdings    []Holding `json:"holdings,omitempty"`
 }
 
 // Instrument defines a tradeable instrument in the mock.
