@@ -1,0 +1,173 @@
+{
+  "port": 8089,
+  "postback_url": "http://localhost:8080/broker-callback",
+  "execution_mode": "instant",
+  "users": {
+    "MASTER01": {
+      "api_key": "key_master01",
+      "api_secret": "secret_master01",
+      "access_token": "token_master01",
+      "role": "master"
+    },
+    "MASTER02": {
+      "api_key": "key_master02",
+      "api_secret": "secret_master02",
+      "access_token": "token_master02",
+      "role": "master"
+    },
+    "FOLLOW01A": {
+      "api_key": "key_follow01a",
+      "api_secret": "secret_follow01a",
+      "access_token": "token_follow01a",
+      "role": "follower"
+    },
+    "FOLLOW01B": {
+      "api_key": "key_follow01b",
+      "api_secret": "secret_follow01b",
+      "access_token": "token_follow01b",
+      "role": "follower"
+    },
+    "FOLLOW01C": {
+      "api_key": "key_follow01c",
+      "api_secret": "secret_follow01c",
+      "access_token": "token_follow01c",
+      "role": "follower"
+    },
+    "FOLLOW01D": {
+      "api_key": "key_follow01d",
+      "api_secret": "secret_follow01d",
+      "access_token": "token_follow01d",
+      "role": "follower"
+    },
+    "FOLLOW02A": {
+      "api_key": "key_follow02a",
+      "api_secret": "secret_follow02a",
+      "access_token": "token_follow02a",
+      "role": "follower"
+    },
+    "FOLLOW02B": {
+      "api_key": "key_follow02b",
+      "api_secret": "secret_follow02b",
+      "access_token": "token_follow02b",
+      "role": "follower"
+    },
+    "FOLLOW02C": {
+      "api_key": "key_follow02c",
+      "api_secret": "secret_follow02c",
+      "access_token": "token_follow02c",
+      "role": "follower"
+    },
+    "FOLLOW02D": {
+      "api_key": "key_follow02d",
+      "api_secret": "secret_follow02d",
+      "access_token": "token_follow02d",
+      "role": "follower"
+    }
+  },
+  "instruments": [
+    {
+      "exchange": "NFO",
+      "tradingsymbol": "NIFTY26OCTFUT",
+      "instrument_token": 408065,
+      "lot_size": 75,
+      "tick_size": 0.05,
+      "ltp": 25000.0
+    },
+    {
+      "exchange": "NSE",
+      "tradingsymbol": "RELIANCE",
+      "instrument_token": 738561,
+      "lot_size": 1,
+      "tick_size": 0.05,
+      "ltp": 2450.0
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26C10600",
+      "instrument_token": 1001,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 114.4
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26C10700",
+      "instrument_token": 1002,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 101.6
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26C11000",
+      "instrument_token": 1003,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 71.0
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26P8400",
+      "instrument_token": 1004,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 43.0
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26P8500",
+      "instrument_token": 1005,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 50.5
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26P8600",
+      "instrument_token": 1006,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 60.6
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26P8700",
+      "instrument_token": 1007,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 73.3
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOILM21SEP26",
+      "instrument_token": 1008,
+      "lot_size": 10,
+      "tick_size": 0.05,
+      "ltp": 9580.0
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL17SEP26P8200",
+      "instrument_token": 1009,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 29.7
+    },
+    {
+      "exchange": "MCX",
+      "tradingsymbol": "CRUDEOIL21SEP26",
+      "instrument_token": 1010,
+      "lot_size": 100,
+      "tick_size": 0.05,
+      "ltp": 9584.0
+    }
+  ],
+  "validation": {
+    "lot_size_check": true,
+    "max_quantity_per_order": 1800,
+    "circuit_limit_pct": 10.0,
+    "allowed_exchanges": ["NFO", "NSE", "MCX"],
+    "allowed_products": ["NRML", "MIS", "CNC"],
+    "allowed_order_types": ["MARKET", "LIMIT", "SL", "SL-M"]
+  }
+}

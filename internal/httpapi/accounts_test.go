@@ -350,11 +350,38 @@ func TestPostAccount_InvalidMasterID_Returns400(t *testing.T) {
 	}
 }
 
+func TestPostAccount_AllowsTestbroker(t *testing.T) {
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"name":            "Test Master",
+		"role":            "master",
+		"broker":          "testbroker",
+		"brokerAccountId": "MASTER01",
+		"apiKey":          "key_master01",
+		"apiSecret":       "sec_master01",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createAccountArgs) != 1 {
+		t.Fatalf("expected 1 createAccount call, got %d", len(store.createAccountArgs))
+	}
+	if store.createAccountArgs[0].Broker != "testbroker" {
+		t.Errorf("broker = %s, want testbroker", store.createAccountArgs[0].Broker)
+	}
+}
+
 func TestPostAccount_BadBroker_Returns400(t *testing.T) {
 	store := &stubStore{}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"role": "master", "broker": "zerodha", "brokerAccountId": "ZX1234"})
+	body, _ := json.Marshal(map[string]any{"role": "master", "broker": "invalid_broker", "brokerAccountId": "ZX1234"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

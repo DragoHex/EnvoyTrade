@@ -36,6 +36,8 @@ import (
 	"envoytrade/internal/queue/memchan"
 	"envoytrade/internal/recon"
 	"envoytrade/internal/store/postgres"
+	"envoytrade/internal/testbroker"
+	"envoytrade/internal/ticker"
 	"envoytrade/internal/worker"
 
 	"github.com/google/uuid"
@@ -88,10 +90,28 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("database migrations applied")
 
+	brokerRegistry := broker.NewRegistry()
+	kiteBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
+		var proxyCfg *kite.ProxyConfig
+		if acc.ProxyHost != "" {
+			proxyCfg = &kite.ProxyConfig{
+				Scheme:       "https",
+				Host:         acc.ProxyHost,
+				Port:         acc.ProxyPort,
+				ClientID:     acc.ProxyUsername,
+				ClientSecret: acc.ProxyPassword,
+			}
+		}
+		return kite.NewLiveBroker(acc.ApiKey, acc.AccessToken, proxyCfg)
+	})
+	brokerRegistry.Register("kite", kiteBrokerFactory)
+	brokerRegistry.Register("zerodha", kiteBrokerFactory)
+	brokerRegistry.Register("testbroker", testbroker.NewBrokerFactory())
+
 	workerPool := worker.NewPool()
 	workerPool.Logger = logger.With("component", "worker_pool")
 	defer workerPool.Shutdown()
-	followersRegistered, err := registerFollowers(ctx, store, workerPool)
+	followersRegistered, err := registerFollowers(ctx, store, workerPool, brokerRegistry)
 	if err != nil {
 		return fmt.Errorf("register followers: %w", err)
 	}
@@ -159,8 +179,13 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Dynamic multi-master WebSocket ticker manager
-	tickerManager := kite.NewTickerManager(store, masterFillQueue, poller, logger.With("component", "ticker_manager"))
+	// Dynamic multi-master WebSocket ticker manager (generic, multi-broker)
+	tickerManager := ticker.NewManager(store, poller, logger.With("component", "ticker_manager"))
+	kiteTickerFactory := kite.NewTickerFactory(masterFillQueue, logger.With("component", "kite_ticker"))
+	testbrokerTickerFactory := testbroker.NewTickerFactory(masterFillQueue, logger.With("component", "testbroker_ticker"))
+	tickerManager.RegisterFactory("kite", kiteTickerFactory)
+	tickerManager.RegisterFactory("zerodha", kiteTickerFactory)
+	tickerManager.RegisterFactory("testbroker", testbrokerTickerFactory)
 	defer tickerManager.Shutdown()
 
 	if err := tickerManager.SyncActiveMasters(ctx); err != nil {
@@ -251,7 +276,7 @@ func run(logger *slog.Logger) error {
 
 // registerFollowers registers every existing follower account with the
 // worker pool so Rebalance can dispatch to it.
-func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool) (int, error) {
+func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, registry *broker.Registry) (int, error) {
 	groups, err := store.Groups(ctx)
 	if err != nil {
 		return 0, err
@@ -266,21 +291,23 @@ func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.
 			var b broker.Broker = &fake.Broker{}
 			authInfo, err := store.AccountAuthInfo(ctx, f.AccountID)
 			if err == nil && authInfo.ApiKey != "" && authInfo.AccessToken != "" {
-				var proxyCfg *kite.ProxyConfig
+				acc := broker.BrokerAccount{
+					ID:              f.AccountID.String(),
+					Broker:          authInfo.Broker,
+					BrokerAccountID: authInfo.BrokerAccountID,
+					ApiKey:          authInfo.ApiKey,
+					ApiSecret:       authInfo.ApiSecret,
+					AccessToken:     authInfo.AccessToken,
+				}
 				if authInfo.IPAddress != "" {
-					pIP, err := store.ProxyIPByAddress(ctx, authInfo.IPAddress)
-					if err == nil {
-						proxyCfg = &kite.ProxyConfig{
-							Scheme:       "https",
-							Host:         pIP.Host,
-							Port:         pIP.Port,
-							ClientID:     pIP.Username,
-							ClientSecret: pIP.Password,
-						}
+					if pIP, err := store.ProxyIPByAddress(ctx, authInfo.IPAddress); err == nil {
+						acc.ProxyHost = pIP.Host
+						acc.ProxyPort = pIP.Port
+						acc.ProxyUsername = pIP.Username
+						acc.ProxyPassword = pIP.Password
 					}
 				}
-				liveBroker, err := kite.NewLiveBroker(authInfo.ApiKey, authInfo.AccessToken, proxyCfg)
-				if err == nil {
+				if liveBroker, err := registry.Create(ctx, acc); err == nil {
 					b = liveBroker
 				}
 			}
@@ -305,6 +332,13 @@ func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.
 	}
 	kc := kiteconnect.New(authInfo.ApiKey)
 	kc.SetAccessToken(authInfo.AccessToken)
+	if strings.EqualFold(authInfo.Broker, "testbroker") {
+		tbURL := os.Getenv("TESTBROKER_URL")
+		if tbURL == "" {
+			tbURL = "http://localhost:8089"
+		}
+		kc.SetBaseURI(tbURL)
+	}
 	return kc.GetOrders()
 }
 
@@ -322,7 +356,13 @@ func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, foll
 	}
 	kc := kiteconnect.New(authInfo.ApiKey)
 	kc.SetAccessToken(authInfo.AccessToken)
-	if authInfo.IPAddress != "" {
+	if strings.EqualFold(authInfo.Broker, "testbroker") {
+		tbURL := os.Getenv("TESTBROKER_URL")
+		if tbURL == "" {
+			tbURL = "http://localhost:8089"
+		}
+		kc.SetBaseURI(tbURL)
+	} else if authInfo.IPAddress != "" {
 		pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress)
 		if err == nil {
 			proxyCfg := kite.ProxyConfig{
