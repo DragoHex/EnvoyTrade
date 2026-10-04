@@ -3,6 +3,7 @@ package kite_test
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -14,6 +15,12 @@ import (
 	"github.com/shopspring/decimal"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
+
+func init() {
+	if os.Getenv("ENCRYPTION_KEY") == "" {
+		_ = os.Setenv("ENCRYPTION_KEY", "envoytrade-test-encryption-key-32b")
+	}
+}
 
 type mockSyncStore struct {
 	authInfo      domain.AccountAuthInfo

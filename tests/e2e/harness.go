@@ -209,6 +209,7 @@ func (h *Harness) ensureServicesRunning() {
 		serverCmd.Env = append(os.Environ(),
 			"PORT=8080",
 			"DATABASE_URL="+h.DatabaseURL,
+			"ENCRYPTION_KEY=envoytrade-e2e-encryption-key-32b",
 			"TESTBROKER_URL="+h.TestBrokerURL,
 			"TESTBROKER_WS_URL="+h.TestBrokerWSURL,
 			"LOG_TO_STDOUT=true",

@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"envoytrade/internal/domain"
@@ -9,6 +10,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
+
+func init() {
+	if os.Getenv("ENCRYPTION_KEY") == "" {
+		_ = os.Setenv("ENCRYPTION_KEY", "envoytrade-test-encryption-key-32b")
+	}
+}
 
 // stubStore is a hand-written fake satisfying httpapi.GroupsStore,
 // httpapi.AccountsStore, and httpapi.ActionsStore — same style as

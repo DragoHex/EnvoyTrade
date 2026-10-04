@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
 
 	"envoytrade/internal/domain"
 
@@ -190,3 +192,59 @@ WHERE p.ip_address = $1;`
 	}
 	return p, nil
 }
+
+// UpsertProxyIP inserts or updates a static proxy configuration in the proxy_ips table.
+func (s *Store) UpsertProxyIP(ctx context.Context, p domain.ProxyIP) error {
+	const query = `
+INSERT INTO proxy_ips (ip_address, ip_type, host, port, username, password, valid_from, valid_until, plan)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (ip_address) DO UPDATE SET
+    ip_type = EXCLUDED.ip_type,
+    host = EXCLUDED.host,
+    port = EXCLUDED.port,
+    username = EXCLUDED.username,
+    password = EXCLUDED.password,
+    valid_from = EXCLUDED.valid_from,
+    valid_until = EXCLUDED.valid_until,
+    plan = EXCLUDED.plan;`
+
+	port := p.Port
+	if port == 0 {
+		port = 443
+	}
+	plan := p.Plan
+	if plan == "" {
+		plan = "QUARTERLY"
+	}
+	validFrom := p.ValidFrom
+	if validFrom.IsZero() {
+		validFrom = time.Now()
+	}
+	validUntil := p.ValidUntil
+	if validUntil.IsZero() {
+		validUntil = validFrom.AddDate(0, 3, 0)
+	}
+
+	ipType := p.IPType
+	if ipType == "" {
+		if strings.Contains(p.IPAddress, ":") {
+			ipType = "ipv6"
+		} else {
+			ipType = "ipv4"
+		}
+	}
+
+	_, err := s.pool.Exec(ctx, query,
+		p.IPAddress,
+		ipType,
+		p.Host,
+		port,
+		p.Username,
+		p.Password,
+		validFrom,
+		validUntil,
+		plan,
+	)
+	return err
+}
+

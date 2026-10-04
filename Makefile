@@ -1,3 +1,6 @@
+-include .env
+export
+
 DATABASE_URL ?= postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable
 PORT ?= 8080
 FRONTEND_PORT ?= 5173
@@ -12,7 +15,7 @@ TUNNEL_NAME ?= mytunnel
 	db-up db-down db-seed db-flush seed flush \
 	backend-up backend-down frontend-up frontend-down tunnel-up tunnel-down \
 	up up-all all-up up-everything down down-all all-down down-everything \
-	check-log-dir setup-log-dir sqlc-generate
+	check-log-dir setup-log-dir check-encryption-key sqlc-generate
 
 build: build-backend build-frontend
 
@@ -98,13 +101,22 @@ setup-log-dir:
 	sudo mkdir -p /var/log/envoytrade && sudo chown -R $$(whoami) /var/log/envoytrade
 	@echo "Directory /var/log/envoytrade is ready."
 
+check-encryption-key:
+	@if [ -z "$$ENCRYPTION_KEY" ]; then \
+		echo "================================================================================"; \
+		echo " ERROR: ENCRYPTION_KEY is required."; \
+		echo " Set it in your environment or in a .env file (see .env.example)."; \
+		echo "================================================================================"; \
+		exit 1; \
+	fi
+
 # backend-up starts the backend server in the background and waits until it is listening
-backend-up: db-up check-log-dir
+backend-up: db-up check-log-dir check-encryption-key
 	@if lsof -ti :$(PORT) >/dev/null 2>&1; then \
 		echo "Backend is already running on port $(PORT) (PID: $$(lsof -ti :$(PORT) | tr '\n' ' '))"; \
 	else \
 		echo "Starting backend server on port $(PORT)..."; \
-		DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" nohup go run ./cmd/server > $(BACKEND_LOG) 2>&1 & \
+		DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" nohup go run ./cmd/server > $(BACKEND_LOG) 2>&1 & \
 		for i in $$(seq 1 30); do \
 			if lsof -ti :$(PORT) >/dev/null 2>&1; then \
 				echo "Backend started (PID: $$(lsof -ti :$(PORT) | tr '\n' ' '))"; \
@@ -237,8 +249,8 @@ build-backend:
 build-frontend:
 	cd frontend && pnpm build
 
-run-backend: check-log-dir
-	DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" go run ./cmd/server
+run-backend: check-log-dir check-encryption-key
+	DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" go run ./cmd/server
 
 run-frontend:
 	cd frontend && pnpm dev
