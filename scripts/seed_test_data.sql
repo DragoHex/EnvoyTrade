@@ -22,25 +22,28 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at    = now();
 
 -- 1. Accounts: 2 masters and 8 followers, scoped to primary demo user
-INSERT INTO accounts (id, user_id, role, broker, broker_user_id, status, api_secret, active, name, created_at, updated_at)
+INSERT INTO accounts (id, user_id, role, broker, broker_user_id, status, api_key, api_secret, access_token, auth_status, active, name, created_at, updated_at)
 VALUES
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'a0000000-0000-0000-0000-000000000001', 'master',   'zerodha', 'MASTER01',  'active', '', true, 'Rajesh Sharma',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:20:40.549228+00'),
-  ('c80b3596-4449-4f32-b25a-a5bfd6883c4f', 'a0000000-0000-0000-0000-000000000001', 'master',   'zerodha', 'MASTER02',  'active', '', true, 'Priya Patel',     '2026-09-08 02:23:46.867428+00', '2026-09-11 15:14:57.102543+00'),
-  ('a5183e89-6cb2-4d32-91a2-6dc525570185', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW01A', 'active', '', true, 'Amit Verma',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.865876+00'),
-  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW01B', 'active', '', true, 'Sneha Kulkarni',  '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.883042+00'),
-  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW01C', 'error',  '', true, 'Vikram Malhotra', '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.901048+00'),
-  ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW01D', 'active', '', true, 'Ananya Iyer',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.921094+00'),
-  ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW02A', 'active', '', true, 'Rohan Gupta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.939633+00'),
-  ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW02B', 'active', '', true, 'Neha Deshmukh',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.957899+00'),
-  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW02C', 'active', '', true, 'Aditya Nair',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.981594+00'),
-  ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 'a0000000-0000-0000-0000-000000000001', 'follower', 'zerodha', 'FOLLOW02D', 'error',  '', true, 'Pooja Mehta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.996682+00')
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER01',  'active', 'key_master01',  'secret_master01',  'token_master01',  'authenticated', true, 'Rajesh Sharma',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:20:40.549228+00'),
+  ('c80b3596-4449-4f32-b25a-a5bfd6883c4f', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER02',  'active', 'key_master02',  'secret_master02',  'token_master02',  'authenticated', true, 'Priya Patel',     '2026-09-08 02:23:46.867428+00', '2026-09-11 15:14:57.102543+00'),
+  ('a5183e89-6cb2-4d32-91a2-6dc525570185', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01A', 'active', 'key_follow01a', 'secret_follow01a', 'token_follow01a', 'authenticated', true, 'Amit Verma',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.865876+00'),
+  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01B', 'active', 'key_follow01b', 'secret_follow01b', 'token_follow01b', 'authenticated', true, 'Sneha Kulkarni',  '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.883042+00'),
+  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01C', 'error',  'key_follow01c', 'secret_follow01c', 'token_follow01c', 'authenticated', true, 'Vikram Malhotra', '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.901048+00'),
+  ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01D', 'active', 'key_follow01d', 'secret_follow01d', 'token_follow01d', 'authenticated', true, 'Ananya Iyer',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.921094+00'),
+  ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02A', 'active', 'key_follow02a', 'secret_follow02a', 'token_follow02a', 'authenticated', true, 'Rohan Gupta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.939633+00'),
+  ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02B', 'active', 'key_follow02b', 'secret_follow02b', 'token_follow02b', 'authenticated', true, 'Neha Deshmukh',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.957899+00'),
+  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02C', 'active', 'key_follow02c', 'secret_follow02c', 'token_follow02c', 'authenticated', true, 'Aditya Nair',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.981594+00'),
+  ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02D', 'error',  'key_follow02d', 'secret_follow02d', 'token_follow02d', 'authenticated', true, 'Pooja Mehta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.996682+00')
 ON CONFLICT (id) DO UPDATE SET
   user_id        = EXCLUDED.user_id,
   role           = EXCLUDED.role,
   broker         = EXCLUDED.broker,
   broker_user_id = EXCLUDED.broker_user_id,
   status         = EXCLUDED.status,
+  api_key        = EXCLUDED.api_key,
   api_secret     = EXCLUDED.api_secret,
+  access_token   = EXCLUDED.access_token,
+  auth_status    = EXCLUDED.auth_status,
   active         = EXCLUDED.active,
   name           = EXCLUDED.name,
   created_at     = EXCLUDED.created_at,
@@ -148,5 +151,27 @@ VALUES
   ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-006', 'MCX', 'CRUDEOIL17SEP26P8200',  0, 'BUY',  'CNC', 'LIMIT', 100,   23.0000, 'COMPLETE', '2026-09-11 09:17:37+00', '{}'::jsonb, 'dispatched'),
   ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-007', 'MCX', 'CRUDEOIL17SEP26P8700',  0, 'SELL', 'CNC', 'LIMIT', 100,   53.9000, 'COMPLETE', '2026-09-11 09:17:28+00', '{}'::jsonb, 'dispatched')
 ON CONFLICT (master_id, broker_order_id, filled_quantity, status) DO NOTHING;
+
+-- 8. Instruments: Canonical lot sizes and tick sizes for test contracts
+INSERT INTO instruments (instrument_token, exchange, tradingsymbol, lot_size, tick_size, segment, expiry, refreshed_at)
+VALUES
+  (408065, 'NFO', 'NIFTY26OCTFUT',        75,  0.0500, 'NFO-FUT', '2026-10-29', now()),
+  (738561, 'NSE', 'RELIANCE',               1,  0.0500, 'NSE-EQ',  NULL,         now()),
+  (1001,   'MCX', 'CRUDEOIL17SEP26C10600', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1002,   'MCX', 'CRUDEOIL17SEP26C10700', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1003,   'MCX', 'CRUDEOIL17SEP26C11000', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1004,   'MCX', 'CRUDEOIL17SEP26P8400',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1005,   'MCX', 'CRUDEOIL17SEP26P8500',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1006,   'MCX', 'CRUDEOIL17SEP26P8600',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1007,   'MCX', 'CRUDEOIL17SEP26P8700',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1008,   'MCX', 'CRUDEOILM21SEP26',       10, 0.0500, 'MCX-FUT', '2026-09-21', now()),
+  (1009,   'MCX', 'CRUDEOIL17SEP26P8200',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1010,   'MCX', 'CRUDEOIL21SEP26',       100, 0.0500, 'MCX-FUT', '2026-09-21', now())
+ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET
+  lot_size     = EXCLUDED.lot_size,
+  tick_size    = EXCLUDED.tick_size,
+  segment      = EXCLUDED.segment,
+  expiry       = EXCLUDED.expiry,
+  refreshed_at = now();
 
 COMMIT;
