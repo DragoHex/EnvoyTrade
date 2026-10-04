@@ -70,6 +70,15 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 		"qty", fill.FilledQuantity,
 	)
 
+	if fill.Status != "" && fill.Status != domain.TerminalComplete {
+		e.log().Info("engine: master fill is not complete, skipping fan-out",
+			"master_id", fill.MasterID,
+			"broker_order_id", fill.BrokerOrderID,
+			"status", fill.Status,
+		)
+		return nil
+	}
+
 	active, err := e.store.MasterActive(ctx, fill.MasterID)
 	if err != nil {
 		return fmt.Errorf("check master active: %w", err)

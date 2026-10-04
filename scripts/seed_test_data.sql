@@ -28,12 +28,12 @@ VALUES
   ('c80b3596-4449-4f32-b25a-a5bfd6883c4f', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER02',  'active', 'key_master02',  'secret_master02',  'token_master02',  'authenticated', true, 'Priya Patel',     '2026-09-08 02:23:46.867428+00', '2026-09-11 15:14:57.102543+00'),
   ('a5183e89-6cb2-4d32-91a2-6dc525570185', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01A', 'active', 'key_follow01a', 'secret_follow01a', 'token_follow01a', 'authenticated', true, 'Amit Verma',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.865876+00'),
   ('5894c29d-7740-4494-9c98-c9d59d1364bc', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01B', 'active', 'key_follow01b', 'secret_follow01b', 'token_follow01b', 'authenticated', true, 'Sneha Kulkarni',  '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.883042+00'),
-  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01C', 'error',  'key_follow01c', 'secret_follow01c', 'token_follow01c', 'authenticated', true, 'Vikram Malhotra', '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.901048+00'),
+  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01C', 'active', 'key_follow01c', 'secret_follow01c', 'token_follow01c', 'authenticated', true, 'Vikram Malhotra', '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.901048+00'),
   ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01D', 'active', 'key_follow01d', 'secret_follow01d', 'token_follow01d', 'authenticated', true, 'Ananya Iyer',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.921094+00'),
   ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02A', 'active', 'key_follow02a', 'secret_follow02a', 'token_follow02a', 'authenticated', true, 'Rohan Gupta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.939633+00'),
   ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02B', 'active', 'key_follow02b', 'secret_follow02b', 'token_follow02b', 'authenticated', true, 'Neha Deshmukh',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.957899+00'),
   ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02C', 'active', 'key_follow02c', 'secret_follow02c', 'token_follow02c', 'authenticated', true, 'Aditya Nair',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.981594+00'),
-  ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02D', 'error',  'key_follow02d', 'secret_follow02d', 'token_follow02d', 'authenticated', true, 'Pooja Mehta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.996682+00')
+  ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02D', 'active', 'key_follow02d', 'secret_follow02d', 'token_follow02d', 'authenticated', true, 'Pooja Mehta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.996682+00')
 ON CONFLICT (id) DO UPDATE SET
   user_id        = EXCLUDED.user_id,
   role           = EXCLUDED.role,
@@ -64,12 +64,13 @@ ON CONFLICT (id) DO UPDATE SET
 -- 3. Follow links: Followers linked to groups with multiplier ratios
 INSERT INTO follow_links (follower_id, capital_ratio, max_qty_per_order, enabled, effective_from, group_id)
 VALUES
-  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 0.500000, NULL, false, '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
-  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 0.750000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
+  ('a5183e89-6cb2-4d32-91a2-6dc525570185', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
+  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
+  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
   ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
   ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 1.000000, NULL, true,  '2026-09-10 04:54:59.917762+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f'),
   ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f'),
-  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 0.500000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f'),
+  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f'),
   ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f')
 ON CONFLICT (follower_id) DO UPDATE SET
   capital_ratio     = EXCLUDED.capital_ratio,

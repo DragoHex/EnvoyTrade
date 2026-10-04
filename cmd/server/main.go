@@ -179,6 +179,7 @@ func run(logger *slog.Logger) error {
 	syncer := &kite.PortfolioSyncer{
 		Store: store,
 	}
+	workerPool.Syncer = syncer
 
 	// Consumers draining queues into store and engine
 	masterFillConsumer := &listener.MasterFillConsumer{
