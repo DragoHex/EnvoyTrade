@@ -1,7 +1,20 @@
 .kiro
 gokiteconnect/
 .DS_Store
-dist/
-artifacts/
+
+# Environment files and credentials
 .env
-testbroker/bin/
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+credentials.json
+secrets.json
+
+# Logs and scratch
+*.log
+scratch/

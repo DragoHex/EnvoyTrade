@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,3 +63,24 @@ func TestSetupLogger_FallbackWhenDirUnwritable(t *testing.T) {
 		t.Fatal("expected fallback logger, got nil")
 	}
 }
+
+func TestRun_RequiresEnvVars(t *testing.T) {
+	logger := slog.Default()
+
+	// Missing DATABASE_URL
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("ENCRYPTION_KEY", "any-key")
+	err := run(logger)
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL is required") {
+		t.Fatalf("expected DATABASE_URL is required error, got: %v", err)
+	}
+
+	// Missing ENCRYPTION_KEY
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/db")
+	t.Setenv("ENCRYPTION_KEY", "")
+	err = run(logger)
+	if err == nil || !strings.Contains(err.Error(), "ENCRYPTION_KEY is required") {
+		t.Fatalf("expected ENCRYPTION_KEY is required error, got: %v", err)
+	}
+}
+
