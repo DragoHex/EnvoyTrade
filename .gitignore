@@ -18,3 +18,5 @@ secrets.json
 # Logs and scratch
 *.log
 scratch/
+artifacts/
+testbroker/bin/
