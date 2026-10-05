@@ -35,6 +35,7 @@ import (
 	"envoytrade/internal/kite/fake"
 	"envoytrade/internal/listener"
 	"envoytrade/internal/queue/memchan"
+	"envoytrade/internal/rebalance"
 	"envoytrade/internal/recon"
 	"envoytrade/internal/squareoff"
 	"envoytrade/internal/store/postgres"
@@ -186,6 +187,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("worker pool initialized", "followers_registered", followersRegistered)
 
 	squareOffSvc := squareoff.NewService(store, brokerResolver, syncer, logger.With("component", "squareoff"))
+	rebalanceSvc := rebalance.NewService(store, brokerResolver, syncer, logger.With("component", "rebalance"))
 
 	eng := engine.New(store, workerPool)
 	eng.Logger = logger.With("component", "engine")
@@ -314,6 +316,7 @@ func run(logger *slog.Logger) error {
 		httpapi.WithPortfolioSyncer(syncer),
 		httpapi.WithTickerManager(tickerManager),
 		httpapi.WithSquareOffService(squareOffSvc),
+		httpapi.WithRebalanceService(rebalanceSvc),
 	)
 
 	if frontend.HasEmbeddedUI() {

@@ -431,3 +431,67 @@ type SquareOffResult struct {
 	Orders                      []SquareOffOrder `json:"orders"`
 	Errors                      []string         `json:"errors,omitempty"`
 }
+
+// RebalanceRequest carries target follower IDs for cluster rebalance operations.
+type RebalanceRequest struct {
+	FollowerIDs []uuid.UUID `json:"follower_ids,omitempty"`
+}
+
+// SymbolDrift represents the position drift for a single instrument on a follower.
+type SymbolDrift struct {
+	Exchange      string `json:"exchange"`
+	Tradingsymbol string `json:"tradingsymbol"`
+	Product       string `json:"product"`
+	LotSize       int    `json:"lot_size"`
+	MasterQty     int    `json:"master_qty"`
+	TargetQty     int    `json:"target_qty"`
+	FollowerQty   int    `json:"follower_qty"`
+	DriftQty      int    `json:"drift_qty"`
+	Action        string `json:"action"` // BUY | SELL
+}
+
+// FollowerDrift represents all drifting positions for a given follower account.
+type FollowerDrift struct {
+	AccountID       uuid.UUID       `json:"account_id"`
+	AccountName     string          `json:"account_name"`
+	BrokerAccountID string          `json:"broker_account_id"`
+	Enabled         bool            `json:"enabled"`
+	CloneFactor     decimal.Decimal `json:"clone_factor"`
+	Symbols         []SymbolDrift   `json:"symbols"`
+}
+
+// GroupRebalanceDiff represents the preview diff of all drifting followers in a group.
+type GroupRebalanceDiff struct {
+	GroupID            uuid.UUID       `json:"group_id"`
+	MasterID           uuid.UUID       `json:"master_id"`
+	FollowersEvaluated int             `json:"followers_evaluated"`
+	FollowersWithDrift int             `json:"followers_with_drift"`
+	Drifts             []FollowerDrift `json:"drifts"`
+}
+
+// RebalanceOrder represents an order placed to resolve position drift.
+type RebalanceOrder struct {
+	AccountID     uuid.UUID `json:"account_id"`
+	Role          string    `json:"role"`
+	BrokerOrderID string    `json:"broker_order_id"`
+	Exchange      string    `json:"exchange"`
+	Tradingsymbol string    `json:"tradingsymbol"`
+	Product       string    `json:"product"`
+	Side          string    `json:"side"` // BUY | SELL
+	Quantity      int       `json:"quantity"`
+	Status        string    `json:"status"`
+}
+
+// RebalanceResult is the execution receipt returned by rebalance endpoints.
+type RebalanceResult struct {
+	Action            string           `json:"action"`
+	Status            string           `json:"status"` // completed | partial | empty
+	GroupID           *uuid.UUID       `json:"group_id,omitempty"`
+	AccountID         *uuid.UUID       `json:"account_id,omitempty"`
+	FollowersAffected int              `json:"followers_affected"`
+	CancelledOrders   int              `json:"cancelled_orders"`
+	OrdersPlaced      int              `json:"orders_placed"`
+	Orders            []RebalanceOrder `json:"orders"`
+	Errors            []string         `json:"errors,omitempty"`
+}
+
