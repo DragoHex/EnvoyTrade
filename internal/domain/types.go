@@ -40,6 +40,7 @@ type MasterFill struct {
 	Status          string
 	OrderTimestamp  time.Time
 	RawPayload      []byte
+	Tag             string
 	ReceivedAt      time.Time
 	DispatchState   DispatchState
 	DispatchedAt    *time.Time
@@ -52,7 +53,7 @@ type FollowLink struct {
 	FollowerID     uuid.UUID
 	GroupID        uuid.UUID
 	MasterID       uuid.UUID
-	CapitalRatio   decimal.Decimal
+	CloneFactor    decimal.Decimal
 	MaxQtyPerOrder int
 	Enabled        bool
 	EffectiveFrom  time.Time
@@ -134,7 +135,7 @@ type Account struct {
 	GroupID         *uuid.UUID
 	GroupName       *string
 	MasterID        *uuid.UUID
-	CapitalRatio    *decimal.Decimal
+	CloneFactor     *decimal.Decimal
 	MaxQtyPerOrder  *int
 	Enabled         bool
 }
@@ -397,4 +398,36 @@ type AccountOrdersDetail struct {
 	OpenOrders      []OrderDetailItem     `json:"openOrders"`
 	ClosedOrders    []OrderDetailItem     `json:"closedOrders"`
 	RejectedOrders  []OrderDetailItem     `json:"rejectedOrders"`
+}
+
+// SquareOffRequest carries optional symbol filters for square-off operations.
+type SquareOffRequest struct {
+	Symbols []string `json:"symbols,omitempty"`
+}
+
+// SquareOffOrder represents an order placed as part of a square-off operation.
+type SquareOffOrder struct {
+	AccountID     uuid.UUID `json:"account_id"`
+	Role          string    `json:"role"`
+	BrokerOrderID string    `json:"broker_order_id"`
+	Exchange      string    `json:"exchange"`
+	Tradingsymbol string    `json:"tradingsymbol"`
+	Product       string    `json:"product"`
+	Side          string    `json:"side"` // BUY | SELL
+	Quantity      int       `json:"quantity"`
+	Status        string    `json:"status"`
+}
+
+// SquareOffResult is the execution receipt returned by square-off endpoints.
+type SquareOffResult struct {
+	Action                      string           `json:"action"`
+	Status                      string           `json:"status"` // completed | partial | empty
+	GroupID                     *uuid.UUID       `json:"group_id,omitempty"`
+	AccountID                   *uuid.UUID       `json:"account_id,omitempty"`
+	Role                        string           `json:"role,omitempty"`
+	FollowersAffected           int              `json:"followers_affected"`
+	CancelledOrders             int              `json:"cancelled_orders"`
+	PositionsSquaredOff         int              `json:"positions_squared_off"`
+	Orders                      []SquareOffOrder `json:"orders"`
+	Errors                      []string         `json:"errors,omitempty"`
 }

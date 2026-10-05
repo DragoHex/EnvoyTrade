@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AccountRow } from './AccountRow'
@@ -60,6 +61,15 @@ describe('AccountRow', () => {
   })
 
   it('gates Square Off behind a confirm modal', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
     const onSquareOff = vi.fn()
     render(() => (
       <AccountRow
@@ -355,4 +365,81 @@ describe('AccountRow', () => {
       vi.useRealTimers()
     }
   })
+
+  it('resets live summary when row is collapsed so it displays updated follower props', async () => {
+    const initialFollower: GroupFollower = {
+      accountId: 'f-fold',
+      name: 'Fold Test Follower',
+      brokerAccountId: 'FLD123',
+      enabled: true,
+      status: 'ok',
+      netQty: 5,
+      openPositionsCount: 1,
+      closedPositionsCount: 0,
+      openOrdersCount: 0,
+      totalMtm: 100,
+    }
+
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: {
+        netQty: 99,
+        openPositionsCount: 5,
+        closedPositionsCount: 2,
+        pendingOrdersCount: 4,
+        totalMtm: '999.00',
+        realizedPnl: '100.00',
+        accountValue: '50000.00',
+        status: 'online',
+      },
+      counts: { openPositions: 5, closedPositions: 2, holdings: 0, openOrders: 4, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 5, totalPages: 1 },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    const [followerSig, setFollowerSig] = createSignal(initialFollower)
+
+    render(() => (
+      <AccountRow
+        follower={followerSig()}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    // Initially folded: shows follower's netQty: 5
+    const netQtyCell = document.querySelector('tr[data-testid="account-row"] .col-net-qty')!
+    expect(netQtyCell.textContent).toBe('5')
+
+    // Expand row
+    const expandBtn = screen.getByTestId('expand-row-btn')
+    fireEvent.click(expandBtn)
+
+    // Wait for live metrics to load: Net Qty becomes 99
+    await vi.waitFor(() => {
+      expect(netQtyCell.textContent).toBe('99')
+    })
+
+    // Now collapse/fold the row
+    fireEvent.click(expandBtn)
+
+    // Update follower prop to simulate GroupDetail update while folded (e.g. netQty becomes 12)
+    setFollowerSig({
+      ...initialFollower,
+      netQty: 12,
+      totalMtm: 250,
+    })
+
+    // It should now revert to follower's updated netQty 12, NOT remain stuck on 99
+    await vi.waitFor(() => {
+      expect(netQtyCell.textContent).toBe('12')
+    })
+  })
 })
+

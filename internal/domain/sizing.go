@@ -23,7 +23,7 @@ const (
 	ReasonCapped
 	// ReasonBadInstrument: lot size is not a usable positive value.
 	ReasonBadInstrument
-	// ReasonInvalidRatio: capital_ratio is not a usable positive value.
+	// ReasonInvalidRatio: clone_factor is not a usable positive value.
 	ReasonInvalidRatio
 )
 
@@ -46,7 +46,7 @@ func (r SizingReason) String() string {
 }
 
 // SizeOrder computes the quantity a follower should place for a given
-// master fill quantity, follower capital ratio, instrument lot size, and
+// master fill quantity, follower clone factor, instrument lot size, and
 // optional per-link cap. It never exceeds the master's intent: the result
 // is always floored to a lot multiple, never rounded up.
 //

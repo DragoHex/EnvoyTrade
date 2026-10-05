@@ -22,7 +22,7 @@ const master: api.Account = {
   broker: 'kite',
   brokerAccountId: 'ZX1234',
   masterId: null,
-  capitalRatio: null,
+  cloneFactor: null,
   maxQtyPerOrder: null,
   enabled: true,
   active: true,
@@ -35,7 +35,7 @@ const follower: api.Account = {
   broker: 'kite',
   brokerAccountId: 'ZY5678',
   masterId: 'm1',
-  capitalRatio: '0.5',
+  cloneFactor: '0.5',
   maxQtyPerOrder: 100,
   enabled: true,
   active: true,
@@ -48,7 +48,7 @@ const unattached: api.Account = {
   broker: 'kite',
   brokerAccountId: 'ZZ0000',
   masterId: null,
-  capitalRatio: null,
+  cloneFactor: null,
   maxQtyPerOrder: null,
   enabled: false,
   active: true,
@@ -181,13 +181,14 @@ describe('GroupManagePage', () => {
     const initialCallCount = getAccountsSpy.mock.calls.length
 
     await userEvent.selectOptions(screen.getByLabelText('Account'), 'f2')
-    await userEvent.type(screen.getByLabelText('Capital Ratio'), '0.5')
+    await userEvent.clear(screen.getByLabelText('Clone Factor'))
+    await userEvent.type(screen.getByLabelText('Clone Factor'), '0.5')
     await userEvent.click(screen.getByRole('button', { name: 'Add to group' }))
 
     await waitFor(() =>
       expect(addSpy).toHaveBeenCalledWith('m1', {
         accountId: 'f2',
-        capitalRatio: '0.5',
+        cloneFactor: '0.5',
         maxQtyPerOrder: undefined,
       }),
     )

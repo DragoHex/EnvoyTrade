@@ -29,8 +29,8 @@ func TestGroups_ListsMastersWithFollowerCountAndStatus(t *testing.T) {
 	f2 := seedAccount(t, s, "follower")
 
 	for _, l := range []domain.FollowLink{
-		{FollowerID: f1, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true},
-		{FollowerID: f2, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: false},
+		{FollowerID: f1, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true},
+		{FollowerID: f2, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: false},
 	} {
 		if err := s.CreateFollowLink(ctx, l); err != nil {
 			t.Fatalf("CreateFollowLink: %v", err)
@@ -86,7 +86,7 @@ func TestGroupDetail_ReturnsMasterAndFollowers(t *testing.T) {
 	follower := seedAccount(t, s, "follower")
 
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
-		FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSetFollowLinkEnabled_TogglesEnabledFlag(t *testing.T) {
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
-		FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestResolveMasterID_ReturnsMasterID(t *testing.T) {
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
-		FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}

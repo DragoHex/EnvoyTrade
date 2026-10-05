@@ -60,7 +60,7 @@ export function GroupManagePage() {
 
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
   const [selectedAccountId, setSelectedAccountId] = createSignal('')
-  const [capitalRatio, setCapitalRatio] = createSignal('')
+  const [cloneFactor, setCloneFactor] = createSignal('1')
   const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
   const [pendingRemove, setPendingRemove] = createSignal<Account | null>(null)
   const [editModalOpen, setEditModalOpen] = createSignal(false)
@@ -157,7 +157,7 @@ export function GroupManagePage() {
       const groupId = detail()?.id || params.masterId
       await addAccountToGroup(groupId, {
         accountId,
-        capitalRatio: capitalRatio(),
+        cloneFactor: cloneFactor() || '1',
         maxQtyPerOrder: maxQtyPerOrder() === '' ? undefined : Number(maxQtyPerOrder()),
       })
       const added = await getAccount(accountId)
@@ -181,7 +181,7 @@ export function GroupManagePage() {
       )
       mutateAll((prev) => prev?.map((acc) => (acc.id === added.id ? added : acc)))
       setSelectedAccountId('')
-      setCapitalRatio('')
+      setCloneFactor('1')
       setMaxQtyPerOrder('')
       showToast({ kind: 'success', message: 'Follower added to group successfully.' })
     } catch (err) {
@@ -253,7 +253,7 @@ export function GroupManagePage() {
                   <th class="col-name">Name</th>
                   <th class="col-broker-id">Broker User ID</th>
                   <th class="col-role">Role</th>
-                  <th class="col-capital-ratio">Capital Ratio</th>
+                  <th class="col-clone-factor">Clone Factor</th>
                   <th class="col-max-qty">Max Qty/Order</th>
                   <th class="col-status">Status</th>
                   <th class="col-actions"></th>
@@ -287,7 +287,7 @@ export function GroupManagePage() {
                           <RoleIcon role={a().role} />
                         </span>
                       </td>
-                      <td class="col-capital-ratio">{a().role === 'follower' ? (a().capitalRatio ?? '—') : '—'}</td>
+                      <td class="col-clone-factor">{a().role === 'follower' ? (a().cloneFactor ?? '—') : '—'}</td>
                       <td class="col-max-qty">{a().role === 'follower' ? (a().maxQtyPerOrder ?? '—') : '—'}</td>
                       <td class="col-status">
                         <span class="status-cell-centered" title={a().status}>
@@ -342,12 +342,12 @@ export function GroupManagePage() {
             </select>
           </label>
           <label>
-            Capital Ratio
+            Clone Factor
             <input
-              value={capitalRatio()}
+              value={cloneFactor()}
               placeholder="e.g. 1.0"
               required
-              onInput={(e) => setCapitalRatio(e.currentTarget.value)}
+              onInput={(e) => setCloneFactor(e.currentTarget.value)}
             />
           </label>
           <label>

@@ -38,6 +38,11 @@ type PortfolioSyncer interface {
 	SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error
 }
 
+// Broker is what the worker pool needs from a broker implementation.
+type Broker interface {
+	PlaceOrder(ctx context.Context, variety string, params broker.OrderParams) (broker.OrderResponse, error)
+}
+
 // Pool owns one goroutine and one bounded channel per registered
 // follower. It satisfies engine.Dispatcher structurally — engine never
 // imports this package, only the interface it declared.
@@ -76,7 +81,7 @@ func (p *Pool) log() *slog.Logger {
 // channel of the given buffer size until ctx is cancelled or Shutdown is
 // called — Shutdown is authoritative regardless of which context (if
 // any) a caller passes in, so it always terminates every worker.
-func (p *Pool) Register(ctx context.Context, followerID uuid.UUID, b broker.Broker, store Store, bufferSize int) {
+func (p *Pool) Register(ctx context.Context, followerID uuid.UUID, b Broker, store Store, bufferSize int) {
 	ch := make(chan domain.Job, bufferSize)
 
 	p.mu.Lock()
@@ -113,7 +118,7 @@ func (p *Pool) Shutdown() {
 	p.wg.Wait()
 }
 
-func (p *Pool) run(ctx context.Context, in <-chan domain.Job, b broker.Broker, store Store) {
+func (p *Pool) run(ctx context.Context, in <-chan domain.Job, b Broker, store Store) {
 	defer p.wg.Done()
 	var lastCall time.Time
 	for {
@@ -156,7 +161,7 @@ func isTimeout(err error) bool {
 	return strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded")
 }
 
-func (p *Pool) place(ctx context.Context, job domain.Job, b broker.Broker, store Store) {
+func (p *Pool) place(ctx context.Context, job domain.Job, b Broker, store Store) {
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("panic placing order: %v", r)

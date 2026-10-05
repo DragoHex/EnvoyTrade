@@ -29,6 +29,13 @@ func spaHandler(staticFS fs.FS) http.Handler {
 				stat, err := f.Stat()
 				_ = f.Close()
 				if err == nil && !stat.IsDir() {
+					if strings.HasPrefix(path, "assets/") {
+						w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					} else {
+						w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+						w.Header().Set("Pragma", "no-cache")
+						w.Header().Set("Expires", "0")
+					}
 					fileServer.ServeHTTP(w, r)
 					return
 				}
@@ -36,6 +43,9 @@ func spaHandler(staticFS fs.FS) http.Handler {
 		}
 
 		// Fallback to index.html for client-side routing
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})

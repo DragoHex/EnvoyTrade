@@ -31,7 +31,7 @@ export function AccountDetailDrawer(props: {
   const [availableIPs, setAvailableIPs] = createSignal<AvailableProxyIPsResponse>({ ipv4: [], ipv6: [] })
   const [ipType, setIpType] = createSignal<'na' | 'ipv4' | 'ipv6'>('ipv4')
   const [ip, setIp] = createSignal('')
-  const [capitalRatio, setCapitalRatio] = createSignal('')
+  const [cloneFactor, setCloneFactor] = createSignal('1')
   const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
   const [masterId, setMasterId] = createSignal('')
   const [status, setStatus] = createSignal('ok')
@@ -50,7 +50,7 @@ export function AccountDetailDrawer(props: {
     setApiSecret(a?.apiSecret ?? '')
     setPassword('')
     setTotpSecret('')
-    setCapitalRatio(a?.capitalRatio ?? '')
+    setCloneFactor(a?.cloneFactor ?? '1')
     setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
     setMasterId(a?.masterId ?? '')
     setStatus(a?.status ?? 'ok')
@@ -157,7 +157,7 @@ export function AccountDetailDrawer(props: {
           patch.ip = trimmedIP
         }
         if (isFollower()) {
-          if (capitalRatio() !== (a.capitalRatio ?? '')) patch.capitalRatio = capitalRatio()
+          if (cloneFactor() !== (a.cloneFactor ?? '1')) patch.cloneFactor = cloneFactor()
           const maxQty = maxQtyPerOrder() === '' ? null : Number(maxQtyPerOrder())
           if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
         }
@@ -188,7 +188,7 @@ export function AccountDetailDrawer(props: {
             setError('IP Address is required for follower accounts.')
             return
           }
-          body.capitalRatio = capitalRatio()
+          body.cloneFactor = cloneFactor() || '1'
           body.maxQtyPerOrder = Number(maxQtyPerOrder())
           body.masterId = masterId()
         }
@@ -352,8 +352,8 @@ export function AccountDetailDrawer(props: {
             </label>
             <Show when={isFollower()}>
               <label>
-                Capital Ratio
-                <input value={capitalRatio()} onInput={(e) => setCapitalRatio(e.currentTarget.value)} />
+                Clone Factor
+                <input value={cloneFactor()} onInput={(e) => setCloneFactor(e.currentTarget.value)} />
               </label>
               <label>
                 Max Qty/Order

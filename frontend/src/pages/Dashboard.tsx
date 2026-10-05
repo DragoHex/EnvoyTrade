@@ -1,5 +1,13 @@
 import { createResource, For, Show, onMount, onCleanup } from 'solid-js'
-import { getGroupDetail, getGroups, patchAccount, postAction, type ActionType } from '../api'
+import {
+  getGroupDetail,
+  getGroups,
+  patchAccount,
+  postAction,
+  squareOffAccount,
+  squareOffGroup,
+  type ActionType,
+} from '../api'
 import { GroupCard } from '../components/GroupCard'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
 import { EmptyState } from '../components/EmptyState'
@@ -33,6 +41,22 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
     }
   }
 
+  const onSquareOffGroup = async (groupId: string, symbols?: string[]) => {
+    try {
+      await squareOffGroup(groupId, symbols ? { symbols } : undefined)
+    } finally {
+      refetch()
+    }
+  }
+
+  const onSquareOffAccount = async (accountId: string, symbols?: string[]) => {
+    try {
+      await squareOffAccount(accountId, symbols ? { symbols } : undefined)
+    } finally {
+      refetch()
+    }
+  }
+
   // Non-keyed Show (not keyed function child, and not Suspense) here on purpose:
   // createResource keeps the last resolved value while refetch() is in flight,
   // and non-keyed Show evaluates truthiness without disposing or remounting children,
@@ -46,6 +70,8 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
         onToggleCopy={onToggleCopy}
         onToggleMasterActive={onToggleMasterActive}
         onAction={onAction}
+        onSquareOffGroup={onSquareOffGroup}
+        onSquareOffAccount={onSquareOffAccount}
       />
     </Show>
   )

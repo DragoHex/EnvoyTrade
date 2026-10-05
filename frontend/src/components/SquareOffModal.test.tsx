@@ -1,0 +1,158 @@
+import { render, screen } from '@solidjs/testing-library'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import { SquareOffModal, type SquareOffModalTarget } from './SquareOffModal'
+import * as api from '../api'
+
+describe('SquareOffModal', () => {
+  const groupTarget: SquareOffModalTarget = {
+    type: 'group',
+    id: 'g1',
+    name: 'Group 1',
+    masterId: 'm1',
+  }
+
+  const accountTarget: SquareOffModalTarget = {
+    type: 'account',
+    id: 'f1',
+    name: 'Follower 1',
+    brokerAccountId: 'FOLLOW01A',
+  }
+
+  it('does not render when open is false', () => {
+    render(() => (
+      <SquareOffModal open={false} target={groupTarget} onCancel={() => {}} />
+    ))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('renders cluster warning when target is group', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => (
+      <SquareOffModal open={true} target={groupTarget} onCancel={() => {}} />
+    ))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Group 1')).toBeInTheDocument()
+    expect(screen.getByText(/Master square-off will cascade to all active followers/)).toBeInTheDocument()
+  })
+
+  it('renders isolation warning when target is follower account', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => (
+      <SquareOffModal open={true} target={accountTarget} onCancel={() => {}} />
+    ))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Follower 1')).toBeInTheDocument()
+    expect(screen.getByText(/Only this follower account will be squared off/)).toBeInTheDocument()
+  })
+
+  it('renders open positions checklist and supports selective symbol square off', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 175, totalMtm: 500, realizedPnl: 0, accountValue: 100000, status: 'online' },
+      openPositions: [
+        { product: 'NRML', instrument: 'NIFTY26OCTFUT', qty: 75, avgPrice: '25000', ltp: '25100', mtm: '7500' },
+        { product: 'CNC', instrument: 'RELIANCE', qty: 10, avgPrice: '2400', ltp: '2450', mtm: '500' },
+      ],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+
+    render(() => (
+      <SquareOffModal
+        open={true}
+        target={accountTarget}
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+      />
+    ))
+
+    expect(await screen.findByText('NIFTY26OCTFUT')).toBeInTheDocument()
+    expect(screen.getByText('RELIANCE')).toBeInTheDocument()
+    expect(screen.getByText('2 of 2 selected')).toBeInTheDocument()
+
+    // Deselect RELIANCE by unchecking its checkbox
+    const relianceCheckbox = screen.getByLabelText('Select RELIANCE')
+    await userEvent.click(relianceCheckbox)
+
+    expect(screen.getByText('1 of 2 selected')).toBeInTheDocument()
+
+    // Click confirm
+    await userEvent.click(screen.getByText('Confirm'))
+    expect(onConfirm).toHaveBeenCalledWith(['NIFTY26OCTFUT'])
+  })
+
+  it('toggles Select All and Deselect All via table header checkbox', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 75, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [
+        { product: 'NRML', instrument: 'NIFTY26OCTFUT', qty: 75, avgPrice: '25000', ltp: '25100', mtm: '0' },
+      ],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => (
+      <SquareOffModal open={true} target={accountTarget} onCancel={() => {}} />
+    ))
+
+    expect(await screen.findByText('NIFTY26OCTFUT')).toBeInTheDocument()
+    const headerCheckbox = screen.getByLabelText('Select All Symbols')
+    expect(screen.getByText('1 of 1 selected')).toBeInTheDocument()
+
+    // Uncheck all
+    await userEvent.click(headerCheckbox)
+    expect(screen.getByText('0 of 1 selected')).toBeInTheDocument()
+
+    // Check all again
+    await userEvent.click(headerCheckbox)
+    expect(screen.getByText('1 of 1 selected')).toBeInTheDocument()
+  })
+
+  it('calls onCancel when Cancel button is clicked', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+    const onCancel = vi.fn()
+
+    render(() => (
+      <SquareOffModal open={true} target={accountTarget} onCancel={onCancel} />
+    ))
+
+    await userEvent.click(screen.getByText('Cancel'))
+    expect(onCancel).toHaveBeenCalled()
+  })
+})

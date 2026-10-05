@@ -8,6 +8,8 @@ export function GroupCard(props: {
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
   onToggleMasterActive: (next: boolean) => Promise<void> | void
   onAction: (accountId: string, type: ActionType) => Promise<void>
+  onSquareOffGroup?: (groupId: string, symbols?: string[]) => Promise<void>
+  onSquareOffAccount?: (accountId: string, symbols?: string[]) => Promise<void>
 }) {
   return (
     <section data-testid="group-card">
@@ -17,6 +19,7 @@ export function GroupCard(props: {
       <AccountTable
         master={{
           masterId: props.detail.masterId,
+          groupId: props.detail.id,
           name: props.detail.masterName || props.detail.name || '',
           brokerAccountId: props.detail.masterAccountId,
           status: props.status,
@@ -33,6 +36,8 @@ export function GroupCard(props: {
         onToggleCopy={props.onToggleCopy}
         onToggleMasterActive={props.onToggleMasterActive}
         onAction={props.onAction}
+        onSquareOffGroup={props.onSquareOffGroup}
+        onSquareOffAccount={props.onSquareOffAccount}
       />
     </section>
   )

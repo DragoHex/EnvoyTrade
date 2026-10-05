@@ -18,6 +18,7 @@ type API interface {
 	GetPositions() (kiteconnect.Positions, error)
 	GetHoldings() (kiteconnect.Holdings, error)
 	GetUserMargins() (kiteconnect.AllMargins, error)
+	CancelOrder(variety string, orderID string, parentOrderID *string) (kiteconnect.OrderResponse, error)
 }
 
 // Broker adapts Zerodha's Kite Connect Client to the broker-agnostic
@@ -77,13 +78,60 @@ func (b *Broker) GetOrderHistory(ctx context.Context, orderID string) ([]kitecon
 	return history, nil
 }
 
-// GetPositions retrieves user positions (both net and day).
-func (b *Broker) GetPositions(ctx context.Context) (kiteconnect.Positions, error) {
+// GetPositions retrieves user net positions mapped to broker-agnostic Position types.
+func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 	positions, err := b.api.GetPositions()
 	if err != nil {
-		return kiteconnect.Positions{}, fmt.Errorf("kite get positions: %w", err)
+		return nil, fmt.Errorf("kite get positions: %w", err)
 	}
-	return positions, nil
+	out := make([]broker.Position, 0, len(positions.Net))
+	for _, p := range positions.Net {
+		out = append(out, broker.Position{
+			Exchange:      p.Exchange,
+			Tradingsymbol: p.Tradingsymbol,
+			Product:       p.Product,
+			Quantity:      p.Quantity,
+			AveragePrice:  p.AveragePrice,
+			LastPrice:     p.LastPrice,
+			M2M:           p.M2M,
+			PnL:           p.PnL,
+		})
+	}
+	return out, nil
+}
+
+// GetOpenOrders retrieves all open or trigger-pending orders.
+func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
+	orders, err := b.api.GetOrders()
+	if err != nil {
+		return nil, fmt.Errorf("kite get orders: %w", err)
+	}
+	var out []broker.Order
+	for _, o := range orders {
+		if o.Status == "OPEN" || o.Status == "TRIGGER PENDING" {
+			out = append(out, broker.Order{
+				OrderID:        o.OrderID,
+				Exchange:       o.Exchange,
+				Tradingsymbol:  o.TradingSymbol,
+				Status:         o.Status,
+				Quantity:       int(o.Quantity),
+				FilledQuantity: int(o.FilledQuantity),
+			})
+		}
+	}
+	return out, nil
+}
+
+// CancelOrder cancels an open order on the broker.
+func (b *Broker) CancelOrder(ctx context.Context, variety, orderID string) (broker.OrderResponse, error) {
+	if variety == "" {
+		variety = kiteconnect.VarietyRegular
+	}
+	resp, err := b.api.CancelOrder(variety, orderID, nil)
+	if err != nil {
+		return broker.OrderResponse{}, fmt.Errorf("kite cancel order: %w", err)
+	}
+	return broker.OrderResponse{OrderID: resp.OrderID}, nil
 }
 
 // GetHoldings retrieves user equity holdings.

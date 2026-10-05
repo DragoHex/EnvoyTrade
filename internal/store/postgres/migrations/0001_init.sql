@@ -106,11 +106,17 @@ CREATE INDEX IF NOT EXISTS groups_master_id_idx ON groups (master_id);
 CREATE TABLE IF NOT EXISTS follow_links (
     follower_id       uuid PRIMARY KEY REFERENCES accounts(id),
     group_id          uuid NOT NULL REFERENCES groups(id),
-    capital_ratio     numeric(10,6) NOT NULL CHECK (capital_ratio > 0),
+    clone_factor      numeric(10,6) NOT NULL DEFAULT 1.0 CHECK (clone_factor > 0),
     max_qty_per_order integer,
     enabled           boolean NOT NULL DEFAULT true,
     effective_from    timestamptz NOT NULL DEFAULT now()
 );
+
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='follow_links' AND column_name='capital_ratio') THEN
+        ALTER TABLE follow_links RENAME COLUMN capital_ratio TO clone_factor;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS follow_links_group_id_idx ON follow_links (group_id);
 

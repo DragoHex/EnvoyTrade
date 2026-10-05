@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"envoytrade/internal/domain"
 
@@ -285,6 +286,7 @@ func (h *handlers) deleteGroup(w http.ResponseWriter, r *http.Request) {
 
 type postGroupFollowerRequest struct {
 	AccountID      string `json:"accountId"`
+	CloneFactor    string `json:"cloneFactor"`
 	CapitalRatio   string `json:"capitalRatio"`
 	MaxQtyPerOrder *int   `json:"maxQtyPerOrder"`
 }
@@ -311,9 +313,16 @@ func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid accountId")
 		return
 	}
-	capitalRatio, err := decimal.NewFromString(req.CapitalRatio)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid capitalRatio")
+	cfStr := strings.TrimSpace(req.CloneFactor)
+	if cfStr == "" {
+		cfStr = strings.TrimSpace(req.CapitalRatio)
+	}
+	if cfStr == "" {
+		cfStr = "1"
+	}
+	cloneFactor, err := decimal.NewFromString(cfStr)
+	if err != nil || cloneFactor.Sign() <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid cloneFactor")
 		return
 	}
 
@@ -356,7 +365,7 @@ func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 		FollowerID:     accountID,
 		GroupID:        linkGroupID,
 		MasterID:       linkMasterID,
-		CapitalRatio:   capitalRatio,
+		CloneFactor:    cloneFactor,
 		MaxQtyPerOrder: maxQty,
 		Enabled:        true,
 	})

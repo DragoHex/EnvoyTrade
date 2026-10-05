@@ -129,7 +129,7 @@ type setAPISecretCall struct {
 
 type updateFollowLinkTermsCall struct {
 	FollowerID     uuid.UUID
-	CapitalRatio   decimal.Decimal
+	CloneFactor    decimal.Decimal
 	MaxQtyPerOrder *int
 }
 
@@ -269,8 +269,8 @@ func (s *stubStore) CreateFollowLink(_ context.Context, link domain.FollowLink) 
 	return s.createFollowLinkErr
 }
 
-func (s *stubStore) UpdateFollowLinkTerms(_ context.Context, followerID uuid.UUID, capitalRatio decimal.Decimal, maxQtyPerOrder *int) error {
-	s.updateFollowLinkTermsArgs = append(s.updateFollowLinkTermsArgs, updateFollowLinkTermsCall{followerID, capitalRatio, maxQtyPerOrder})
+func (s *stubStore) UpdateFollowLinkTerms(_ context.Context, followerID uuid.UUID, cloneFactor decimal.Decimal, maxQtyPerOrder *int) error {
+	s.updateFollowLinkTermsArgs = append(s.updateFollowLinkTermsArgs, updateFollowLinkTermsCall{followerID, cloneFactor, maxQtyPerOrder})
 	return s.updateFollowLinkTermsErr
 }
 

@@ -1,11 +1,12 @@
-import { createEffect, createResource, createSignal, onCleanup, Show } from 'solid-js'
+import { createResource, createSignal, createEffect, onCleanup, Show } from 'solid-js'
 import { CopyToggle } from './CopyToggle'
 import { ConfirmActionModal } from './ConfirmActionModal'
+import { SquareOffModal } from './SquareOffModal'
 import { ResultToast, type ToastResult } from './ResultToast'
 import { StatusDot } from './StatusDot'
-import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, SyncIcon, ChevronDownIcon } from './icons'
+import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, ChevronDownIcon, ThanosBalanceIcon } from './icons'
 import { AccountOrderDetails } from './AccountOrderDetails'
-import { getAccountOrders, type GroupFollower } from '../api'
+import { getAccountOrders, type GroupFollower, type AccountSummaryMetrics } from '../api'
 
 type DestructiveAction = 'square_off' | 'exit_open_orders' | null
 const TOAST_DISMISS_MS = 4000
@@ -26,7 +27,7 @@ export function AccountRow(props: {
   toggleDisabled?: boolean
   onToggleCopy: (next: boolean) => void | Promise<void>
   onRebalance: () => Promise<void>
-  onSquareOff: () => void
+  onSquareOff: (symbols?: string[]) => void | Promise<void>
   onExitOpenOrders: () => void
 }) {
   const [pending, setPending] = createSignal<DestructiveAction>(null)
@@ -36,21 +37,24 @@ export function AccountRow(props: {
   let dismissTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => clearTimeout(dismissTimer))
 
+  const [liveSummary, setLiveSummary] = createSignal<AccountSummaryMetrics | null>(null)
+
+  createEffect(() => {
+    if (!expanded()) {
+      setLiveSummary(null)
+    }
+  })
+
   // Fetch account orders/metrics on row expansion or if already expanded
-  const [ordersData, { refetch: refetchOrders }] = createResource(
+  const [ordersData] = createResource(
     () => (expanded() ? props.follower.accountId : null),
     (accId) => getAccountOrders(accId, 'open_positions'),
   )
 
-  createEffect(() => {
-    if (!expanded()) return
-    const timer = setInterval(() => {
-      refetchOrders()
-    }, 7000)
-    onCleanup(() => clearInterval(timer))
-  })
-
-  const summary = () => ordersData()?.summary
+  const summary = () => {
+    if (!expanded()) return null
+    return liveSummary() ?? ordersData()?.summary
+  }
 
   const showToast = (result: ToastResult) => {
     setToast(result)
@@ -68,12 +72,6 @@ export function AccountRow(props: {
     } finally {
       setRebalancing(false)
     }
-  }
-
-  const confirm = () => {
-    if (pending() === 'square_off') props.onSquareOff()
-    if (pending() === 'exit_open_orders') props.onExitOpenOrders()
-    setPending(null)
   }
 
   return (
@@ -129,7 +127,7 @@ export function AccountRow(props: {
               disabled={rebalancing() || props.actionsDisabled}
               onClick={handleRebalance}
             >
-              <SyncIcon spinning={rebalancing()} />
+              <ThanosBalanceIcon spinning={rebalancing()} />
             </button>
             <button
               type="button"
@@ -165,10 +163,32 @@ export function AccountRow(props: {
             <ChevronDownIcon class={`chevron-icon ${expanded() ? 'chevron-rotated' : ''}`} />
           </button>
         </td>
+        <SquareOffModal
+          open={pending() === 'square_off'}
+          target={{
+            type: props.isMaster ? 'group' : 'account',
+            id: props.follower.accountId,
+            name: props.follower.name,
+            brokerAccountId: props.follower.brokerAccountId,
+          }}
+          onConfirm={async (symbols) => {
+            try {
+              await props.onSquareOff(symbols)
+              showToast({ kind: 'success', message: 'Square-off submitted successfully.' })
+            } catch (e) {
+              showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Square-off failed.' })
+              throw e
+            }
+          }}
+          onCancel={() => setPending(null)}
+        />
         <ConfirmActionModal
-          open={pending() !== null}
-          label={pending() === 'square_off' ? 'Square Off' : 'Exit Open Orders'}
-          onConfirm={confirm}
+          open={pending() === 'exit_open_orders'}
+          label="Exit Open Orders"
+          onConfirm={() => {
+            props.onExitOpenOrders()
+            setPending(null)
+          }}
           onCancel={() => setPending(null)}
         />
         <ResultToast result={toast()} onDismiss={() => setToast(null)} />
@@ -182,6 +202,7 @@ export function AccountRow(props: {
               accountName={props.follower.name}
               brokerAccountId={props.follower.brokerAccountId}
               isExpanded={expanded()}
+              onSummaryChange={(s) => setLiveSummary(s)}
             />
           </td>
         </tr>

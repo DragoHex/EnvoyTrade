@@ -12,7 +12,7 @@ const master: Account = {
   broker: 'kite',
   brokerAccountId: 'ZX1234',
   masterId: null,
-  capitalRatio: null,
+  cloneFactor: null,
   maxQtyPerOrder: null,
   enabled: true,
   active: true,
@@ -26,7 +26,7 @@ const follower: Account = {
   broker: 'kite',
   brokerAccountId: 'ZY5678',
   masterId: 'm1',
-  capitalRatio: '0.5',
+  cloneFactor: '0.5',
   maxQtyPerOrder: 100,
   enabled: true,
   active: true,
@@ -35,14 +35,14 @@ const follower: Account = {
 }
 
 describe('AccountDetailDrawer', () => {
-  it('create mode, role=master: does not show capitalRatio/maxQtyPerOrder/master fields, submits createAccount', async () => {
+  it('create mode, role=master: does not show cloneFactor/maxQtyPerOrder/master fields, submits createAccount', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
       <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
-    expect(screen.queryByLabelText('Capital Ratio')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Clone Factor')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Master')).not.toBeInTheDocument()
 
     await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZX9999')
@@ -55,7 +55,7 @@ describe('AccountDetailDrawer', () => {
     )
   })
 
-  it('create mode, role=follower: shows master dropdown defaulting to Select a Master, submits createAccount with masterId', async () => {
+  it('create mode, role=follower: shows master dropdown defaulting to Select a Master, submits createAccount with masterId and default cloneFactor 1', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
       <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
@@ -64,13 +64,14 @@ describe('AccountDetailDrawer', () => {
     expect(screen.getByLabelText('Role')).toHaveValue('follower')
     expect(screen.getByLabelText('Master')).toBeInTheDocument()
     expect(screen.getByLabelText('Master')).toHaveValue('')
+    expect(screen.getByLabelText('Clone Factor')).toHaveValue('1')
 
     await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
     await userEvent.type(screen.getByLabelText('API Key'), 'key')
     await userEvent.type(screen.getByLabelText('API Secret'), 'secret')
     await userEvent.selectOptions(screen.getByLabelText('Master'), 'm1')
-    await userEvent.clear(screen.getByLabelText('Capital Ratio'))
-    await userEvent.type(screen.getByLabelText('Capital Ratio'), '0.5')
+    await userEvent.clear(screen.getByLabelText('Clone Factor'))
+    await userEvent.type(screen.getByLabelText('Clone Factor'), '0.5')
     await userEvent.type(screen.getByLabelText(/IP Address/), '192.168.1.50')
     await userEvent.clear(screen.getByLabelText('Max Qty/Order'))
     await userEvent.type(screen.getByLabelText('Max Qty/Order'), '100')
@@ -78,7 +79,7 @@ describe('AccountDetailDrawer', () => {
 
     expect(onCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        role: 'follower', brokerAccountId: 'ZY9999', masterId: 'm1', capitalRatio: '0.5', maxQtyPerOrder: 100, ip: '192.168.1.50',
+        role: 'follower', brokerAccountId: 'ZY9999', masterId: 'm1', cloneFactor: '0.5', maxQtyPerOrder: 100, ip: '192.168.1.50',
       }),
     )
   })
@@ -104,11 +105,11 @@ describe('AccountDetailDrawer', () => {
 
     expect(screen.getByLabelText('Role')).toBeDisabled()
 
-    await userEvent.clear(screen.getByLabelText('Capital Ratio'))
-    await userEvent.type(screen.getByLabelText('Capital Ratio'), '0.75')
+    await userEvent.clear(screen.getByLabelText('Clone Factor'))
+    await userEvent.type(screen.getByLabelText('Clone Factor'), '0.75')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(onSave).toHaveBeenCalledWith('f1', { capitalRatio: '0.75' })
+    expect(onSave).toHaveBeenCalledWith('f1', { cloneFactor: '0.75' })
   })
   it('create mode, role=follower without IP: shows validation error', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
@@ -170,7 +171,7 @@ describe('AccountDetailDrawer', () => {
     expect(onCreate).not.toHaveBeenCalled()
   })
 
-  it('edit mode: role is locked, submits changed IP and capitalRatio via onSave', async () => {
+  it('edit mode: role is locked, submits changed IP and cloneFactor via onSave', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(() => (
       <AccountDetailDrawer open account={follower} masters={[master]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />

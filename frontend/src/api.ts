@@ -103,7 +103,7 @@ export interface Account {
   groupId?: string | null
   groupName?: string | null
   masterId: string | null
-  capitalRatio: string | null
+  cloneFactor: string | null
   maxQtyPerOrder: number | null
   enabled: boolean
   active: boolean
@@ -120,7 +120,7 @@ export interface CreateAccountRequest {
   password?: string
   totpSecret?: string
   ip?: string
-  capitalRatio?: string
+  cloneFactor?: string
   maxQtyPerOrder?: number
   groupId?: string
   masterId?: string
@@ -245,7 +245,7 @@ export function patchAccount(
     | { name: string }
     | { enabled: boolean }
     | { active: boolean }
-    | { capitalRatio?: string; maxQtyPerOrder?: number }
+    | { cloneFactor?: string; maxQtyPerOrder?: number }
     | { status: string }
     | { ip?: string }
     | { apiKey?: string; apiSecret?: string }
@@ -271,10 +271,14 @@ export function getAccount(id: string): Promise<Account> {
 }
 
 export function createAccount(body: CreateAccountRequest): Promise<Account> {
+  const payload = { ...body }
+  if (payload.role === 'follower') {
+    payload.cloneFactor = payload.cloneFactor ?? '1'
+  }
   return apiFetch(`${BASE}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   }).then((r) => json(r))
 }
 
@@ -292,7 +296,7 @@ export function removeAccountFromGroup(id: string): Promise<void> {
 
 export function addAccountToGroup(
   groupId: string,
-  body: { accountId: string; capitalRatio: string; maxQtyPerOrder?: number },
+  body: { accountId: string; cloneFactor: string; maxQtyPerOrder?: number },
 ): Promise<void> {
   return apiFetch(`${BASE}/groups/${groupId}/followers`, {
     method: 'POST',
@@ -308,6 +312,52 @@ export function postAction(id: string, type: ActionType): Promise<{ type: string
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type }),
+  }).then((r) => json(r))
+}
+
+export interface SquareOffOrder {
+  orderId: string
+  symbol: string
+  side: string
+  quantity: number
+  status: string
+  error?: string
+}
+
+export interface AccountSquareOffResult {
+  accountId: string
+  status: 'completed' | 'partial' | 'failed'
+  orders: SquareOffOrder[]
+  error?: string
+}
+
+export interface GroupSquareOffResult {
+  groupId: string
+  status: 'completed' | 'partial' | 'failed'
+  account: AccountSquareOffResult
+  followers: AccountSquareOffResult[]
+  error?: string
+}
+
+export function squareOffGroup(
+  groupId: string,
+  body?: { symbols?: string[] }
+): Promise<GroupSquareOffResult> {
+  return apiFetch(`${BASE}/groups/${groupId}/positions/square-off`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  }).then((r) => json(r))
+}
+
+export function squareOffAccount(
+  accountId: string,
+  body?: { symbols?: string[] }
+): Promise<AccountSquareOffResult> {
+  return apiFetch(`${BASE}/accounts/${accountId}/positions/square-off`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
   }).then((r) => json(r))
 }
 
@@ -380,6 +430,9 @@ export interface OrderDetailItem {
 }
 
 export interface AccountOrdersResponse {
+  accountId?: string
+  role?: string
+  brokerAccountId?: string
   summary: AccountSummaryMetrics
   counts?: TabCounts
   pagination?: PaginationInfo

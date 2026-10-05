@@ -45,7 +45,7 @@ func New(pool *pgxpool.Pool) *Store {
 }
 
 // NewPool creates a pgx pool configured to scan Postgres `numeric`
-// columns directly into shopspring/decimal.Decimal — capital_ratio and
+// columns directly into shopspring/decimal.Decimal — clone_factor and
 // every price column in this schema depend on it (PLAN.md §4.2 mandates
 // decimal, never float64, for money and ratio math).
 func NewPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
@@ -233,7 +233,7 @@ func (s *Store) CreateFollowLink(ctx context.Context, link domain.FollowLink) er
 	err := s.queries.CreateFollowLink(ctx, sqlcgen.CreateFollowLinkParams{
 		FollowerID:     link.FollowerID,
 		GroupID:        groupID,
-		CapitalRatio:   link.CapitalRatio,
+		CloneFactor:    link.CloneFactor,
 		MaxQtyPerOrder: nullableMaxQty(link.MaxQtyPerOrder),
 		Enabled:        link.Enabled,
 	})
@@ -267,7 +267,7 @@ func (s *Store) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]d
 			FollowerID:     r.FollowerID,
 			GroupID:        r.GroupID,
 			MasterID:       r.MasterID,
-			CapitalRatio:   r.CapitalRatio,
+			CloneFactor:    r.CloneFactor,
 			MaxQtyPerOrder: int(r.MaxQtyPerOrder),
 			Enabled:        r.Enabled,
 			EffectiveFrom:  r.EffectiveFrom.Time,
@@ -632,8 +632,8 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 		if r.Role == "follower" {
 			a.MasterID = r.MasterID
 		}
-		if r.CapitalRatio.Valid {
-			a.CapitalRatio = &r.CapitalRatio.Decimal
+		if r.CloneFactor.Valid {
+			a.CloneFactor = &r.CloneFactor.Decimal
 		}
 		if r.MaxQtyPerOrder != nil {
 			maxQty := int(*r.MaxQtyPerOrder)
@@ -644,13 +644,13 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 	return accounts, nil
 }
 
-// UpdateFollowLinkTerms updates a follower's capital ratio and max
+// UpdateFollowLinkTerms updates a follower's clone factor and max
 // quantity per order — the Accounts page's edit form. Returns
 // domain.ErrNotFound if followerID has no follow_link row.
-func (s *Store) UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, capitalRatio decimal.Decimal, maxQtyPerOrder *int) error {
+func (s *Store) UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, cloneFactor decimal.Decimal, maxQtyPerOrder *int) error {
 	rowsAffected, err := s.queries.UpdateFollowLinkTerms(ctx, sqlcgen.UpdateFollowLinkTermsParams{
 		FollowerID:     followerID,
-		CapitalRatio:   capitalRatio,
+		CloneFactor:    cloneFactor,
 		MaxQtyPerOrder: nullableMaxQtyPtr(maxQtyPerOrder),
 	})
 	if err != nil {

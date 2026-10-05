@@ -12,7 +12,7 @@ const master: Account = {
   broker: 'kite',
   brokerAccountId: 'ZX1234',
   masterId: null,
-  capitalRatio: null,
+  cloneFactor: null,
   maxQtyPerOrder: null,
   enabled: true,
   active: true,
@@ -25,7 +25,7 @@ const follower: Account = {
   broker: 'kite',
   brokerAccountId: 'ZY5678',
   masterId: 'm1',
-  capitalRatio: '0.5',
+  cloneFactor: '0.5',
   maxQtyPerOrder: 100,
   enabled: true,
   active: true,
@@ -33,7 +33,7 @@ const follower: Account = {
 }
 
 describe('AccountsTable', () => {
-  it('renders one row per account with role/broker/group/capitalRatio/status', () => {
+  it('renders one row per account with role/broker/group/cloneFactor/status', () => {
     render(() => (
       <AccountsTable accounts={[master, follower]} onEdit={vi.fn()} onRemoveFromGroup={vi.fn()} onDelete={vi.fn()} />
     ))

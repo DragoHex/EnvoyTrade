@@ -10,6 +10,8 @@ import {
   setOnUnauthorized,
   fetchProxyIPs,
   fetchAvailableProxyIPs,
+  squareOffGroup,
+  squareOffAccount,
 } from './api'
 
 describe('api client', () => {
@@ -248,5 +250,33 @@ describe('api client', () => {
     expect(result).toEqual(fakeAvailable)
     const [url] = (globalThis.fetch as any).mock.calls[0]
     expect(url).toBe('/api/v1/proxy-ips/available?accountId=acc-123')
+  })
+
+  it('squareOffGroup sends POST /api/v1/groups/:id/positions/square-off', async () => {
+    const fakeResp = { groupId: 'g-1', status: 'completed', account: { accountId: 'm-1', status: 'completed', orders: [] }, followers: [] }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeResp), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+
+    const result = await squareOffGroup('g-1', { symbols: ['NIFTY26OCTFUT'] })
+    expect(result).toEqual(fakeResp)
+    const [url, init] = (globalThis.fetch as any).mock.calls[0]
+    expect(url).toBe('/api/v1/groups/g-1/positions/square-off')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ symbols: ['NIFTY26OCTFUT'] })
+  })
+
+  it('squareOffAccount sends POST /api/v1/accounts/:id/positions/square-off', async () => {
+    const fakeResp = { accountId: 'acc-1', status: 'completed', orders: [] }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeResp), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+
+    const result = await squareOffAccount('acc-1')
+    expect(result).toEqual(fakeResp)
+    const [url, init] = (globalThis.fetch as any).mock.calls[0]
+    expect(url).toBe('/api/v1/accounts/acc-1/positions/square-off')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({})
   })
 })

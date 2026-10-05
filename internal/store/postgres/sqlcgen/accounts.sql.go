@@ -87,7 +87,7 @@ const accounts = `-- name: Accounts :many
 SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret, a.active, a.status, a.ip_address,
        a.auth_status, a.auth_error,
        g.id AS group_id, g.name AS group_name, g.master_id,
-       f.capital_ratio, f.max_qty_per_order,
+       f.clone_factor, f.max_qty_per_order,
        COALESCE(f.enabled, true) AS enabled
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
@@ -118,7 +118,7 @@ type AccountsRow struct {
 	GroupID        *uuid.UUID
 	GroupName      *string
 	MasterID       *uuid.UUID
-	CapitalRatio   decimal.NullDecimal
+	CloneFactor    decimal.NullDecimal
 	MaxQtyPerOrder *int32
 	Enabled        bool
 }
@@ -148,7 +148,7 @@ func (q *Queries) Accounts(ctx context.Context, arg AccountsParams) ([]AccountsR
 			&i.GroupID,
 			&i.GroupName,
 			&i.MasterID,
-			&i.CapitalRatio,
+			&i.CloneFactor,
 			&i.MaxQtyPerOrder,
 			&i.Enabled,
 		); err != nil {
@@ -403,17 +403,17 @@ func (q *Queries) SetAccountStatus(ctx context.Context, arg SetAccountStatusPara
 }
 
 const updateFollowLinkTerms = `-- name: UpdateFollowLinkTerms :execrows
-UPDATE follow_links SET capital_ratio = $2, max_qty_per_order = $3 WHERE follower_id = $1
+UPDATE follow_links SET clone_factor = $2, max_qty_per_order = $3 WHERE follower_id = $1
 `
 
 type UpdateFollowLinkTermsParams struct {
 	FollowerID     uuid.UUID
-	CapitalRatio   decimal.Decimal
+	CloneFactor    decimal.Decimal
 	MaxQtyPerOrder *int32
 }
 
 func (q *Queries) UpdateFollowLinkTerms(ctx context.Context, arg UpdateFollowLinkTermsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateFollowLinkTerms, arg.FollowerID, arg.CapitalRatio, arg.MaxQtyPerOrder)
+	result, err := q.db.Exec(ctx, updateFollowLinkTerms, arg.FollowerID, arg.CloneFactor, arg.MaxQtyPerOrder)
 	if err != nil {
 		return 0, err
 	}

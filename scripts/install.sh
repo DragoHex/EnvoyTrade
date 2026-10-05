@@ -42,6 +42,54 @@ run_privileged() {
     fi
 }
 
+# Resolve or generate ENCRYPTION_KEY
+resolve_encryption_key() {
+    local key="${ENCRYPTION_KEY:-}"
+    if [ -n "${key}" ]; then
+        echo "${key}"
+        return
+    fi
+    for env_path in "${SCRIPT_DIR}/../.env" "${SCRIPT_DIR}/.env" "./.env"; do
+        if [ -f "${env_path}" ]; then
+            key="$(grep -E '^ENCRYPTION_KEY=' "${env_path}" 2>/dev/null | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)"
+            if [ -n "${key}" ]; then
+                echo "${key}"
+                return
+            fi
+        fi
+    done
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 16
+    else
+        head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
+    fi
+}
+
+# Ensure PostgreSQL role 'envoytrade' and database 'envoytrade' exist if psql is available
+ensure_postgres_db() {
+    if command -v psql >/dev/null 2>&1; then
+        local psql_flags="-d postgres"
+        if [ -S "/tmp/.s.PGSQL.5432" ]; then
+            psql_flags="-h /tmp -d postgres"
+        elif [ -S "/var/run/postgresql/.s.PGSQL.5432" ]; then
+            psql_flags="-h /var/run/postgresql -d postgres"
+        fi
+
+        echo "--> Ensuring PostgreSQL role 'envoytrade' and database 'envoytrade' exist..."
+        psql ${psql_flags} -c "
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'envoytrade') THEN
+    CREATE ROLE envoytrade WITH LOGIN SUPERUSER PASSWORD 'envoytrade';
+  END IF;
+END
+\$\$;" >/dev/null 2>&1 || true
+
+        psql ${psql_flags} -tc "SELECT 1 FROM pg_database WHERE datname = 'envoytrade'" 2>/dev/null | grep -q 1 || \
+            psql ${psql_flags} -c "CREATE DATABASE envoytrade OWNER envoytrade;" >/dev/null 2>&1 || true
+    fi
+}
+
 # 1. Stop existing service if running (prevents text file busy / dirty binary overwrite)
 echo "--> Checking for existing running service..."
 if [ "${OS}" = "Darwin" ]; then
@@ -123,10 +171,22 @@ if [ "${OS}" = "Darwin" ]; then
         PLIST_SRC="${SCRIPT_DIR}/../packaging/launchd/com.envoytrade.server.plist"
     fi
 
-    # Detect PostgreSQL port (5434 for dev container or 5432 for system postgres)
-    LOCAL_DB_PORT="5434"
-    if pg_isready -h localhost -p 5432 >/dev/null 2>&1; then
-        LOCAL_DB_PORT="5432"
+    # Ensure system PostgreSQL role and DB exist
+    ensure_postgres_db
+
+    # Resolve encryption key
+    ENC_KEY="$(resolve_encryption_key)"
+
+    # Determine default database URL for macOS
+    # 1. Native macOS Unix domain socket at /tmp (highest performance)
+    # 2. Container dev port (5434)
+    # 3. Standard TCP fallback (5432)
+    if [ -S "/tmp/.s.PGSQL.5432" ]; then
+        DEFAULT_DB_URL="postgres://envoytrade:envoytrade@/envoytrade?host=/tmp&pool_min_conns=5&pool_max_conns=25"
+    elif pg_isready -h localhost -p 5434 >/dev/null 2>&1; then
+        DEFAULT_DB_URL="postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable"
+    else
+        DEFAULT_DB_URL="postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable"
     fi
 
     # Check if a configuration already exists in either location
@@ -140,19 +200,26 @@ if [ "${OS}" = "Darwin" ]; then
     if [ -z "${EXISTING_CONFIG}" ]; then
         echo "--> Creating default configuration at ${CONFIG_FILE}..."
         cat <<EOF > "${CONFIG_FILE}"
-DATABASE_URL=postgres://envoytrade:envoytrade@localhost:${LOCAL_DB_PORT}/envoytrade?sslmode=disable
+DATABASE_URL=${DEFAULT_DB_URL}
 PORT=8080
 LOG_FILE=/var/log/envoytrade/app.log
 LOG_LEVEL=info
-LOG_TO_STDOUT=true
+LOG_FORMAT=json
+LOG_TO_STDOUT=false
+ENCRYPTION_KEY=${ENC_KEY}
 EOF
         chmod 600 "${CONFIG_FILE}"
     else
         CONFIG_FILE="${EXISTING_CONFIG}"
-        # Guard: if existing config has stale linux socket default on macOS, warn or update
+        # Guard: if existing config has stale Linux socket default on macOS, update to /tmp
         if grep -q "host=/var/run/postgresql" "${CONFIG_FILE}" 2>/dev/null; then
-            echo "--> Fixing legacy Linux Unix domain socket path in ${CONFIG_FILE} for macOS..."
-            sed -i '' "s|host=/var/run/postgresql|host=localhost|g" "${CONFIG_FILE}" || true
+            echo "--> Fixing legacy Linux Unix domain socket path in ${CONFIG_FILE} for macOS (/tmp)..."
+            sed -i '' "s|host=/var/run/postgresql|host=/tmp|g" "${CONFIG_FILE}" || true
+        fi
+        # Guard: ensure ENCRYPTION_KEY is present
+        if ! grep -q "^ENCRYPTION_KEY=" "${CONFIG_FILE}" 2>/dev/null; then
+            echo "--> Adding missing ENCRYPTION_KEY to ${CONFIG_FILE}..."
+            echo "ENCRYPTION_KEY=${ENC_KEY}" >> "${CONFIG_FILE}"
         fi
     fi
 
@@ -174,6 +241,7 @@ EOF
         done
         mkdir -p /var/log/envoytrade 2>/dev/null || true
         chown -R "${TARGET_USER}:${TARGET_GROUP}" /var/log/envoytrade 2>/dev/null || true
+        chown "${TARGET_USER}:${TARGET_GROUP}" "${INSTALL_BIN}" 2>/dev/null || true
         rm -f /tmp/envoytrade.stdout.log /tmp/envoytrade.stderr.log
     fi
 
@@ -206,11 +274,15 @@ EOF
         echo "--> Registering LaunchAgent for user ${TARGET_USER} (uid ${TARGET_UID})..."
         sleep 1
 
-        # Bootstrap the job into the user's GUI session domain using modern API
+        # Bootstrap or kickstart the job into the user's GUI session domain
         if [ "$(id -u)" -eq 0 ]; then
-            sudo -u "${TARGET_USER}" launchctl bootstrap "gui/${TARGET_UID}" "${PLIST_DEST}"
+            sudo -u "${TARGET_USER}" launchctl bootout "gui/${TARGET_UID}/com.envoytrade.server" 2>/dev/null || true
+            sudo -u "${TARGET_USER}" launchctl bootstrap "gui/${TARGET_UID}" "${PLIST_DEST}" 2>/dev/null || \
+            sudo -u "${TARGET_USER}" launchctl kickstart -k "gui/${TARGET_UID}/com.envoytrade.server" 2>/dev/null || true
         else
-            launchctl bootstrap "gui/${TARGET_UID}" "${PLIST_DEST}"
+            launchctl bootout "gui/${TARGET_UID}/com.envoytrade.server" 2>/dev/null || true
+            launchctl bootstrap "gui/${TARGET_UID}" "${PLIST_DEST}" 2>/dev/null || \
+            launchctl kickstart -k "gui/${TARGET_UID}/com.envoytrade.server" 2>/dev/null || true
         fi
 
         echo "    Service registered with launchd (RunAtLoad=true, restarts on crash)."
@@ -262,6 +334,12 @@ elif [ "${OS}" = "Linux" ]; then
     run_privileged mkdir -p "${CONFIG_DIR}" "${LOG_DIR}" "${DATA_DIR}" "${BACKUP_DIR}"
     run_privileged chown -R envoytrade:envoytrade "${LOG_DIR}" "${DATA_DIR}" "${BACKUP_DIR}"
 
+    # Ensure system PostgreSQL role and DB exist
+    ensure_postgres_db
+
+    # Resolve encryption key
+    ENC_KEY="$(resolve_encryption_key)"
+
     # Socket vs TCP determination for Linux
     DEFAULT_DB_URL="postgres://envoytrade:envoytrade@localhost:5432/envoytrade?sslmode=disable"
     if [ -d "/var/run/postgresql" ]; then
@@ -273,6 +351,9 @@ elif [ "${OS}" = "Linux" ]; then
         if [ -n "${ENV_EXAMPLE}" ] && [ -f "${ENV_EXAMPLE}" ]; then
             echo "--> Initializing configuration from packaged .env.example..."
             run_privileged cp "${ENV_EXAMPLE}" "${CONFIG_FILE}"
+            if ! grep -q "^ENCRYPTION_KEY=" "${CONFIG_FILE}" 2>/dev/null || grep -q "^ENCRYPTION_KEY=$" "${CONFIG_FILE}" 2>/dev/null; then
+                sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENC_KEY}|" "${CONFIG_FILE}" 2>/dev/null || echo "ENCRYPTION_KEY=${ENC_KEY}" >> "${CONFIG_FILE}"
+            fi
         else
             echo "--> Creating default configuration at ${CONFIG_FILE}..."
             run_privileged tee "${CONFIG_FILE}" > /dev/null <<EOF
@@ -282,10 +363,17 @@ LOG_FILE=/var/log/envoytrade/app.log
 LOG_LEVEL=info
 LOG_FORMAT=json
 LOG_TO_STDOUT=false
+ENCRYPTION_KEY=${ENC_KEY}
 EOF
         fi
         run_privileged chmod 600 "${CONFIG_FILE}"
         run_privileged chown envoytrade:envoytrade "${CONFIG_FILE}"
+    else
+        # Guard: ensure ENCRYPTION_KEY is present
+        if ! grep -q "^ENCRYPTION_KEY=" "${CONFIG_FILE}" 2>/dev/null; then
+            echo "--> Adding missing ENCRYPTION_KEY to ${CONFIG_FILE}..."
+            echo "ENCRYPTION_KEY=${ENC_KEY}" | run_privileged tee -a "${CONFIG_FILE}" > /dev/null
+        fi
     fi
 
     # Check for PostgreSQL canonical tuning configuration

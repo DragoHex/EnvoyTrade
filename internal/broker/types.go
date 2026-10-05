@@ -25,3 +25,25 @@ type OrderParams struct {
 type OrderResponse struct {
 	OrderID string
 }
+
+// Position represents an open or closed position with the broker.
+type Position struct {
+	Exchange      string  `json:"exchange"`
+	Tradingsymbol string  `json:"tradingsymbol"`
+	Product       string  `json:"product"`
+	Quantity      int     `json:"quantity"` // net quantity (>0 long, <0 short, 0 closed)
+	AveragePrice  float64 `json:"average_price"`
+	LastPrice     float64 `json:"last_price"`
+	M2M           float64 `json:"m2m"`
+	PnL           float64 `json:"pnl"`
+}
+
+// Order represents an existing order on the broker (e.g., for status check or cancellation).
+type Order struct {
+	OrderID       string  `json:"order_id"`
+	Exchange      string  `json:"exchange"`
+	Tradingsymbol string  `json:"tradingsymbol"`
+	Status        string  `json:"status"` // OPEN, COMPLETE, CANCELLED, REJECTED
+	Quantity      int     `json:"quantity"`
+	FilledQuantity int    `json:"filled_quantity"`
+}

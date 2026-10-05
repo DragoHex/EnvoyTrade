@@ -36,6 +36,7 @@ import (
 	"envoytrade/internal/listener"
 	"envoytrade/internal/queue/memchan"
 	"envoytrade/internal/recon"
+	"envoytrade/internal/squareoff"
 	"envoytrade/internal/store/postgres"
 	"envoytrade/internal/testbroker"
 	"envoytrade/internal/ticker"
@@ -64,9 +65,9 @@ func main() {
 }
 
 // loadEnvFallback checks standard system and user locations for envoytrade.env
-// if environment variables like DATABASE_URL are not already set.
+// if environment variables like DATABASE_URL or ENCRYPTION_KEY are not already set.
 func loadEnvFallback() {
-	if os.Getenv("DATABASE_URL") != "" {
+	if os.Getenv("DATABASE_URL") != "" && os.Getenv("ENCRYPTION_KEY") != "" {
 		return
 	}
 
@@ -105,7 +106,7 @@ func loadEnvFallback() {
 				}
 			}
 		}
-		if os.Getenv("DATABASE_URL") != "" {
+		if os.Getenv("DATABASE_URL") != "" && os.Getenv("ENCRYPTION_KEY") != "" {
 			break
 		}
 	}
@@ -164,14 +165,27 @@ func run(logger *slog.Logger) error {
 	brokerRegistry.Register("zerodha", kiteBrokerFactory)
 	brokerRegistry.Register("testbroker", testbroker.NewBrokerFactory())
 
+	syncer := &kite.PortfolioSyncer{
+		Store: store,
+	}
+
+	brokerResolver := &serverBrokerResolver{
+		store:    store,
+		registry: brokerRegistry,
+		syncer:   syncer,
+	}
+
 	workerPool := worker.NewPool()
 	workerPool.Logger = logger.With("component", "worker_pool")
+	workerPool.Syncer = syncer
 	defer workerPool.Shutdown()
-	followersRegistered, err := registerFollowers(ctx, store, workerPool, brokerRegistry)
+	followersRegistered, err := registerFollowers(ctx, store, workerPool, brokerResolver)
 	if err != nil {
 		return fmt.Errorf("register followers: %w", err)
 	}
 	logger.Info("worker pool initialized", "followers_registered", followersRegistered)
+
+	squareOffSvc := squareoff.NewService(store, brokerResolver, syncer, logger.With("component", "squareoff"))
 
 	eng := engine.New(store, workerPool)
 	eng.Logger = logger.With("component", "engine")
@@ -179,11 +193,6 @@ func run(logger *slog.Logger) error {
 	// Queues for incoming signals & status updates
 	masterFillQueue := memchan.New[domain.MasterFill](1024)
 	orderUpdateQueue := memchan.New[domain.OrderUpdate](1024)
-
-	syncer := &kite.PortfolioSyncer{
-		Store: store,
-	}
-	workerPool.Syncer = syncer
 
 	// Consumers draining queues into store and engine
 	masterFillConsumer := &listener.MasterFillConsumer{
@@ -304,6 +313,7 @@ func run(logger *slog.Logger) error {
 		httpapi.WithLogger(logger.With("component", "httpapi")),
 		httpapi.WithPortfolioSyncer(syncer),
 		httpapi.WithTickerManager(tickerManager),
+		httpapi.WithSquareOffService(squareOffSvc),
 	)
 
 	if frontend.HasEmbeddedUI() {
@@ -344,9 +354,56 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
+type serverBrokerResolver struct {
+	store    *postgres.Store
+	registry *broker.Registry
+	syncer   *kite.PortfolioSyncer
+}
+
+func (r *serverBrokerResolver) ResolveBroker(ctx context.Context, accountID uuid.UUID) (broker.Broker, error) {
+	authInfo, err := r.store.AccountAuthInfo(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("load account auth info: %w", err)
+	}
+
+	if authInfo.ApiKey == "" && authInfo.AccessToken == "" {
+		return &fake.Broker{}, nil
+	}
+
+	if (authInfo.AccessToken == "" || (authInfo.TokenExpiresAt != nil && !time.Now().Before(*authInfo.TokenExpiresAt))) &&
+		authInfo.EncryptedPassword != "" && authInfo.EncryptedTotpSecret != "" && r.syncer != nil {
+		if err := r.syncer.SyncAccountPortfolio(ctx, accountID); err == nil {
+			if refreshed, err := r.store.AccountAuthInfo(ctx, accountID); err == nil {
+				authInfo = refreshed
+			}
+		}
+	}
+
+	acc := broker.BrokerAccount{
+		ID:              accountID.String(),
+		Role:            authInfo.Role,
+		Broker:          authInfo.Broker,
+		BrokerAccountID: authInfo.BrokerAccountID,
+		ApiKey:          authInfo.ApiKey,
+		ApiSecret:       authInfo.ApiSecret,
+		AccessToken:     authInfo.AccessToken,
+	}
+
+	if authInfo.IPAddress != "" {
+		if pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress); err == nil {
+			acc.ProxyHost = pIP.Host
+			acc.ProxyPort = pIP.Port
+			acc.ProxyUsername = pIP.Username
+			acc.ProxyPassword = pIP.Password
+		}
+	}
+
+	return r.registry.Create(ctx, acc)
+}
+
 // registerFollowers registers every existing follower account with the
 // worker pool so Rebalance can dispatch to it.
-func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, registry *broker.Registry) (int, error) {
+func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, resolver *serverBrokerResolver) (int, error) {
 	groups, err := store.Groups(ctx)
 	if err != nil {
 		return 0, err
@@ -358,28 +415,9 @@ func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.
 			return 0, err
 		}
 		for _, f := range detail.Followers {
-			var b broker.Broker = &fake.Broker{}
-			authInfo, err := store.AccountAuthInfo(ctx, f.AccountID)
-			if err == nil && authInfo.ApiKey != "" && authInfo.AccessToken != "" {
-				acc := broker.BrokerAccount{
-					ID:              f.AccountID.String(),
-					Broker:          authInfo.Broker,
-					BrokerAccountID: authInfo.BrokerAccountID,
-					ApiKey:          authInfo.ApiKey,
-					ApiSecret:       authInfo.ApiSecret,
-					AccessToken:     authInfo.AccessToken,
-				}
-				if authInfo.IPAddress != "" {
-					if pIP, err := store.ProxyIPByAddress(ctx, authInfo.IPAddress); err == nil {
-						acc.ProxyHost = pIP.Host
-						acc.ProxyPort = pIP.Port
-						acc.ProxyUsername = pIP.Username
-						acc.ProxyPassword = pIP.Password
-					}
-				}
-				if liveBroker, err := registry.Create(ctx, acc); err == nil {
-					b = liveBroker
-				}
+			b, err := resolver.ResolveBroker(ctx, f.AccountID)
+			if err != nil {
+				b = &fake.Broker{}
 			}
 			pool.Register(ctx, f.AccountID, b, store, 16)
 			count++

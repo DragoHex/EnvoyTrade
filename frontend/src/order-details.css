@@ -217,12 +217,11 @@ tr.row-expanded {
 .order-table-container {
   overflow-x: auto;
   min-height: 260px;
-  transition: opacity 0.15s ease;
 }
 
 .order-table-container.is-fetching {
-  opacity: 0.65;
-  pointer-events: none;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .order-subtable {

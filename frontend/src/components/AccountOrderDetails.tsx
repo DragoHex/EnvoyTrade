@@ -1,5 +1,15 @@
-import { createSignal, createResource, createMemo, createEffect, Show, Index, onCleanup } from 'solid-js'
-import { getAccountOrders } from '../api'
+import { createSignal, createResource, createMemo, createEffect, Show, For, onCleanup } from 'solid-js'
+import { createStore, reconcile } from 'solid-js/store'
+import {
+  getAccountOrders,
+  type AccountSummaryMetrics,
+  type TabCounts,
+  type PaginationInfo,
+  type PositionItem,
+  type HoldingItem,
+  type OrderDetailItem,
+  type AccountOrdersResponse,
+} from '../api'
 import { isOrdersDataEqual } from '../utils/ordersDiff'
 import {
   ExitSquareIcon,
@@ -22,6 +32,7 @@ interface AccountOrderDetailsProps {
   brokerAccountId?: string
   onClose?: () => void
   isExpanded?: boolean
+  onSummaryChange?: (summary: AccountSummaryMetrics) => void
 }
 
 function toNumber(val: unknown, fallback = 0): number {
@@ -49,6 +60,57 @@ function formatNumber(val: unknown): string {
   return n.toLocaleString('en-IN')
 }
 
+interface OrdersStoreState {
+  summary: AccountSummaryMetrics
+  counts?: TabCounts
+  pagination?: PaginationInfo
+  openPositions: PositionItem[]
+  closedPositions: PositionItem[]
+  holdings: HoldingItem[]
+  openOrders: OrderDetailItem[]
+  closedOrders: OrderDetailItem[]
+  rejectedOrders: OrderDetailItem[]
+}
+
+function createInitialStoreState(): OrdersStoreState {
+  return {
+    summary: {
+      netQty: 0,
+      openPositionsCount: 0,
+      openCount: 0,
+      closedPositionsCount: 0,
+      closedCount: 0,
+      pendingOrdersCount: 0,
+      pendingMetric: 0,
+      totalMtm: 0,
+      realizedPnl: 0,
+      accountValue: 0,
+      status: 'offline',
+    },
+    counts: {
+      openPositions: 0,
+      closedPositions: 0,
+      holdings: 0,
+      openOrders: 0,
+      closedOrders: 0,
+      rejectedOrders: 0,
+    },
+    pagination: {
+      tab: 'open_positions',
+      page: 1,
+      limit: 10,
+      totalCount: 0,
+      totalPages: 1,
+    },
+    openPositions: [],
+    closedPositions: [],
+    holdings: [],
+    openOrders: [],
+    closedOrders: [],
+    rejectedOrders: [],
+  }
+}
+
 export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   const [activeTab, setActiveTab] = createSignal<OrderTabId>('open_positions')
   const [page, setPage] = createSignal<number>(1)
@@ -56,9 +118,12 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   const [holdingSortDir, setHoldingSortDir] = createSignal<'asc' | 'desc'>('asc')
   const [isPolling, setIsPolling] = createSignal<boolean>(false)
 
-  const isExpanded = () => props.isExpanded ?? true
+  const [store, setStore] = createStore<OrdersStoreState>(createInitialStoreState())
 
-  const [ordersData, { mutate }] = createResource(
+  const isExpanded = () => props.isExpanded ?? true
+  const isTableFetching = () => ordersData.loading && !isPolling()
+
+  const [ordersData, { mutate, refetch }] = createResource(
     () => {
       if (!isExpanded()) return null
       return {
@@ -68,11 +133,66 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
         limit: 10,
       }
     },
-    (params) => {
-      if (!params) return Promise.resolve(undefined as any)
-      return getAccountOrders(params.accountId, params.tab, params.page, params.limit)
-    },
+    ({ accountId, tab, page, limit }) => getAccountOrders(accountId, tab, page, limit),
   )
+
+  const isTabReady = (tab: OrderTabId) => !ordersData.loading && store.pagination?.tab === tab
+
+  function normalizeOrders<T extends OrderDetailItem>(items: T[] | undefined): T[] {
+    if (!items) return []
+    return items.map((item, idx) => ({
+      ...item,
+      id: item.id || `${item.instrument}-${item.time ?? ''}-${item.type}-${idx}`,
+    }))
+  }
+
+  function applyData(fresh: AccountOrdersResponse) {
+    if (!fresh) return
+    // Strict isolation guard: discard responses intended for any other account
+    if (fresh.accountId && fresh.accountId !== props.accountId) return
+
+    if (fresh.summary) {
+      setStore('summary', reconcile(fresh.summary))
+    }
+    if (fresh.counts) {
+      setStore('counts', reconcile(fresh.counts))
+    }
+    if (fresh.pagination) {
+      setStore('pagination', reconcile(fresh.pagination))
+    }
+
+    const responseTab = fresh.pagination?.tab ?? activeTab()
+
+    if (responseTab === 'open_positions' || (fresh.openPositions && fresh.openPositions.length > 0)) {
+      setStore('openPositions', reconcile(fresh.openPositions ?? [], { key: 'instrument' }))
+    }
+    if (responseTab === 'closed_positions' || (fresh.closedPositions && fresh.closedPositions.length > 0)) {
+      setStore('closedPositions', reconcile(fresh.closedPositions ?? [], { key: 'instrument' }))
+    }
+    if (responseTab === 'holdings' || (fresh.holdings && fresh.holdings.length > 0)) {
+      setStore('holdings', reconcile(fresh.holdings ?? [], { key: 'instrument' }))
+    }
+    if (responseTab === 'open_orders' || (fresh.openOrders && fresh.openOrders.length > 0)) {
+      setStore('openOrders', reconcile(normalizeOrders(fresh.openOrders), { key: 'id' }))
+    }
+    if (responseTab === 'closed_orders' || (fresh.closedOrders && fresh.closedOrders.length > 0)) {
+      setStore('closedOrders', reconcile(normalizeOrders(fresh.closedOrders), { key: 'id' }))
+    }
+    if (responseTab === 'rejected_orders' || (fresh.rejectedOrders && fresh.rejectedOrders.length > 0)) {
+      setStore('rejectedOrders', reconcile(normalizeOrders(fresh.rejectedOrders), { key: 'id' }))
+    }
+
+    if (fresh.summary) {
+      props.onSummaryChange?.(fresh.summary)
+    }
+  }
+
+  createEffect(() => {
+    const data = ordersData()
+    if (data) {
+      applyData(data)
+    }
+  })
 
   createEffect(() => {
     if (!isExpanded()) return
@@ -98,24 +218,16 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   })
 
   function switchTab(tab: OrderTabId) {
+    if (tab === activeTab()) {
+      refetch()
+      return
+    }
     setActiveTab(tab)
     setPage(1)
   }
 
   const summary = () => {
-    const s = ordersData()?.summary
-    if (!s) {
-      return {
-        netQty: 0,
-        openCount: 0,
-        closedCount: 0,
-        pendingMetric: 0,
-        totalMtm: 0,
-        realizedPnl: 0,
-        accountValue: 0,
-        status: 'offline',
-      }
-    }
+    const s = store.summary
     return {
       netQty: toNumber(s.netQty),
       openCount: s.openPositionsCount ?? s.openCount ?? 0,
@@ -128,24 +240,24 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
     }
   }
 
-  const openPositions = () => ordersData()?.openPositions ?? []
-  const closedPositions = () => ordersData()?.closedPositions ?? []
-  const holdings = () => ordersData()?.holdings ?? []
-  const openOrders = () => ordersData()?.openOrders ?? []
-  const closedOrders = () => ordersData()?.closedOrders ?? []
-  const rejectedOrders = () => ordersData()?.rejectedOrders ?? []
+  const openPositions = () => store.openPositions
+  const closedPositions = () => store.closedPositions
+  const holdings = () => store.holdings
+  const openOrders = () => store.openOrders
+  const closedOrders = () => store.closedOrders
+  const rejectedOrders = () => store.rejectedOrders
 
   const counts = () => ({
-    openPositions: ordersData()?.counts?.openPositions ?? openPositions().length,
-    closedPositions: ordersData()?.counts?.closedPositions ?? closedPositions().length,
-    holdings: ordersData()?.counts?.holdings ?? holdings().length,
-    openOrders: ordersData()?.counts?.openOrders ?? openOrders().length,
-    closedOrders: ordersData()?.counts?.closedOrders ?? closedOrders().length,
-    rejectedOrders: ordersData()?.counts?.rejectedOrders ?? rejectedOrders().length,
+    openPositions: store.counts?.openPositions ?? store.openPositions.length,
+    closedPositions: store.counts?.closedPositions ?? store.closedPositions.length,
+    holdings: store.counts?.holdings ?? store.holdings.length,
+    openOrders: store.counts?.openOrders ?? store.openOrders.length,
+    closedOrders: store.counts?.closedOrders ?? store.closedOrders.length,
+    rejectedOrders: store.counts?.rejectedOrders ?? store.rejectedOrders.length,
   })
 
   const pagination = () => {
-    const p = ordersData()?.pagination
+    const p = store.pagination
     const currentTab = activeTab()
     let totalCount = 0
     switch (currentTab) {
@@ -383,7 +495,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
         <Show when={ordersData()}>
           {/* Tab 1: Open Position */}
           <Show when={activeTab() === 'open_positions'}>
-            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -402,37 +514,39 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     fallback={
                       <tr>
                         <td colspan={7} class="table-empty-cell">
-                          <EmptyState message="No data" />
+                          <Show when={isTabReady('open_positions')}>
+                            <EmptyState message="No data" />
+                          </Show>
                         </td>
                       </tr>
                     }
                   >
-                    <Index each={openPositions()}>
+                    <For each={openPositions()}>
                       {(pos) => (
                         <tr>
                           <td>
-                            <span class="product-badge">{pos().product}</span>
+                            <span class="product-badge">{pos.product}</span>
                           </td>
-                          <td class="font-medium">{pos().instrument}</td>
+                          <td class="font-medium">{pos.instrument}</td>
                           <td
                             class={`text-right font-mono ${
-                              pos().qty > 0 ? 'text-positive' : pos().qty < 0 ? 'text-negative' : ''
+                              pos.qty > 0 ? 'text-positive' : pos.qty < 0 ? 'text-negative' : ''
                             }`}
                           >
-                            {pos().qty}
+                            {pos.qty}
                           </td>
-                          <td class="font-mono text-muted">{pos().avgPrice}</td>
-                          <td class="text-right font-mono">{formatPrice(pos().ltp)}</td>
+                          <td class="font-mono text-muted">{pos.avgPrice}</td>
+                          <td class="text-right font-mono">{formatPrice(pos.ltp)}</td>
                           <td
                             class={`text-right font-mono font-medium ${
-                              toNumber(pos().mtm) > 0
+                              toNumber(pos.mtm) > 0
                                 ? 'text-positive'
-                                : toNumber(pos().mtm) < 0
+                                : toNumber(pos.mtm) < 0
                                 ? 'text-negative'
                                 : ''
                             }`}
                           >
-                            {formatCurrency(pos().mtm)}
+                            {formatCurrency(pos.mtm)}
                           </td>
                           <td class="text-center">
                             <button
@@ -446,7 +560,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           </td>
                         </tr>
                       )}
-                    </Index>
+                    </For>
                   </Show>
                 </tbody>
               </table>
@@ -455,7 +569,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 2: Closed Position */}
           <Show when={activeTab() === 'closed_positions'}>
-            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -472,37 +586,39 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     fallback={
                       <tr>
                         <td colspan={5} class="table-empty-cell">
-                          <EmptyState message="No data" />
+                          <Show when={isTabReady('closed_positions')}>
+                            <EmptyState message="No data" />
+                          </Show>
                         </td>
                       </tr>
                     }
                   >
-                    <Index each={closedPositions()}>
+                    <For each={closedPositions()}>
                       {(pos) => {
-                        const val = pos().pnl !== undefined ? pos().pnl : pos().mtm
+                        const val = () => pos.pnl !== undefined ? pos.pnl : pos.mtm
                         return (
                           <tr>
                             <td>
-                              <span class="product-badge">{pos().product}</span>
+                              <span class="product-badge">{pos.product}</span>
                             </td>
-                            <td class="font-medium">{pos().instrument}</td>
-                            <td class="font-mono text-muted">{pos().avgPrice}</td>
-                            <td class="text-right font-mono">{formatPrice(pos().ltp)}</td>
+                            <td class="font-medium">{pos.instrument}</td>
+                            <td class="font-mono text-muted">{pos.avgPrice}</td>
+                            <td class="text-right font-mono">{formatPrice(pos.ltp)}</td>
                             <td
                               class={`text-right font-mono font-medium ${
-                                toNumber(val) > 0
+                                toNumber(val()) > 0
                                   ? 'text-positive'
-                                  : toNumber(val) < 0
+                                  : toNumber(val()) < 0
                                   ? 'text-negative'
                                   : ''
                               }`}
                             >
-                              {formatCurrency(val)}
+                              {formatCurrency(val())}
                             </td>
                           </tr>
                         )
                       }}
-                    </Index>
+                    </For>
                   </Show>
                 </tbody>
               </table>
@@ -511,7 +627,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 3: Holding */}
           <Show when={activeTab() === 'holdings'}>
-            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -551,28 +667,30 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     fallback={
                       <tr>
                         <td colspan={6} class="table-empty-cell">
-                          <EmptyState message="No data" />
+                          <Show when={isTabReady('holdings')}>
+                            <EmptyState message="No data" />
+                          </Show>
                         </td>
                       </tr>
                     }
                   >
-                    <Index each={sortedHoldings()}>
+                    <For each={sortedHoldings()}>
                       {(h) => (
                         <tr>
-                          <td class="font-medium">{h().instrument}</td>
-                          <td class="text-right font-mono">{formatNumber(h().sellableQuantity)}</td>
-                          <td class="text-right font-mono">{formatPrice(h().buyAveragePrice)}</td>
-                          <td class="text-right font-mono">{formatPrice(h().ltp)}</td>
+                          <td class="font-medium">{h.instrument}</td>
+                          <td class="text-right font-mono">{formatNumber(h.sellableQuantity)}</td>
+                          <td class="text-right font-mono">{formatPrice(h.buyAveragePrice)}</td>
+                          <td class="text-right font-mono">{formatPrice(h.ltp)}</td>
                           <td
                             class={`text-right font-mono font-medium ${
-                              toNumber(h().pnl) > 0
+                              toNumber(h.pnl) > 0
                                 ? 'text-positive'
-                                : toNumber(h().pnl) < 0
+                                : toNumber(h.pnl) < 0
                                 ? 'text-negative'
                                 : ''
                             }`}
                           >
-                            {formatCurrency(h().pnl)}
+                            {formatCurrency(h.pnl)}
                           </td>
                           <td class="text-center">
                             <button
@@ -586,7 +704,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           </td>
                         </tr>
                       )}
-                    </Index>
+                    </For>
                   </Show>
                 </tbody>
               </table>
@@ -595,7 +713,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 4: Open Order */}
           <Show when={activeTab() === 'open_orders'}>
-            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -615,29 +733,31 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     fallback={
                       <tr>
                         <td colspan={8} class="table-empty-cell">
-                          <EmptyState message="No data" />
+                          <Show when={isTabReady('open_orders')}>
+                            <EmptyState message="No data" />
+                          </Show>
                         </td>
                       </tr>
                     }
                   >
-                    <Index each={openOrders()}>
+                    <For each={openOrders()}>
                       {(ord) => (
                         <tr>
                           <td>
-                            <span class="product-badge">{ord().product ?? 'CNC'}</span>
+                            <span class="product-badge">{ord.product ?? 'CNC'}</span>
                           </td>
-                          <td class="font-mono text-sm text-muted">{ord().time ?? '—'}</td>
-                          <td class="font-medium">{ord().instrument}</td>
-                          <td class="text-right font-mono">{ord().quantity}</td>
-                          <td class="text-right font-mono">{formatPrice(ord().triggerPrice)}</td>
-                          <td class="text-right font-mono">{formatPrice(ord().limitPrice)}</td>
+                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
+                          <td class="font-medium">{ord.instrument}</td>
+                          <td class="text-right font-mono">{ord.quantity}</td>
+                          <td class="text-right font-mono">{formatPrice(ord.triggerPrice)}</td>
+                          <td class="text-right font-mono">{formatPrice(ord.limitPrice)}</td>
                           <td class="text-center">
                             <span
                               class={`type-badge ${
-                                ord().type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
+                                ord.type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
                               }`}
                             >
-                              {ord().type}
+                              {ord.type}
                             </span>
                           </td>
                           <td class="text-center">
@@ -652,7 +772,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           </td>
                         </tr>
                       )}
-                    </Index>
+                    </For>
                   </Show>
                 </tbody>
               </table>
@@ -661,7 +781,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 5: Closed Order */}
           <Show when={activeTab() === 'closed_orders'}>
-            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -679,33 +799,35 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     fallback={
                       <tr>
                         <td colspan={6} class="table-empty-cell">
-                          <EmptyState message="No data" />
+                          <Show when={isTabReady('closed_orders')}>
+                            <EmptyState message="No data" />
+                          </Show>
                         </td>
                       </tr>
                     }
                   >
-                    <Index each={closedOrders()}>
+                    <For each={closedOrders()}>
                       {(ord) => (
                         <tr>
                           <td>
-                            <span class="product-badge">{ord().product ?? 'CNC'}</span>
+                            <span class="product-badge">{ord.product ?? 'CNC'}</span>
                           </td>
-                          <td class="font-mono text-sm text-muted">{ord().time ?? '—'}</td>
-                          <td class="font-medium">{ord().instrument}</td>
-                          <td class="text-right font-mono">{ord().quantity}</td>
-                          <td class="text-right font-mono">{formatPrice(ord().price)}</td>
+                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
+                          <td class="font-medium">{ord.instrument}</td>
+                          <td class="text-right font-mono">{ord.quantity}</td>
+                          <td class="text-right font-mono">{formatPrice(ord.price)}</td>
                           <td class="text-center">
                             <span
                               class={`type-badge ${
-                                ord().type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
+                                ord.type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
                               }`}
                             >
-                              {ord().type}
+                              {ord.type}
                             </span>
                           </td>
                         </tr>
                       )}
-                    </Index>
+                    </For>
                   </Show>
                 </tbody>
               </table>
@@ -714,7 +836,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
           {/* Tab 6: Rejected Order */}
           <Show when={activeTab() === 'rejected_orders'}>
-            <div class={`order-table-container ${ordersData.loading && !isPolling() ? 'is-fetching' : ''}`}>
+            <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>
               <table class="order-subtable">
                 <thead>
                   <tr>
@@ -731,30 +853,32 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     fallback={
                       <tr>
                         <td colspan={5} class="table-empty-cell">
-                          <EmptyState message="No data" />
+                          <Show when={isTabReady('rejected_orders')}>
+                            <EmptyState message="No data" />
+                          </Show>
                         </td>
                       </tr>
                     }
                   >
-                    <Index each={rejectedOrders()}>
+                    <For each={rejectedOrders()}>
                       {(ord) => (
                         <tr>
-                          <td class="font-mono text-sm text-muted">{ord().time ?? '—'}</td>
-                          <td class="font-medium">{ord().instrument}</td>
-                          <td class="text-right font-mono">{ord().quantity}</td>
+                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
+                          <td class="font-medium">{ord.instrument}</td>
+                          <td class="text-right font-mono">{ord.quantity}</td>
                           <td class="text-center">
                             <span
                               class={`type-badge ${
-                                ord().type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
+                                ord.type === 'B' ? 'type-badge-buy' : 'type-badge-sell'
                               }`}
                             >
-                              {ord().type}
+                              {ord.type}
                             </span>
                           </td>
-                          <td class="text-negative font-medium">{ord().reason ?? 'Rejected'}</td>
+                          <td class="text-negative font-medium">{ord.reason ?? 'Rejected'}</td>
                         </tr>
                       )}
-                    </Index>
+                    </For>
                   </Show>
                 </tbody>
               </table>
@@ -773,7 +897,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                 <button
                   type="button"
                   class="pagination-btn"
-                  disabled={pagination().page <= 1 || (ordersData.loading && !isPolling())}
+                  disabled={pagination().page <= 1 || isTableFetching()}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   aria-label="Previous page"
                 >
@@ -786,7 +910,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                 <button
                   type="button"
                   class="pagination-btn"
-                  disabled={pagination().page >= pagination().totalPages || (ordersData.loading && !isPolling())}
+                  disabled={pagination().page >= pagination().totalPages || isTableFetching()}
                   onClick={() => setPage((p) => Math.min(pagination().totalPages, p + 1))}
                   aria-label="Next page"
                 >
