@@ -22,6 +22,7 @@ prefer expanding an existing endpoint over adding a new one.
 | [`orders.md`](./orders.md) | `GET /accounts/{id}/orders` | Dashboard account expanded order, position, and holding drawer |
 | [`actions.md`](./actions.md) | `POST /accounts/{id}/actions` | Dashboard Rebalance / Exit Open Orders buttons |
 | [`positions.md`](./positions.md) | `POST /groups/{id}/positions/square-off`, `POST /accounts/{id}/positions/square-off` | Cluster and account portfolio square-off operations |
+| [`rebalance.md`](./rebalance.md) | `GET /groups/{id}/positions/rebalance/diff`, `POST /groups/{id}/positions/rebalance`, `GET /accounts/{id}/positions/rebalance/diff`, `POST /accounts/{id}/positions/rebalance` | Cluster and account portfolio rebalance operations |
 | [`analytics.md`](./analytics.md) | `GET /analytics/pnl`, `GET /analytics/trades` | Analytics page |
 | [`proxy_ips.md`](./proxy_ips.md) | `GET /proxy-ips`, `GET /proxy-ips/available` | Proxy IP pool management and auto-assignment in Account drawer |
 
