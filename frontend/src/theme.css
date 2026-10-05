@@ -270,7 +270,7 @@ nav [data-tooltip]:hover::after,
   opacity: 0.7;
 }
 .icon-spin {
-  animation: icon-spin 0.8s linear infinite;
+  animation: icon-spin 2.4s linear infinite;
   transform-origin: center;
 }
 @keyframes icon-spin {
@@ -826,7 +826,7 @@ tr[data-testid='master-row'] td {
   text-align: center;
 }
 
-.group-members-table .col-capital-ratio {
+.group-members-table .col-clone-factor {
   width: 14%;
 }
 
@@ -1370,5 +1370,176 @@ nav a.user-badge-link.active:hover,
 .not-found-actions a:focus {
   text-decoration: none;
 }
+
+/* Square Off Modal Styling */
+.square-off-modal {
+  width: 580px;
+  max-width: 95vw;
+  max-height: 90vh;
+}
+.square-off-modal-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.square-off-modal-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.square-off-modal-header .target-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.square-off-warning {
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.825rem;
+  line-height: 1.45;
+}
+.square-off-warning.warning-group {
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  background: rgba(229, 72, 77, 0.08);
+  color: #d32f2f;
+}
+[data-theme='dark'] .square-off-warning.warning-group {
+  border-color: rgba(229, 72, 77, 0.4);
+  background: rgba(229, 72, 77, 0.12);
+  color: #ff6b6b;
+}
+.square-off-warning.warning-account {
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  background: rgba(245, 166, 35, 0.08);
+  color: #b45309;
+}
+[data-theme='dark'] .square-off-warning.warning-account {
+  border-color: rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.12);
+  color: #f5a623;
+}
+.square-off-error-banner {
+  background: rgba(229, 72, 77, 0.12);
+  color: #d32f2f;
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+[data-theme='dark'] .square-off-error-banner {
+  color: #ff6b6b;
+  border-color: rgba(229, 72, 77, 0.4);
+}
+.square-off-positions-section {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+.square-off-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+.section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+.selection-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+}
+.square-off-table-wrapper {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.square-off-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.825rem;
+}
+.square-off-table th {
+  padding: 0.45rem 0.6rem;
+  background: var(--color-surface);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+}
+.square-off-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+.square-off-table tr.selected-row {
+  background: rgba(4, 180, 136, 0.08);
+}
+[data-theme='dark'] .square-off-table tr.selected-row {
+  background: rgba(6, 216, 150, 0.1);
+}
+.square-off-table tr:hover {
+  background: var(--color-surface);
+  cursor: pointer;
+}
+.square-off-table .col-check {
+  width: 32px;
+  text-align: center;
+}
+.square-off-table .product-badge {
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--color-border);
+  color: var(--color-text);
+}
+.square-off-empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.square-off-empty p {
+  margin: 0;
+  font-weight: 500;
+}
+.square-off-empty small {
+  opacity: 0.75;
+  font-size: 0.775rem;
+}
+.square-off-confirm-btn {
+  background: #e5484d !important;
+  border-color: #e5484d !important;
+  color: #ffffff !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.square-off-confirm-btn:hover {
+  background: #d03035 !important;
+  border-color: #d03035 !important;
+}
+
 
 

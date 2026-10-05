@@ -85,10 +85,10 @@ export function AccountsTable(props: {
       ),
     },
     {
-      header: 'Capital Ratio',
+      header: 'Clone Factor',
       headerClass: 'col-center',
       cellClass: 'col-center',
-      cell: (a) => a.capitalRatio ?? '—',
+      cell: (a) => a.cloneFactor ?? '—',
     },
     {
       header: 'Max Qty/Order',

@@ -16,11 +16,14 @@ export function AccountTable(props: {
     totalMtm?: number | string
     availableCash?: number | string
     availableMargin?: number | string
+    groupId?: string
   }
   followers: GroupFollower[]
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
   onToggleMasterActive: (next: boolean) => Promise<void> | void
   onAction: (accountId: string, type: ActionType) => Promise<void>
+  onSquareOffGroup?: (groupId: string, symbols?: string[]) => Promise<void>
+  onSquareOffAccount?: (accountId: string, symbols?: string[]) => Promise<void>
 }) {
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
 
@@ -82,7 +85,12 @@ export function AccountTable(props: {
           toggleDisabled={togglingId() === props.master.masterId}
           onToggleCopy={handleToggleMaster}
           onRebalance={() => props.onAction(props.master.masterId, 'rebalance')}
-          onSquareOff={() => props.onAction(props.master.masterId, 'square_off')}
+          onSquareOff={(symbols) => {
+            if (props.onSquareOffGroup) {
+              return props.onSquareOffGroup(props.master.groupId || props.master.masterId, symbols)
+            }
+            return props.onAction(props.master.masterId, 'square_off')
+          }}
           onExitOpenOrders={() => props.onAction(props.master.masterId, 'exit_open_orders')}
         />
         {/* Index (not For): a refetch after a button click resolves to a
@@ -98,7 +106,12 @@ export function AccountTable(props: {
               toggleDisabled={!props.master.active || togglingId() === f().accountId}
               onToggleCopy={(next) => handleToggleFollower(f().accountId, next)}
               onRebalance={() => props.onAction(f().accountId, 'rebalance')}
-              onSquareOff={() => props.onAction(f().accountId, 'square_off')}
+              onSquareOff={(symbols) => {
+                if (props.onSquareOffAccount) {
+                  return props.onSquareOffAccount(f().accountId, symbols)
+                }
+                return props.onAction(f().accountId, 'square_off')
+              }}
               onExitOpenOrders={() => props.onAction(f().accountId, 'exit_open_orders')}
             />
           )}

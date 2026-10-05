@@ -27,6 +27,42 @@ export function SyncIcon(props: { spinning?: boolean }) {
   )
 }
 
+export function ThanosBalanceIcon(props: { class?: string; spinning?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      class={props.class}
+      classList={{ 'icon-spin': props.spinning }}
+    >
+      {/* ☝️ Index Finger Body (cradles underneath hilt, clean negative space slot at y=8.1-8.7) */}
+      <path d="M11.4 8.7h2.2v6.3h-2.2z" />
+      {/* 3 Curled Knuckles (middle, ring, pinky) */}
+      <path d="M9.3 12.3c0-.6.5-1 1-1s1 .4 1 1v3h-2v-3z" />
+      <path d="M7.3 13.3c0-.5.4-1 .9-1s1 .5 1 1v2.5H7.3v-2.5z" />
+      <path d="M5.5 14.3c0-.5.4-.9.9-.9s.9.4.9.9v2H5.5v-2z" />
+      {/* Rounded Palm Heel with Folded Thumb Line */}
+      <path
+        fill-rule="evenodd"
+        d="M5.5 16.5h8.2c.4 0 .7.3.7.7 0 1.4-.6 2.7-1.8 3.5-.8.5-1.8.7-2.8.7-1.8 0-3.3-.8-4.1-2.1-.2-.5-.3-1.1-.3-1.8 0-.6.4-1 1-1zm3 1.2c-.3 0-.5.2-.5.5s.2.5.5.5h3.6c.3 0 .5-.2.5-.5s-.2-.5-.5-.5H8.5z"
+      />
+
+      {/* Gamora Double Dagger placed OVER the finger */}
+      {/* Left Leaf Blade */}
+      <path d="M1.5 6.8c1.8-.7 3.3-1.4 4.8-1.5 1 .7 1.8 1.1 2.2 1.2-.4.1-1.2.5-2.2 1.2-1.5-.1-3-.8-4.8-1.5z" />
+      {/* Right Leaf Blade */}
+      <path d="M23.5 6.8c-1.8-.7-3.3-1.4-4.8-1.5-1 .7-1.8 1.1-2.2 1.2.4.1 1.2.5 2.2 1.2 1.5-.1 3-.8 4.8-1.5z" />
+      {/* Capsule Hilt with 100% PURE Background Hole (zero geometry inside) */}
+      <path
+        fill-rule="evenodd"
+        d="M8.5 5.5h8c.8 0 1.4.6 1.4 1.3s-.6 1.3-1.4 1.3h-8c-.8 0-1.4-.6-1.4-1.3s.6-1.3 1.4-1.3zm4 .4a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8z"
+      />
+    </svg>
+  )
+}
+
+export { ThanosBalanceIcon as RebalanceIcon }
+
 export function CropSquareIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor">
