@@ -62,7 +62,7 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at = EXCLUDED.updated_at;
 
 -- 3. Follow links: Followers linked to groups with multiplier ratios
-INSERT INTO follow_links (follower_id, capital_ratio, max_qty_per_order, enabled, effective_from, group_id)
+INSERT INTO follow_links (follower_id, clone_factor, max_qty_per_order, enabled, effective_from, group_id)
 VALUES
   ('a5183e89-6cb2-4d32-91a2-6dc525570185', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
   ('5894c29d-7740-4494-9c98-c9d59d1364bc', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'f6e70723-b904-4427-83ee-a85771dee2e4'),
@@ -73,7 +73,7 @@ VALUES
   ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f'),
   ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'c80b3596-4449-4f32-b25a-a5bfd6883c4f')
 ON CONFLICT (follower_id) DO UPDATE SET
-  capital_ratio     = EXCLUDED.capital_ratio,
+  clone_factor      = EXCLUDED.clone_factor,
   max_qty_per_order = EXCLUDED.max_qty_per_order,
   enabled           = EXCLUDED.enabled,
   effective_from    = EXCLUDED.effective_from,

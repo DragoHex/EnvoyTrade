@@ -47,7 +47,7 @@ SELECT role FROM accounts WHERE id = $1;
 SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret, a.active, a.status, a.ip_address,
        a.auth_status, a.auth_error,
        g.id AS group_id, g.name AS group_name, g.master_id,
-       f.capital_ratio, f.max_qty_per_order,
+       f.clone_factor, f.max_qty_per_order,
        COALESCE(f.enabled, true) AS enabled
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
@@ -57,7 +57,7 @@ WHERE (sqlc.narg('ids')::uuid[] IS NULL OR a.id = ANY(sqlc.narg('ids')::uuid[]))
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC;
 
 -- name: UpdateFollowLinkTerms :execrows
-UPDATE follow_links SET capital_ratio = $2, max_qty_per_order = $3 WHERE follower_id = $1;
+UPDATE follow_links SET clone_factor = $2, max_qty_per_order = $3 WHERE follower_id = $1;
 
 -- name: SetAccountStatus :execrows
 UPDATE accounts SET status = $2, updated_at = now() WHERE id = $1;

@@ -72,6 +72,13 @@ func (f *fakeKiteAPI) GetUserMargins() (kiteconnect.AllMargins, error) {
 	return f.margins, nil
 }
 
+func (f *fakeKiteAPI) CancelOrder(variety string, orderID string, parentOrderID *string) (kiteconnect.OrderResponse, error) {
+	if f.placeErr != nil {
+		return kiteconnect.OrderResponse{}, f.placeErr
+	}
+	return kiteconnect.OrderResponse{OrderID: orderID}, nil
+}
+
 func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
 	api := &fakeKiteAPI{orderID: "kite-123"}
 	b := kite.NewBroker(api)
@@ -215,7 +222,7 @@ func TestBroker_GetPositions_Delegates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPositions: %v", err)
 	}
-	if len(pos.Net) != 1 || pos.Net[0].Tradingsymbol != "NIFTY26SEP24000CE" {
+	if len(pos) != 1 || pos[0].Tradingsymbol != "NIFTY26SEP24000CE" {
 		t.Fatalf("unexpected positions: %+v", pos)
 	}
 }

@@ -62,7 +62,20 @@ func (h *handlers) postAction(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"type": actionSyncPositions, "status": "accepted"})
 	case actionSquareOff:
-		writeError(w, http.StatusNotImplemented, "square_off is not implemented yet")
+		if h.squareOffSvc == nil {
+			writeError(w, http.StatusNotImplemented, "square off service not configured")
+			return
+		}
+		result, err := h.squareOffSvc.SquareOffAccount(r.Context(), id, nil)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "account not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	case actionExitOpenOrders:
 		writeError(w, http.StatusNotImplemented, "exit_open_orders is not implemented yet")
 	default:

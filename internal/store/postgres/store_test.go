@@ -107,9 +107,9 @@ func TestEnabledFollowLinks_FiltersByMasterAndEnabled(t *testing.T) {
 	otherMasterFollower := seedAccount(t, s, "follower")
 
 	links := []domain.FollowLink{
-		{FollowerID: enabledFollower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true},
-		{FollowerID: disabledFollower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: false},
-		{FollowerID: otherMasterFollower, MasterID: otherMaster, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true},
+		{FollowerID: enabledFollower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true},
+		{FollowerID: disabledFollower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: false},
+		{FollowerID: otherMasterFollower, MasterID: otherMaster, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true},
 	}
 	for _, l := range links {
 		if err := s.CreateFollowLink(ctx, l); err != nil {
@@ -703,7 +703,7 @@ func TestAccounts_ListsAllWithFollowLinkFields(t *testing.T) {
 	maxQty := 10
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
 		FollowerID: follower, MasterID: master,
-		CapitalRatio: decimal.NewFromFloat(0.5), MaxQtyPerOrder: maxQty, Enabled: true,
+		CloneFactor: decimal.NewFromFloat(0.5), MaxQtyPerOrder: maxQty, Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestAccounts_ListsAllWithFollowLinkFields(t *testing.T) {
 	if gotMaster == nil || gotFollower == nil {
 		t.Fatalf("missing rows: master=%v follower=%v", gotMaster, gotFollower)
 	}
-	if gotMaster.MasterID != nil || gotMaster.CapitalRatio != nil || gotMaster.MaxQtyPerOrder != nil {
+	if gotMaster.MasterID != nil || gotMaster.CloneFactor != nil || gotMaster.MaxQtyPerOrder != nil {
 		t.Errorf("master row should have nil group fields, got %+v", gotMaster)
 	}
 	if !gotMaster.Enabled {
@@ -737,8 +737,8 @@ func TestAccounts_ListsAllWithFollowLinkFields(t *testing.T) {
 	if gotFollower.MasterID == nil || *gotFollower.MasterID != master {
 		t.Errorf("follower MasterID = %v, want %v", gotFollower.MasterID, master)
 	}
-	if gotFollower.CapitalRatio == nil || !gotFollower.CapitalRatio.Equal(decimal.NewFromFloat(0.5)) {
-		t.Errorf("follower CapitalRatio = %v, want 0.5", gotFollower.CapitalRatio)
+	if gotFollower.CloneFactor == nil || !gotFollower.CloneFactor.Equal(decimal.NewFromFloat(0.5)) {
+		t.Errorf("follower CloneFactor = %v, want 0.5", gotFollower.CloneFactor)
 	}
 	if gotFollower.MaxQtyPerOrder == nil || *gotFollower.MaxQtyPerOrder != maxQty {
 		t.Errorf("follower MaxQtyPerOrder = %v, want %d", gotFollower.MaxQtyPerOrder, maxQty)
@@ -781,14 +781,14 @@ func TestCreateFollowLink_DuplicateFollowerReturnsErrDuplicate(t *testing.T) {
 	follower := seedAccount(t, s, "follower")
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
 		FollowerID: follower, MasterID: master,
-		CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
 
 	err := s.CreateFollowLink(ctx, domain.FollowLink{
 		FollowerID: follower, MasterID: master,
-		CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	})
 	if !errors.Is(err, domain.ErrDuplicate) {
 		t.Fatalf("CreateFollowLink duplicate follower: err = %v, want ErrDuplicate", err)
@@ -802,7 +802,7 @@ func TestUpdateFollowLinkTerms_UpdatesFields(t *testing.T) {
 	follower := seedAccount(t, s, "follower")
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
 		FollowerID: follower, MasterID: master,
-		CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
@@ -820,8 +820,8 @@ func TestUpdateFollowLinkTerms_UpdatesFields(t *testing.T) {
 		t.Fatalf("got %d accounts, want 1", len(accounts))
 	}
 	got := accounts[0]
-	if got.CapitalRatio == nil || !got.CapitalRatio.Equal(decimal.NewFromFloat(0.75)) {
-		t.Errorf("CapitalRatio = %v, want 0.75", got.CapitalRatio)
+	if got.CloneFactor == nil || !got.CloneFactor.Equal(decimal.NewFromFloat(0.75)) {
+		t.Errorf("CloneFactor = %v, want 0.75", got.CloneFactor)
 	}
 	if got.MaxQtyPerOrder == nil || *got.MaxQtyPerOrder != newMaxQty {
 		t.Errorf("MaxQtyPerOrder = %v, want %d", got.MaxQtyPerOrder, newMaxQty)
@@ -903,7 +903,7 @@ func TestDeleteAccount_ConflictWhenReferenced(t *testing.T) {
 	follower := seedAccount(t, s, "follower")
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
 		FollowerID: follower, MasterID: master,
-		CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}
@@ -933,7 +933,7 @@ func TestDeleteFollowLink_Succeeds(t *testing.T) {
 	follower := seedAccount(t, s, "follower")
 	if err := s.CreateFollowLink(ctx, domain.FollowLink{
 		FollowerID: follower, MasterID: master,
-		CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true,
+		CloneFactor: decimal.NewFromFloat(0.5), Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateFollowLink: %v", err)
 	}

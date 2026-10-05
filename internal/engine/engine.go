@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"envoytrade/internal/domain"
 
@@ -79,6 +80,18 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 		return nil
 	}
 
+	if strings.HasPrefix(fill.Tag, "sqoff") {
+		e.log().Info("engine: skipping fan-out for square-off master fill",
+			"master_id", fill.MasterID,
+			"broker_order_id", fill.BrokerOrderID,
+			"tag", fill.Tag,
+		)
+		if fill.ID > 0 {
+			_ = e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDispatched)
+		}
+		return nil
+	}
+
 	active, err := e.store.MasterActive(ctx, fill.MasterID)
 	if err != nil {
 		return fmt.Errorf("check master active: %w", err)
@@ -113,8 +126,8 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 	)
 
 	one := decimal.NewFromInt(1)
-	if link.CapitalRatio.Equal(one) {
-		// Fast-path (main flow): 1:1 ratio forwards master quantity directly.
+	if link.CloneFactor.Equal(one) {
+		// Fast-path (main flow): 1:1 clone factor forwards master quantity directly.
 		// Bypasses local DB instrument validation and calculation.
 		qty = fill.FilledQuantity
 		if link.MaxQtyPerOrder > 0 && qty > link.MaxQtyPerOrder {
@@ -124,13 +137,13 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 			reason = domain.ReasonOK
 		}
 	} else {
-		// Scaled ratio path (ratio != 1): requires exchange lot size to round down to integer lot multiples.
+		// Scaled ratio path (clone factor != 1): requires exchange lot size to round down to integer lot multiples.
 		var err error
 		lotSize, err = e.store.InstrumentLotSize(ctx, fill.Exchange, fill.Tradingsymbol)
 		if err != nil && !errors.Is(err, domain.ErrNotFound) {
 			return fmt.Errorf("lookup instrument lot size: %w", err)
 		}
-		qty, reason = domain.SizeOrder(fill.FilledQuantity, link.CapitalRatio, lotSize, link.MaxQtyPerOrder)
+		qty, reason = domain.SizeOrder(fill.FilledQuantity, link.CloneFactor, lotSize, link.MaxQtyPerOrder)
 	}
 
 	tag := domain.IdempotencyTag(fill.ID, link.FollowerID)
@@ -141,7 +154,7 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 		"intended_qty", qty,
 		"lot_size", lotSize,
 		"sizing_reason", reason,
-		"fast_path", link.CapitalRatio.Equal(one),
+		"fast_path", link.CloneFactor.Equal(one),
 	)
 
 	orderID, err := e.store.InsertFollowerOrder(ctx, domain.FollowerOrder{

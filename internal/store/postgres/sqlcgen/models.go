@@ -78,7 +78,7 @@ type AccountPosition struct {
 type FollowLink struct {
 	FollowerID     uuid.UUID
 	GroupID        uuid.UUID
-	CapitalRatio   decimal.Decimal
+	CloneFactor    decimal.Decimal
 	MaxQtyPerOrder *int32
 	Enabled        bool
 	EffectiveFrom  pgtype.Timestamptz

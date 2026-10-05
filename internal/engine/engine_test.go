@@ -144,8 +144,8 @@ func TestHandleMasterFill_FansOutToAllEnabledFollowers(t *testing.T) {
 	master := seedAccount(t, s, "master")
 	followerA := seedAccount(t, s, "follower")
 	followerB := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: followerA, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: followerB, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.25), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: followerA, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: followerB, MasterID: master, CloneFactor: decimal.NewFromFloat(0.25), Enabled: true})
 
 	fill := insertFill(t, s, master, 100)
 	disp := newFakeDispatcher()
@@ -179,7 +179,7 @@ func TestHandleMasterFill_InactiveMasterSkipsFanOutEntirely(t *testing.T) {
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true})
 	if err := s.SetAccountActive(ctx, master, false); err != nil {
 		t.Fatalf("SetAccountActive: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestHandleMasterFill_DisabledLinkGetsNoOrder(t *testing.T) {
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	disabledFollower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: disabledFollower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: false})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: disabledFollower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: false})
 
 	fill := insertFill(t, s, master, 100)
 	disp := newFakeDispatcher()
@@ -234,7 +234,7 @@ func TestHandleMasterFill_BelowOneLotCreatesRowButNotDispatched(t *testing.T) {
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
 	// ratio so small that even 100 * ratio floors to 0 given lot size 1... use lot size via fill.
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.001), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.001), Enabled: true})
 
 	fill := insertFill(t, s, master, 10) // lot size 1, ratio 0.001 -> floor(10*0.001/1) = 0
 	disp := newFakeDispatcher()
@@ -272,7 +272,7 @@ func TestHandleMasterFill_RedeliveryIsANoOp(t *testing.T) {
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true})
 
 	fill := insertFill(t, s, master, 100)
 	disp := newFakeDispatcher()
@@ -326,8 +326,8 @@ func TestHandleMasterFill_OneFollowerDeadLetteredOthersUnaffected(t *testing.T) 
 	master := seedAccount(t, s, "master")
 	blocked := seedAccount(t, s, "follower")
 	healthy := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: blocked, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: healthy, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: blocked, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: healthy, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true})
 
 	fill := insertFill(t, s, master, 100)
 	disp := newFakeDispatcher()
@@ -374,7 +374,7 @@ func TestHandleMasterFill_FnOLotSizeResolvedFromInstrumentMaster(t *testing.T) {
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(1), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1), Enabled: true})
 	seedInstrument(t, s, domain.Instrument{
 		InstrumentToken: 2, Exchange: "MCX", Tradingsymbol: "CRUDEOIL24DECFUT",
 		LotSize: 100, TickSize: decimal.NewFromFloat(1),
@@ -416,7 +416,7 @@ func TestHandleMasterFill_UnknownInstrumentIsBadInstrumentNotDispatched(t *testi
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(0.5), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(0.5), Enabled: true})
 
 	fill := domain.MasterFill{
 		MasterID: master, BrokerOrderID: uuid.NewString(), Exchange: "NFO",
@@ -467,7 +467,7 @@ func TestHandleMasterFill_OneToOneFastPath_BypassesInstrumentMaster(t *testing.T
 	ctx := context.Background()
 	master := seedAccount(t, s, "master")
 	follower := seedAccount(t, s, "follower")
-	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CapitalRatio: decimal.NewFromFloat(1), Enabled: true})
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1), Enabled: true})
 
 	// Fill on an instrument NOT seeded in the database
 	fill := domain.MasterFill{
@@ -526,7 +526,7 @@ func TestHandleMasterFill_ForceFailOneFollowerOthersUnaffected(t *testing.T) {
 	good1 := seedAccount(t, s, "follower")
 	good2 := seedAccount(t, s, "follower")
 	for _, f := range []uuid.UUID{badToken, good1, good2} {
-		seedFollowLink(t, s, domain.FollowLink{FollowerID: f, MasterID: master, CapitalRatio: decimal.NewFromFloat(1), Enabled: true})
+		seedFollowLink(t, s, domain.FollowLink{FollowerID: f, MasterID: master, CloneFactor: decimal.NewFromFloat(1), Enabled: true})
 	}
 
 	fill := insertFill(t, s, master, 10)

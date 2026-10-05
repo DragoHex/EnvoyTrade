@@ -65,6 +65,62 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 	return broker.OrderResponse{OrderID: resp.OrderID}, nil
 }
 
+// GetPositions retrieves user net positions from testbroker mapped to broker.Position.
+func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
+	pos, err := b.client.GetPositions()
+	if err != nil {
+		return nil, fmt.Errorf("testbroker get positions: %w", err)
+	}
+	out := make([]broker.Position, 0, len(pos.Net))
+	for _, p := range pos.Net {
+		out = append(out, broker.Position{
+			Exchange:      p.Exchange,
+			Tradingsymbol: p.Tradingsymbol,
+			Product:       p.Product,
+			Quantity:      p.Quantity,
+			AveragePrice:  p.AveragePrice,
+			LastPrice:     p.LastPrice,
+			M2M:           p.PnL,
+			PnL:           p.PnL,
+		})
+	}
+	return out, nil
+}
+
+// GetOpenOrders retrieves currently open orders from testbroker.
+func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
+	orders, err := b.client.GetOrders()
+	if err != nil {
+		return nil, fmt.Errorf("testbroker get orders: %w", err)
+	}
+	var out []broker.Order
+	for _, o := range orders {
+		if o.Status == sdk.OrderStatusOpen {
+			out = append(out, broker.Order{
+				OrderID:        o.OrderID,
+				Exchange:       o.Exchange,
+				Tradingsymbol:  o.Tradingsymbol,
+				Status:         o.Status,
+				Quantity:       o.Quantity,
+				FilledQuantity: o.FilledQuantity,
+			})
+		}
+	}
+	return out, nil
+}
+
+// CancelOrder cancels an open order on testbroker.
+func (b *Broker) CancelOrder(ctx context.Context, variety, orderID string) (broker.OrderResponse, error) {
+	if variety == "" {
+		variety = sdk.VarietyRegular
+	}
+	resp, err := b.client.CancelOrder(variety, orderID, nil)
+	if err != nil {
+		return broker.OrderResponse{}, fmt.Errorf("testbroker cancel order: %w", err)
+	}
+	return broker.OrderResponse{OrderID: resp.OrderID}, nil
+}
+
 // Factory implements broker.Factory for the testbroker.
 type Factory struct {
 	baseURI string

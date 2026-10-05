@@ -23,6 +23,7 @@ type routerConfig struct {
 	logger          *slog.Logger
 	syncer          PortfolioSyncer
 	tickerMgr       TickerManager
+	squareOffSvc    SquareOffService
 	staticFS        fs.FS
 }
 
@@ -58,6 +59,13 @@ func WithTickerManager(tm TickerManager) Option {
 	}
 }
 
+// WithSquareOffService configures a SquareOffService for portfolio square-off operations.
+func WithSquareOffService(svc SquareOffService) Option {
+	return func(c *routerConfig) {
+		c.squareOffSvc = svc
+	}
+}
+
 // WithLogger configures structured request logging middleware.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *routerConfig) {
@@ -75,7 +83,7 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer, tickerMgr: cfg.tickerMgr}
+	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer, tickerMgr: cfg.tickerMgr, squareOffSvc: cfg.squareOffSvc}
 
 	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", h.postLogin)
@@ -90,11 +98,13 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{id}", h.patchGroup)
 	mux.HandleFunc("DELETE /api/v1/groups/{id}", h.deleteGroup)
 	mux.HandleFunc("POST /api/v1/groups/{id}/followers", h.postGroupFollower)
+	mux.HandleFunc("POST /api/v1/groups/{id}/positions/square-off", h.postGroupSquareOff)
 	mux.HandleFunc("GET /api/v1/accounts", h.getAccounts)
 	mux.HandleFunc("POST /api/v1/accounts", h.postAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{id}", h.patchAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}", h.deleteAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}/group", h.deleteAccountGroup)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/positions/square-off", h.postAccountSquareOff)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/actions", h.postAction)
 	mux.HandleFunc("GET /api/v1/accounts/{id}/orders", h.getAccountOrders)
 	mux.HandleFunc("GET /api/v1/proxy-ips", h.getProxyIPs)
@@ -176,14 +186,16 @@ type Store interface {
 }
 
 type handlers struct {
-	store     Store
-	engine    Engine
-	syncer    PortfolioSyncer
-	tickerMgr TickerManager
+	store        Store
+	engine       Engine
+	syncer       PortfolioSyncer
+	tickerMgr    TickerManager
+	squareOffSvc SquareOffService
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }

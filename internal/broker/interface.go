@@ -9,4 +9,7 @@ import "context"
 // package (PLAN.md §1).
 type Broker interface {
 	PlaceOrder(ctx context.Context, variety string, params OrderParams) (OrderResponse, error)
+	GetPositions(ctx context.Context) ([]Position, error)
+	GetOpenOrders(ctx context.Context) ([]Order, error)
+	CancelOrder(ctx context.Context, variety, orderID string) (OrderResponse, error)
 }

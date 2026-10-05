@@ -1,9 +1,9 @@
 -- name: CreateFollowLink :exec
-INSERT INTO follow_links (follower_id, group_id, capital_ratio, max_qty_per_order, enabled)
+INSERT INTO follow_links (follower_id, group_id, clone_factor, max_qty_per_order, enabled)
 VALUES ($1, $2, $3, $4, $5);
 
 -- name: EnabledFollowLinks :many
-SELECT f.follower_id, g.id AS group_id, g.master_id, f.capital_ratio, COALESCE(f.max_qty_per_order, 0) AS max_qty_per_order, f.enabled, f.effective_from
+SELECT f.follower_id, g.id AS group_id, g.master_id, f.clone_factor, COALESCE(f.max_qty_per_order, 0) AS max_qty_per_order, f.enabled, f.effective_from
 FROM follow_links f
 JOIN groups g ON g.id = f.group_id
 WHERE g.master_id = $1 AND f.enabled = true;

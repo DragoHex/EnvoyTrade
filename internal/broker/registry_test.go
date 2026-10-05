@@ -14,6 +14,18 @@ func (d *dummyBroker) PlaceOrder(ctx context.Context, variety string, params Ord
 	return OrderResponse{OrderID: d.name + "_123"}, nil
 }
 
+func (d *dummyBroker) GetPositions(ctx context.Context) ([]Position, error) {
+	return nil, nil
+}
+
+func (d *dummyBroker) GetOpenOrders(ctx context.Context) ([]Order, error) {
+	return nil, nil
+}
+
+func (d *dummyBroker) CancelOrder(ctx context.Context, variety, orderID string) (OrderResponse, error) {
+	return OrderResponse{OrderID: orderID}, nil
+}
+
 func TestRegistry_RegisterAndCreate(t *testing.T) {
 	reg := NewRegistry()
 

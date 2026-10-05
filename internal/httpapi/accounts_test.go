@@ -107,19 +107,19 @@ func TestPatchAccount_NoRecognizedField_Returns400(t *testing.T) {
 	}
 }
 
-func TestPatchAccount_CapitalRatio_UpdatesFollowLinkTerms(t *testing.T) {
+func TestPatchAccount_CloneFactor_UpdatesFollowLinkTerms(t *testing.T) {
 	follower := uuid.New()
 	maxQty := 10
 	store := &stubStore{
 		accountRoles: map[uuid.UUID]string{follower: "follower"},
 		accounts: []domain.Account{{
 			ID: follower, Role: "follower",
-			CapitalRatio: decimalPtr("0.5"), MaxQtyPerOrder: &maxQty,
+			CloneFactor: decimalPtr("0.5"), MaxQtyPerOrder: &maxQty,
 		}},
 	}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"capitalRatio": "0.75"})
+	body, _ := json.Marshal(map[string]any{"cloneFactor": "0.75"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -131,12 +131,12 @@ func TestPatchAccount_CapitalRatio_UpdatesFollowLinkTerms(t *testing.T) {
 		t.Fatalf("UpdateFollowLinkTerms called %d times, want 1", len(store.updateFollowLinkTermsArgs))
 	}
 	call := store.updateFollowLinkTermsArgs[0]
-	if call.FollowerID != follower || call.CapitalRatio.String() != "0.75" || *call.MaxQtyPerOrder != maxQty {
-		t.Errorf("call = %+v, want follower=%v capitalRatio=0.75 maxQty=%d preserved", call, follower, maxQty)
+	if call.FollowerID != follower || call.CloneFactor.String() != "0.75" || *call.MaxQtyPerOrder != maxQty {
+		t.Errorf("call = %+v, want follower=%v cloneFactor=0.75 maxQty=%d preserved", call, follower, maxQty)
 	}
 }
 
-func TestPatchAccount_CapitalRatioOnMaster_Returns400(t *testing.T) {
+func TestPatchAccount_CloneFactorOnMaster_Returns400(t *testing.T) {
 	master := uuid.New()
 	store := &stubStore{
 		accountRoles: map[uuid.UUID]string{master: "master"},
@@ -144,7 +144,7 @@ func TestPatchAccount_CapitalRatioOnMaster_Returns400(t *testing.T) {
 	}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"capitalRatio": "0.75"})
+	body, _ := json.Marshal(map[string]any{"cloneFactor": "0.75"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+master.String(), bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -202,7 +202,7 @@ func TestGetAccounts_ReturnsAllAsJSON(t *testing.T) {
 	store := &stubStore{accounts: []domain.Account{
 		{ID: master, Role: "master", Broker: "kite", BrokerAccountID: "M1", Active: true, Enabled: true, Status: "ok"},
 		{ID: follower, Role: "follower", Broker: "kite", BrokerAccountID: "F1", Active: true, Status: "ok",
-			MasterID: &master, CapitalRatio: decimalPtr("0.5"), MaxQtyPerOrder: &maxQty, Enabled: true},
+			MasterID: &master, CloneFactor: decimalPtr("0.5"), MaxQtyPerOrder: &maxQty, Enabled: true},
 	}}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
@@ -220,10 +220,10 @@ func TestGetAccounts_ReturnsAllAsJSON(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d accounts, want 2", len(got))
 	}
-	if got[1]["masterId"] != master.String() || got[1]["capitalRatio"] != "0.5" {
+	if got[1]["masterId"] != master.String() || got[1]["cloneFactor"] != "0.5" {
 		t.Errorf("follower entry = %+v", got[1])
 	}
-	if got[0]["masterId"] != nil || got[0]["capitalRatio"] != nil {
+	if got[0]["masterId"] != nil || got[0]["cloneFactor"] != nil {
 		t.Errorf("master entry should have nil group fields, got %+v", got[0])
 	}
 }
@@ -292,7 +292,7 @@ func TestPostAccount_FollowerWithMasterID_Succeeds(t *testing.T) {
 	maxQty := 25
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678", "apiSecret": "s",
-		"capitalRatio": "0.5", "maxQtyPerOrder": maxQty, "masterId": master.String(),
+		"cloneFactor": "0.5", "maxQtyPerOrder": maxQty, "masterId": master.String(),
 		"ip": "192.168.1.100",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
@@ -306,11 +306,38 @@ func TestPostAccount_FollowerWithMasterID_Succeeds(t *testing.T) {
 		t.Fatalf("CreateFollowLink called %d times, want 1", len(store.createFollowLinkArgs))
 	}
 	link := store.createFollowLinkArgs[0]
-	if link.MasterID != master || link.MaxQtyPerOrder != maxQty || !link.CapitalRatio.Equal(decimal.RequireFromString("0.5")) {
+	if link.MasterID != master || link.MaxQtyPerOrder != maxQty || !link.CloneFactor.Equal(decimal.RequireFromString("0.5")) {
 		t.Errorf("link = %+v", link)
 	}
 	if len(store.createAccountArgs) != 1 || store.createAccountArgs[0].IPAddress != "192.168.1.100" {
 		t.Errorf("createAccountArgs = %+v, want ip 192.168.1.100", store.createAccountArgs)
+	}
+}
+
+func TestPostAccount_FollowerDefaultCloneFactor_DefaultsToOne(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	maxQty := 25
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5679", "apiSecret": "s",
+		"maxQtyPerOrder": maxQty, "masterId": master.String(),
+		"ip": "192.168.1.100",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createFollowLinkArgs) != 1 {
+		t.Fatalf("CreateFollowLink called %d times, want 1", len(store.createFollowLinkArgs))
+	}
+	link := store.createFollowLinkArgs[0]
+	if !link.CloneFactor.Equal(decimal.NewFromInt(1)) {
+		t.Errorf("link.CloneFactor = %v, want 1", link.CloneFactor)
 	}
 }
 
@@ -320,7 +347,7 @@ func TestPostAccount_FollowerMissingMasterID_Returns400(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
-		"capitalRatio": "0.5", "maxQtyPerOrder": 10,
+		"cloneFactor": "0.5", "maxQtyPerOrder": 10,
 		"ip": "192.168.1.100",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
@@ -338,7 +365,7 @@ func TestPostAccount_InvalidMasterID_Returns400(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
-		"capitalRatio": "0.5", "maxQtyPerOrder": 10,
+		"cloneFactor": "0.5", "maxQtyPerOrder": 10,
 		"ip": "192.168.1.100", "masterId": uuid.New().String(),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))

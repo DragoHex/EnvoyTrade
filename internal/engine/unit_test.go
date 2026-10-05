@@ -121,7 +121,7 @@ func TestEngine_OneToOneFastPath_DoesNotCallInstrumentLookup(t *testing.T) {
 		{
 			FollowerID:      followerID,
 			MasterID:        masterID,
-			CapitalRatio:    decimal.NewFromInt(1),
+			CloneFactor:    decimal.NewFromInt(1),
 			MaxQtyPerOrder:  0,
 			Enabled:         true,
 		},
@@ -188,7 +188,7 @@ func TestEngine_OneToOneFastPath_WithMaxQtyCap(t *testing.T) {
 		{
 			FollowerID:     followerID,
 			MasterID:       masterID,
-			CapitalRatio:   decimal.NewFromInt(1),
+			CloneFactor:   decimal.NewFromInt(1),
 			MaxQtyPerOrder: 50,
 			Enabled:        true,
 		},
@@ -242,7 +242,7 @@ func TestEngine_NonOneToOne_CallsInstrumentLookupAndSizes(t *testing.T) {
 		{
 			FollowerID:     followerID,
 			MasterID:       masterID,
-			CapitalRatio:   decimal.NewFromFloat(0.5),
+			CloneFactor:   decimal.NewFromFloat(0.5),
 			MaxQtyPerOrder: 0,
 			Enabled:        true,
 		},
@@ -301,7 +301,7 @@ func TestEngine_LimitOrder_CarriesMasterLimitPrice(t *testing.T) {
 		{
 			FollowerID:   followerID,
 			MasterID:     masterID,
-			CapitalRatio: decimal.NewFromInt(1),
+			CloneFactor: decimal.NewFromInt(1),
 			Enabled:      true,
 		},
 	}
@@ -350,7 +350,7 @@ func TestEngine_LimitOrder_ResolvesPriceFromAveragePriceWhenZero(t *testing.T) {
 		{
 			FollowerID:   followerID,
 			MasterID:     masterID,
-			CapitalRatio: decimal.NewFromInt(1),
+			CloneFactor: decimal.NewFromInt(1),
 			Enabled:      true,
 		},
 	}
@@ -396,7 +396,7 @@ func TestEngine_LimitOrder_ResolvesPriceFromRawPayloadWhenZero(t *testing.T) {
 		{
 			FollowerID:   followerID,
 			MasterID:     masterID,
-			CapitalRatio: decimal.NewFromInt(1),
+			CloneFactor: decimal.NewFromInt(1),
 			Enabled:      true,
 		},
 	}

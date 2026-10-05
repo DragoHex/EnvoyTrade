@@ -48,6 +48,7 @@ func ToMasterFill(o kiteconnect.Order, masterID uuid.UUID) domain.MasterFill {
 		Status:          o.Status,
 		OrderTimestamp:  o.OrderTimestamp.Time,
 		RawPayload:      raw,
+		Tag:             o.Tag,
 	}
 }
 

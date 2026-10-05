@@ -151,7 +151,7 @@ func TestPostGroupFollower_Succeeds(t *testing.T) {
 	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master", follower: "follower"}}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"accountId": follower.String(), "capitalRatio": "0.5", "maxQtyPerOrder": 10})
+	body, _ := json.Marshal(map[string]any{"accountId": follower.String(), "cloneFactor": "0.5", "maxQtyPerOrder": 10})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -174,7 +174,7 @@ func TestPostGroupFollower_MasterIDNotAMaster_Returns400(t *testing.T) {
 	store := &stubStore{accountRoles: map[uuid.UUID]string{notMaster: "follower", follower: "follower"}}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"accountId": follower.String(), "capitalRatio": "0.5"})
+	body, _ := json.Marshal(map[string]any{"accountId": follower.String(), "cloneFactor": "0.5"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+notMaster.String()+"/followers", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -190,7 +190,7 @@ func TestPostGroupFollower_AccountIDNotAFollower_Returns400(t *testing.T) {
 	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master", otherMaster: "master"}}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"accountId": otherMaster.String(), "capitalRatio": "0.5"})
+	body, _ := json.Marshal(map[string]any{"accountId": otherMaster.String(), "cloneFactor": "0.5"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -209,7 +209,7 @@ func TestPostGroupFollower_AlreadyAttached_Returns409(t *testing.T) {
 	}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
 
-	body, _ := json.Marshal(map[string]any{"accountId": follower.String(), "capitalRatio": "0.5"})
+	body, _ := json.Marshal(map[string]any{"accountId": follower.String(), "cloneFactor": "0.5"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

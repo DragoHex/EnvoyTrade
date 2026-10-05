@@ -18,7 +18,7 @@ import (
 // AccountsStore is what the Accounts page needs: the CopyToggle/Stop
 // Copy field (enabled), the master Stop/Start field (active), full
 // account listing/creation/deletion, and the follow-link terms edit
-// (capitalRatio, maxQtyPerOrder, status).
+// (cloneFactor, maxQtyPerOrder, status).
 type AccountsStore interface {
 	SetFollowLinkEnabled(ctx context.Context, followerID uuid.UUID, enabled bool) error
 	SetAccountActive(ctx context.Context, id uuid.UUID, active bool) error
@@ -32,7 +32,7 @@ type AccountsStore interface {
 	SetAccountAPISecret(ctx context.Context, id uuid.UUID, apiSecret string) error
 	SetAccountEncryptedCredentials(ctx context.Context, id uuid.UUID, encPassword, encTotpSecret string) error
 	CreateFollowLink(ctx context.Context, link domain.FollowLink) error
-	UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, capitalRatio decimal.Decimal, maxQtyPerOrder *int) error
+	UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, cloneFactor decimal.Decimal, maxQtyPerOrder *int) error
 	SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error
@@ -51,7 +51,7 @@ type accountResponse struct {
 	GroupID         *string `json:"groupId"`
 	GroupName       *string `json:"groupName"`
 	MasterID        *string `json:"masterId"`
-	CapitalRatio    *string `json:"capitalRatio"`
+	CloneFactor     *string `json:"cloneFactor"`
 	MaxQtyPerOrder  *int    `json:"maxQtyPerOrder"`
 	Enabled         bool    `json:"enabled"`
 	Active          bool    `json:"active"`
@@ -101,9 +101,9 @@ func toAccountResponse(a domain.Account) accountResponse {
 		s := a.MasterID.String()
 		resp.MasterID = &s
 	}
-	if a.CapitalRatio != nil {
-		s := a.CapitalRatio.String()
-		resp.CapitalRatio = &s
+	if a.CloneFactor != nil {
+		s := a.CloneFactor.String()
+		resp.CloneFactor = &s
 	}
 	return resp
 }
@@ -168,6 +168,7 @@ type postAccountRequest struct {
 	TotpSecret      *string `json:"totpSecret"`
 	IP              *string `json:"ip"`
 	IPAddress       *string `json:"ipAddress"`
+	CloneFactor     *string `json:"cloneFactor"`
 	CapitalRatio    *string `json:"capitalRatio"`
 	MaxQtyPerOrder  *int    `json:"maxQtyPerOrder"`
 	GroupID         *string `json:"groupId"`
@@ -222,19 +223,25 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var capitalRatio decimal.Decimal
+	var cloneFactor decimal.Decimal = decimal.NewFromInt(1)
 	var masterID uuid.UUID
 	var groupID uuid.UUID
 	if req.Role == "follower" {
-		if req.CapitalRatio == nil || req.MaxQtyPerOrder == nil || (req.MasterID == nil && req.GroupID == nil) {
-			writeError(w, http.StatusBadRequest, "capitalRatio, maxQtyPerOrder, and masterId or groupId are required for a follower account")
+		if req.MaxQtyPerOrder == nil || (req.MasterID == nil && req.GroupID == nil) {
+			writeError(w, http.StatusBadRequest, "maxQtyPerOrder, and masterId or groupId are required for a follower account")
 			return
 		}
-		var err error
-		capitalRatio, err = decimal.NewFromString(*req.CapitalRatio)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid capitalRatio")
-			return
+		rawCF := req.CloneFactor
+		if rawCF == nil {
+			rawCF = req.CapitalRatio
+		}
+		if rawCF != nil && strings.TrimSpace(*rawCF) != "" {
+			var err error
+			cloneFactor, err = decimal.NewFromString(strings.TrimSpace(*rawCF))
+			if err != nil || cloneFactor.Sign() <= 0 {
+				writeError(w, http.StatusBadRequest, "invalid cloneFactor")
+				return
+			}
 		}
 		if req.GroupID != nil && *req.GroupID != "" {
 			groupID, err = uuid.Parse(*req.GroupID)
@@ -328,7 +335,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			FollowerID:     id,
 			GroupID:        groupID,
 			MasterID:       masterID,
-			CapitalRatio:   capitalRatio,
+			CloneFactor:    cloneFactor,
 			MaxQtyPerOrder: maxQty,
 			Enabled:        true,
 		}
@@ -344,8 +351,8 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			groupIDStr := groupID.String()
 			resp.GroupID = &groupIDStr
 		}
-		capitalRatioStr := capitalRatio.String()
-		resp.CapitalRatio = &capitalRatioStr
+		cloneFactorStr := cloneFactor.String()
+		resp.CloneFactor = &cloneFactorStr
 		resp.MaxQtyPerOrder = req.MaxQtyPerOrder
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -355,6 +362,7 @@ type patchAccountRequest struct {
 	Name           *string `json:"name"`
 	Enabled        *bool   `json:"enabled"`
 	Active         *bool   `json:"active"`
+	CloneFactor    *string `json:"cloneFactor"`
 	CapitalRatio   *string `json:"capitalRatio"`
 	MaxQtyPerOrder *int    `json:"maxQtyPerOrder"`
 	Status         *string `json:"status"`
@@ -427,7 +435,7 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		resp["enabled"] = *req.Enabled
 		updated = true
 	}
-	if req.CapitalRatio != nil || req.MaxQtyPerOrder != nil {
+	if req.CloneFactor != nil || req.CapitalRatio != nil || req.MaxQtyPerOrder != nil {
 		linkResp, ok := h.applyFollowLinkTerms(w, r, id, req)
 		if !ok {
 			return
@@ -534,13 +542,13 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !updated {
-		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"capitalRatio\", \"maxQtyPerOrder\", \"status\", \"ip\", \"apiKey\", \"apiSecret\", \"password\", or \"totpSecret\" is required")
+		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"cloneFactor\", \"maxQtyPerOrder\", \"status\", \"ip\", \"apiKey\", \"apiSecret\", \"password\", or \"totpSecret\" is required")
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// applyFollowLinkTerms handles the capitalRatio/maxQtyPerOrder half of
+// applyFollowLinkTerms handles the cloneFactor/maxQtyPerOrder half of
 // PATCH /accounts/{id} — the Accounts page's edit form. It fetches the
 // account's current follow-link fields first so a partial body (just
 // one of the two) doesn't clobber the other.
@@ -556,21 +564,25 @@ func (h *handlers) applyFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 	}
 	current := accounts[0]
 	if current.Role == "master" {
-		writeError(w, http.StatusBadRequest, "capitalRatio/maxQtyPerOrder only apply to follower accounts")
+		writeError(w, http.StatusBadRequest, "cloneFactor/maxQtyPerOrder only apply to follower accounts")
 		return nil, false
 	}
 
-	capitalRatio := current.CapitalRatio
-	if req.CapitalRatio != nil {
-		parsed, err := decimal.NewFromString(*req.CapitalRatio)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid capitalRatio")
+	cloneFactor := current.CloneFactor
+	cfInput := req.CloneFactor
+	if cfInput == nil {
+		cfInput = req.CapitalRatio
+	}
+	if cfInput != nil {
+		parsed, err := decimal.NewFromString(*cfInput)
+		if err != nil || parsed.Sign() <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid cloneFactor")
 			return nil, false
 		}
-		capitalRatio = &parsed
+		cloneFactor = &parsed
 	}
-	if capitalRatio == nil {
-		writeError(w, http.StatusBadRequest, "account has no capitalRatio to update")
+	if cloneFactor == nil {
+		writeError(w, http.StatusBadRequest, "account has no cloneFactor to update")
 		return nil, false
 	}
 	maxQtyPerOrder := current.MaxQtyPerOrder
@@ -578,13 +590,13 @@ func (h *handlers) applyFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 		maxQtyPerOrder = req.MaxQtyPerOrder
 	}
 
-	if writePatchStoreError(w, h.store.UpdateFollowLinkTerms(r.Context(), id, *capitalRatio, maxQtyPerOrder)) {
+	if writePatchStoreError(w, h.store.UpdateFollowLinkTerms(r.Context(), id, *cloneFactor, maxQtyPerOrder)) {
 		return nil, false
 	}
 
 	resp := map[string]any{}
-	if req.CapitalRatio != nil {
-		resp["capitalRatio"] = *req.CapitalRatio
+	if cfInput != nil {
+		resp["cloneFactor"] = *cfInput
 	}
 	if req.MaxQtyPerOrder != nil {
 		resp["maxQtyPerOrder"] = *req.MaxQtyPerOrder
