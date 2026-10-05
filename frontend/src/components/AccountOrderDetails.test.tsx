@@ -610,8 +610,8 @@ it('locks column header widths with fixed table layout so headers do not shift a
     expect(screen.getByRole('columnheader', { name: 'Instrument' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Quantity' })).toBeInTheDocument()
 
-    // And EmptyState is rendered in the body
-    expect(screen.getByText('No data')).toBeInTheDocument()
+    // And EmptyState is rendered in the body after data resolves
+    expect(await screen.findByText('No data')).toBeInTheDocument()
     const emptyCell = screen.getByText('No data').closest('td')
     expect(emptyCell).toHaveAttribute('colspan', '8')
   })
@@ -847,7 +847,7 @@ it('locks column header widths with fixed table layout so headers do not shift a
       expect(screen.getByText('3600.00')).toBeInTheDocument()
       expect(screen.queryByText('3550.00')).not.toBeInTheDocument()
 
-      // The tr DOM node is STILL the exact same node (Index kept the element, updated children)
+      // The tr DOM node is STILL the exact same node (reconcile and For kept the element)
       expect(row?.isConnected).toBe(true)
       expect(screen.getByText('TCS').closest('tr')).toBe(row)
 
@@ -857,4 +857,296 @@ it('locks column header widths with fixed table layout so headers do not shift a
       vi.useRealTimers()
     }
   })
+
+  it('preserves existing DOM row nodes and only mounts new row nodes when items are added (Point 5)', async () => {
+    vi.useFakeTimers()
+    let positionsList = [
+      { product: 'CNC', instrument: 'TCS', qty: 10, avgPrice: '3500.00', ltp: '3550.00', mtm: '500.00', action: 'exit' },
+    ]
+
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockImplementation(async () => ({
+      summary: { netQty: 10, openPositionsCount: positionsList.length, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 500, realizedPnl: 0, accountValue: 10000, status: 'online' },
+      counts: { openPositions: positionsList.length, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: positionsList.length, totalPages: 1 },
+      openPositions: positionsList,
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }))
+
+    try {
+      render(() => <AccountOrderDetails accountId="acc-diff-add-row" />)
+      expect(await screen.findByText('TCS')).toBeInTheDocument()
+
+      const tcsRow = screen.getByText('TCS').closest('tr')
+      expect(tcsRow).toBeInTheDocument()
+
+      // Add a new position row
+      positionsList = [
+        { product: 'CNC', instrument: 'TCS', qty: 10, avgPrice: '3500.00', ltp: '3550.00', mtm: '500.00', action: 'exit' },
+        { product: 'CNC', instrument: 'INFOSYS', qty: 5, avgPrice: '1500.00', ltp: '1520.00', mtm: '100.00', action: 'exit' },
+      ]
+
+      await vi.advanceTimersByTimeAsync(7000)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(2)
+
+      // Both items are in the document
+      expect(screen.getByText('TCS')).toBeInTheDocument()
+      expect(screen.getByText('INFOSYS')).toBeInTheDocument()
+
+      // Existing TCS row DOM node was preserved (NOT remounted)
+      expect(tcsRow?.isConnected).toBe(true)
+      expect(screen.getByText('TCS').closest('tr')).toBe(tcsRow)
+
+      // New INFOSYS row is mounted
+      const infyRow = screen.getByText('INFOSYS').closest('tr')
+      expect(infyRow).toBeInTheDocument()
+      expect(infyRow).not.toBe(tcsRow)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('strictly isolates state between multiple concurrently mounted AccountOrderDetails instances', async () => {
+    vi.useFakeTimers()
+    const acc1Data: api.AccountOrdersResponse = {
+      summary: { netQty: 10, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 500, realizedPnl: 0, accountValue: 100000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'TCS', qty: 10, avgPrice: '3500.00', ltp: '3550.00', mtm: '500.00', action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    const acc2Data: api.AccountOrdersResponse = {
+      summary: { netQty: 50, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 250, realizedPnl: 0, accountValue: 50000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'INFOSYS', qty: 50, avgPrice: '1500.00', ltp: '1520.00', mtm: '250.00', action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    vi.spyOn(api, 'getAccountOrders').mockImplementation(async (accountId) => {
+      if (accountId === 'acc-1') return JSON.parse(JSON.stringify(acc1Data))
+      if (accountId === 'acc-2') return JSON.parse(JSON.stringify(acc2Data))
+      return JSON.parse(JSON.stringify(acc1Data))
+    })
+
+    try {
+      const { container } = render(() => (
+        <div>
+          <div data-testid="wrapper-acc-1">
+            <AccountOrderDetails accountId="acc-1" accountName="Account 1" />
+          </div>
+          <div data-testid="wrapper-acc-2">
+            <AccountOrderDetails accountId="acc-2" accountName="Account 2" />
+          </div>
+        </div>
+      ))
+
+      const wrap1 = container.querySelector('[data-testid="wrapper-acc-1"]')!
+      const wrap2 = container.querySelector('[data-testid="wrapper-acc-2"]')!
+
+      // Wait for initial render of Acc 1 and Acc 2
+      expect(await screen.findByText('TCS')).toBeInTheDocument()
+      expect(await screen.findByText('INFOSYS')).toBeInTheDocument()
+
+      expect(wrap1.textContent).toContain('TCS')
+      expect(wrap1.textContent).not.toContain('INFOSYS')
+      expect(wrap2.textContent).toContain('INFOSYS')
+      expect(wrap2.textContent).not.toContain('TCS')
+
+      // Acc 1 should show Net Qty 10
+      expect(wrap1.querySelector('.summary-metric-item')?.textContent).toContain('10')
+      // Acc 2 should show Net Qty 50
+      expect(wrap2.querySelector('.summary-metric-item')?.textContent).toContain('50')
+
+      // Now update Acc 1's data on subsequent fetch
+      acc1Data.openPositions = [{ product: 'CNC', instrument: 'TCS-NEW', qty: 20, avgPrice: '3600.00', ltp: '3650.00', mtm: '1000.00', action: 'exit' }]
+      acc1Data.summary.netQty = 20
+
+      await vi.advanceTimersByTimeAsync(7000)
+
+      // Acc 1 should update to TCS-NEW
+      expect(wrap1.textContent).toContain('TCS-NEW')
+
+      // Acc 2 MUST NOT be affected or overwritten by Acc 1's data
+      expect(wrap2.textContent).toContain('INFOSYS')
+      expect(wrap2.textContent).not.toContain('TCS-NEW')
+      expect(wrap2.textContent).not.toContain('TCS')
+      expect(wrap2.querySelector('.summary-metric-item')?.textContent).toContain('50')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not wipe other tabs cached data when fetching a single tab', async () => {
+    const openPosData: api.AccountOrdersResponse = {
+      summary: { netQty: 10, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 500, realizedPnl: 0, accountValue: 100000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 1, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'TCS-PERSIST', qty: 10, avgPrice: '3500.00', ltp: '3550.00', mtm: '500.00', action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    const holdingsData: api.AccountOrdersResponse = {
+      summary: { netQty: 10, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 500, realizedPnl: 0, accountValue: 100000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 1, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'holdings', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [{ instrument: 'RELIANCE-HOLD', sellableQuantity: 15, buyAveragePrice: '2500.00', ltp: '2600.00', pnl: '1500.00', action: 'exit' }],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    vi.spyOn(api, 'getAccountOrders').mockImplementation(async (_accId, tab) => {
+      if (tab === 'holdings') return holdingsData
+      return openPosData
+    })
+
+    const { getByRole, findByText, getByText } = render(() => <AccountOrderDetails accountId="acc-tab-persist" />)
+    expect(await findByText('TCS-PERSIST')).toBeInTheDocument()
+
+    // Switch to holdings: fetch happens for holdings
+    fireEvent.click(getByRole('tab', { name: /Holding/i }))
+    expect(await findByText('RELIANCE-HOLD')).toBeInTheDocument()
+
+    // Switch back to open positions: TCS-PERSIST should still be visible without blanking
+    fireEvent.click(getByRole('tab', { name: /Open Position/i }))
+    expect(getByText('TCS-PERSIST')).toBeInTheDocument()
+  })
+
+  it('refetches data when clicking on the currently active tab', async () => {
+    let callCount = 0
+    vi.spyOn(api, 'getAccountOrders').mockImplementation(async () => {
+      callCount++
+      return {
+        accountId: 'acc-refetch-active',
+        summary: { netQty: callCount * 10, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+        counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+        pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+        openPositions: [{ product: 'CNC', instrument: `INST-${callCount}`, qty: 10, avgPrice: '100', ltp: '100', mtm: '0', action: 'exit' }],
+        closedPositions: [],
+        holdings: [],
+        openOrders: [],
+        closedOrders: [],
+        rejectedOrders: [],
+      }
+    })
+
+    const { getByRole, findByText } = render(() => <AccountOrderDetails accountId="acc-refetch-active" />)
+    expect(await findByText('INST-1')).toBeInTheDocument()
+    expect(callCount).toBe(1)
+
+    // Click on the same active tab: Open Position
+    fireEvent.click(getByRole('tab', { name: /Open Position/i }))
+
+    // Must trigger a refetch and display updated data INST-2
+    expect(await findByText('INST-2')).toBeInTheDocument()
+    expect(callCount).toBe(2)
+  })
+
+  it('discards responses intended for a different account ID', async () => {
+    const wrongAccountData: api.AccountOrdersResponse = {
+      accountId: 'DIFFERENT-ACCOUNT',
+      summary: { netQty: 999, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'WRONG-ACCOUNT-POS', qty: 999, avgPrice: '100', ltp: '100', mtm: '0', action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue(wrongAccountData)
+
+    const { queryByText } = render(() => <AccountOrderDetails accountId="CORRECT-ACCOUNT" />)
+
+    // Wait a tick for async resolution
+    await new Promise((r) => setTimeout(r, 50))
+
+    // WRONG-ACCOUNT-POS must NOT be rendered because account ID doesn't match!
+    expect(queryByText('WRONG-ACCOUNT-POS')).not.toBeInTheDocument()
+  })
+
+  it('does not flash "No data" empty state while data is loading for a newly selected tab', async () => {
+    let resolveTabPromise: (data: api.AccountOrdersResponse) => void
+    const initialData: api.AccountOrdersResponse = {
+      accountId: 'acc-empty-flash-test',
+      summary: {
+        netQty: 10,
+        openPositionsCount: 1,
+        closedPositionsCount: 0,
+        pendingOrdersCount: 0,
+        totalMtm: 100,
+        realizedPnl: 0,
+        accountValue: 10000,
+        status: 'online',
+      },
+      counts: {
+        openPositions: 1,
+        closedPositions: 0,
+        holdings: 0,
+        openOrders: 0,
+        closedOrders: 0,
+        rejectedOrders: 0,
+      },
+      openPositions: [{ product: 'MIS', instrument: 'NIFTY-INITIAL', qty: 50, avgPrice: '100', ltp: '105', mtm: '250', action: 'exit' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    }
+
+    let callCount = 0
+    vi.spyOn(api, 'getAccountOrders').mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve(initialData)
+      return new Promise((resolve) => {
+        resolveTabPromise = resolve
+      })
+    })
+
+    render(() => <AccountOrderDetails accountId="acc-empty-flash-test" />)
+
+    // Wait for initial load
+    expect(await screen.findByText('NIFTY-INITIAL')).toBeInTheDocument()
+
+    // Switch to Closed Position tab (which currently has 0 items and pending fetch)
+    fireEvent.click(screen.getByRole('tab', { name: /Closed Position/i }))
+
+    // While fetch is in flight, "No data" MUST NOT be rendered
+    expect(screen.queryByText('No data')).not.toBeInTheDocument()
+
+    // Resolve fetch with 0 closed positions
+    resolveTabPromise!({
+      ...initialData,
+      pagination: { tab: 'closed_positions', page: 1, limit: 10, totalCount: 0, totalPages: 1 },
+      closedPositions: [],
+    })
+
+    // Now that fetch completed, "No data" should be displayed
+    expect(await screen.findByText('No data')).toBeInTheDocument()
+  })
 });
+
+
+
