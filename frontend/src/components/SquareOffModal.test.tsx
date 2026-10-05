@@ -26,7 +26,7 @@ describe('SquareOffModal', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('renders cluster warning when target is group', async () => {
+  it('renders cluster info tooltip when target is group', async () => {
     vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
       summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
       openPositions: [],
@@ -42,11 +42,16 @@ describe('SquareOffModal', () => {
     ))
 
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByText('Group 1')).toBeInTheDocument()
-    expect(screen.getByText(/Master square-off will cascade to all active followers/)).toBeInTheDocument()
+    expect(screen.getByText('Group: Group 1')).toBeInTheDocument()
+    const infoTrigger = screen.getByLabelText('Info')
+    expect(infoTrigger).toHaveClass('tooltip-danger')
+    expect(infoTrigger).toHaveAttribute(
+      'data-tooltip',
+      expect.stringContaining('Master square-off will cascade to all active followers')
+    )
   })
 
-  it('renders isolation warning when target is follower account', async () => {
+  it('renders isolation info tooltip when target is follower account', async () => {
     vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
       summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
       openPositions: [],
@@ -62,8 +67,13 @@ describe('SquareOffModal', () => {
     ))
 
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByText('Follower 1')).toBeInTheDocument()
-    expect(screen.getByText(/Only this follower account will be squared off/)).toBeInTheDocument()
+    expect(screen.getByText('Follower: Follower 1')).toBeInTheDocument()
+    const infoTrigger = screen.getByLabelText('Info')
+    expect(infoTrigger).toHaveClass('tooltip-warning')
+    expect(infoTrigger).toHaveAttribute(
+      'data-tooltip',
+      expect.stringContaining('Only this follower account will be squared off')
+    )
   })
 
   it('renders open positions checklist and supports selective symbol square off', async () => {
@@ -101,8 +111,8 @@ describe('SquareOffModal', () => {
 
     expect(screen.getByText('1 of 2 selected')).toBeInTheDocument()
 
-    // Click confirm
-    await userEvent.click(screen.getByText('Confirm'))
+    // Click Sq-off button
+    await userEvent.click(screen.getByText('Sq-off'))
     expect(onConfirm).toHaveBeenCalledWith(['NIFTY26OCTFUT'])
   })
 

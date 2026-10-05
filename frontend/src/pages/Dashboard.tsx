@@ -6,6 +6,8 @@ import {
   postAction,
   squareOffAccount,
   squareOffGroup,
+  rebalanceGroup,
+  rebalanceAccount,
   type ActionType,
 } from '../api'
 import { GroupCard } from '../components/GroupCard'
@@ -57,6 +59,22 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
     }
   }
 
+  const onRebalanceGroup = async (groupId: string, followerIds?: string[]) => {
+    try {
+      await rebalanceGroup(groupId, followerIds ? { follower_ids: followerIds } : undefined)
+    } finally {
+      refetch()
+    }
+  }
+
+  const onRebalanceAccount = async (accountId: string) => {
+    try {
+      await rebalanceAccount(accountId)
+    } finally {
+      refetch()
+    }
+  }
+
   // Non-keyed Show (not keyed function child, and not Suspense) here on purpose:
   // createResource keeps the last resolved value while refetch() is in flight,
   // and non-keyed Show evaluates truthiness without disposing or remounting children,
@@ -72,6 +90,8 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
         onAction={onAction}
         onSquareOffGroup={onSquareOffGroup}
         onSquareOffAccount={onSquareOffAccount}
+        onRebalanceGroup={onRebalanceGroup}
+        onRebalanceAccount={onRebalanceAccount}
       />
     </Show>
   )

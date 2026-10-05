@@ -17,6 +17,7 @@ export function AccountTable(props: {
     availableCash?: number | string
     availableMargin?: number | string
     groupId?: string
+    groupName?: string
   }
   followers: GroupFollower[]
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
@@ -24,6 +25,8 @@ export function AccountTable(props: {
   onAction: (accountId: string, type: ActionType) => Promise<void>
   onSquareOffGroup?: (groupId: string, symbols?: string[]) => Promise<void>
   onSquareOffAccount?: (accountId: string, symbols?: string[]) => Promise<void>
+  onRebalanceGroup?: (groupId: string, followerIds?: string[]) => Promise<void>
+  onRebalanceAccount?: (accountId: string) => Promise<void>
 }) {
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
 
@@ -81,10 +84,17 @@ export function AccountTable(props: {
             availableMargin: props.master.availableMargin,
           }}
           isMaster
+          targetGroupId={props.master.groupId || props.master.masterId}
+          targetGroupName={props.master.groupName}
           actionsDisabled={!props.master.active}
           toggleDisabled={togglingId() === props.master.masterId}
           onToggleCopy={handleToggleMaster}
-          onRebalance={() => props.onAction(props.master.masterId, 'rebalance')}
+          onRebalance={(followerIds) => {
+            if (props.onRebalanceGroup) {
+              return props.onRebalanceGroup(props.master.groupId || props.master.masterId, followerIds)
+            }
+            return props.onAction(props.master.masterId, 'rebalance')
+          }}
           onSquareOff={(symbols) => {
             if (props.onSquareOffGroup) {
               return props.onSquareOffGroup(props.master.groupId || props.master.masterId, symbols)
@@ -105,7 +115,12 @@ export function AccountTable(props: {
               actionsDisabled={!props.master.active || !f().enabled}
               toggleDisabled={!props.master.active || togglingId() === f().accountId}
               onToggleCopy={(next) => handleToggleFollower(f().accountId, next)}
-              onRebalance={() => props.onAction(f().accountId, 'rebalance')}
+              onRebalance={() => {
+                if (props.onRebalanceAccount) {
+                  return props.onRebalanceAccount(f().accountId)
+                }
+                return props.onAction(f().accountId, 'rebalance')
+              }}
               onSquareOff={(symbols) => {
                 if (props.onSquareOffAccount) {
                   return props.onSquareOffAccount(f().accountId, symbols)
