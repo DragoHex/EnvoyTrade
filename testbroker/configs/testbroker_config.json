@@ -75,6 +75,12 @@
       "api_secret": "secret_follow02d",
       "access_token": "token_follow02d",
       "role": "follower"
+    },
+    "NEWFOLLOW01": {
+      "api_key": "key_newfollow01",
+      "api_secret": "secret_newfollow01",
+      "access_token": "token_newfollow01",
+      "role": "follower"
     }
   },
   "instruments": [

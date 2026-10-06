@@ -10,6 +10,8 @@ export function GroupCard(props: {
   onAction: (accountId: string, type: ActionType) => Promise<void>
   onSquareOffGroup?: (groupId: string, symbols?: string[]) => Promise<void>
   onSquareOffAccount?: (accountId: string, symbols?: string[]) => Promise<void>
+  onRebalanceGroup?: (groupId: string, followerIds?: string[]) => Promise<void>
+  onRebalanceAccount?: (accountId: string) => Promise<void>
 }) {
   return (
     <section data-testid="group-card">
@@ -21,6 +23,7 @@ export function GroupCard(props: {
           masterId: props.detail.masterId,
           groupId: props.detail.id,
           name: props.detail.masterName || props.detail.name || '',
+          groupName: props.detail.name,
           brokerAccountId: props.detail.masterAccountId,
           status: props.status,
           active: props.detail.masterActive,
@@ -38,6 +41,8 @@ export function GroupCard(props: {
         onAction={props.onAction}
         onSquareOffGroup={props.onSquareOffGroup}
         onSquareOffAccount={props.onSquareOffAccount}
+        onRebalanceGroup={props.onRebalanceGroup}
+        onRebalanceAccount={props.onRebalanceAccount}
       />
     </section>
   )

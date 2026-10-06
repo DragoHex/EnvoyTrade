@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"envoytrade/internal/broker"
+	"envoytrade/internal/domain"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
@@ -24,17 +25,26 @@ type API interface {
 // Broker adapts Zerodha's Kite Connect Client to the broker-agnostic
 // broker.Broker interface (PLAN.md §1).
 type Broker struct {
-	api API
+	api     API
+	proxied bool
 }
 
 // NewBroker wraps an API implementation (e.g. *kiteconnect.Client).
-func NewBroker(api API) *Broker {
-	return &Broker{api: api}
+func NewBroker(api API, proxied bool) *Broker {
+	return &Broker{api: api, proxied: proxied}
+}
+
+// IsProxied reports whether this broker instance is routed through a dedicated proxy.
+func (b *Broker) IsProxied() bool {
+	return b.proxied
 }
 
 // PlaceOrder translates broker.OrderParams to kiteconnect.OrderParams
-// and delegates to the underlying API.
+// and delegates to the underlying API. Order placement must go via proxy.
 func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.OrderParams) (broker.OrderResponse, error) {
+	if !b.proxied {
+		return broker.OrderResponse{}, fmt.Errorf("kite place order: %w", domain.ErrUnproxiedNotAllowed)
+	}
 	if variety == "" {
 		variety = kiteconnect.VarietyRegular
 	}
@@ -122,8 +132,11 @@ func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
 	return out, nil
 }
 
-// CancelOrder cancels an open order on the broker.
+// CancelOrder cancels an open order on the broker. Cancellation must go via proxy.
 func (b *Broker) CancelOrder(ctx context.Context, variety, orderID string) (broker.OrderResponse, error) {
+	if !b.proxied {
+		return broker.OrderResponse{}, fmt.Errorf("kite cancel order: %w", domain.ErrUnproxiedNotAllowed)
+	}
 	if variety == "" {
 		variety = kiteconnect.VarietyRegular
 	}

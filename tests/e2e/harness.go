@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -28,6 +27,8 @@ import (
 const (
 	Master01ID  = "f6e70723-b904-4427-83ee-a85771dee2e4"
 	Master02ID  = "c80b3596-4449-4f32-b25a-a5bfd6883c4f"
+	Group01ID   = "b0000000-0000-0000-0000-000000000001"
+	Group02ID   = "b0000000-0000-0000-0000-000000000002"
 	Follow01AID = "a5183e89-6cb2-4d32-91a2-6dc525570185"
 	Follow01BID = "5894c29d-7740-4494-9c98-c9d59d1364bc"
 	Follow01CID = "18dfc57d-0f23-49af-8ccd-1c0edcbe4788"
@@ -92,7 +93,7 @@ type Harness struct {
 func NewHarness(t *testing.T) *Harness {
 	envoyURL := os.Getenv("ENVOY_URL")
 	if envoyURL == "" {
-		envoyURL = "http://localhost:8080"
+		envoyURL = "http://localhost:8085"
 	}
 	tbURL := os.Getenv("TESTBROKER_URL")
 	if tbURL == "" {
@@ -203,11 +204,15 @@ func (h *Harness) ensureServicesRunning() {
 	// 2. Check EnvoyTrade Server
 	if !isReachable(h.EnvoyURL + "/healthz") {
 		h.t.Logf("EnvoyTrade not running on %s, starting subprocess...", h.EnvoyURL)
+		serverPort := "8085"
+		if u, err := url.Parse(h.EnvoyURL); err == nil && u.Port() != "" {
+			serverPort = u.Port()
+		}
 		serverCmd := exec.Command("go", "run", "./cmd/server")
 		serverCmd.Dir = rootDir
 		serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		serverCmd.Env = append(os.Environ(),
-			"PORT=8080",
+			"PORT="+serverPort,
 			"DATABASE_URL="+h.DatabaseURL,
 			"ENCRYPTION_KEY=envoytrade-e2e-encryption-key-32b",
 			"TESTBROKER_URL="+h.TestBrokerURL,
@@ -360,16 +365,13 @@ func (h *Harness) WaitForFollowerOrder(ctx context.Context, followerID, brokerOr
 }
 
 func isReachable(rawURL string) bool {
-	u, err := url.Parse(rawURL)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		return false
 	}
-	conn, err := net.DialTimeout("tcp", u.Host, 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
+	_ = resp.Body.Close()
+	return resp.StatusCode < 500
 }
 
 func waitForURL(t *testing.T, targetURL string, timeout time.Duration) {

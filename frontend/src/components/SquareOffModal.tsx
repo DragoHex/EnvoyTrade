@@ -1,6 +1,6 @@
 import { createSignal, createResource, createEffect, For, Show } from 'solid-js'
 import { getAccountOrders, squareOffAccount, squareOffGroup } from '../api'
-import { SyncIcon } from './icons'
+import { SyncIcon, CropSquareIcon, InfoIcon } from './icons'
 
 export interface SquareOffModalTarget {
   type: 'group' | 'account'
@@ -123,27 +123,28 @@ export function SquareOffModal(props: SquareOffModalProps) {
       >
         <div class="confirm-modal square-off-modal" onClick={(e) => e.stopPropagation()}>
           <div class="square-off-modal-header">
-            <h3>Square Off Positions</h3>
-            <span class="target-name">{targetDisplayName()}</span>
-          </div>
-
-          <div
-            class={`square-off-warning ${
-              props.target!.type === 'group' ? 'warning-group' : 'warning-account'
-            }`}
-          >
-            <Show
-              when={props.target!.type === 'group'}
-              fallback={
-                <span>
-                  Only this follower account will be squared off. Master and other follower positions remain untouched.
-                </span>
-              }
-            >
-              <span>
-                Master square-off will cascade to all active followers in this group. Open limit orders will be cancelled and positions flattened.
+            <div class="header-title-row">
+              <h3>Square Off Positions</h3>
+              <CropSquareIcon class="square-off-header-icon" />
+            </div>
+            <div class="target-name-row">
+              <span class="target-name">
+                {props.target!.type === 'group' ? `Group: ${targetDisplayName()}` : `Follower: ${targetDisplayName()}`}
               </span>
-            </Show>
+              <span
+                class={`info-tooltip-trigger ${
+                  props.target!.type === 'group' ? 'tooltip-danger' : 'tooltip-warning'
+                }`}
+                data-tooltip={
+                  props.target!.type === 'group'
+                    ? "Master square-off will cascade to all active followers in this group. Open limit orders will be cancelled and positions flattened."
+                    : "Only this follower account will be squared off. Master and other follower positions remain untouched."
+                }
+                aria-label="Info"
+              >
+                <InfoIcon size={14} />
+              </span>
+            </div>
           </div>
 
           <Show when={error()}>
@@ -254,10 +255,10 @@ export function SquareOffModal(props: SquareOffModalProps) {
               onClick={handleConfirm}
               disabled={submitting()}
             >
-              <Show when={submitting()}>
+              <Show when={submitting()} fallback={<CropSquareIcon />}>
                 <SyncIcon spinning={true} />
               </Show>
-              <span>Confirm</span>
+              <span>{submitting() ? 'Squaring off...' : 'Sq-off'}</span>
             </button>
           </div>
         </div>

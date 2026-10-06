@@ -78,6 +78,17 @@ func abs(x int) int {
 	return x
 }
 
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "tokenexception") ||
+		strings.Contains(msg, "incorrect `api_key` or `access_token`") ||
+		strings.Contains(msg, "incorrect api_key or access_token") ||
+		strings.Contains(msg, "invalid token")
+}
+
 // SquareOffAccount closes open positions strictly for one designated account.
 func (s *Service) SquareOffAccount(ctx context.Context, accountID uuid.UUID, symbols []string) (domain.SquareOffResult, error) {
 	s.log().Info("squareoff: starting account square off", "account_id", accountID, "symbols", symbols)
@@ -118,6 +129,15 @@ func (s *Service) SquareOffAccount(ctx context.Context, accountID uuid.UUID, sym
 
 	// 2. Query positions and place opposite market counter-orders
 	positions, err := b.GetPositions(ctx)
+	if err != nil && s.syncer != nil && isAuthError(err) {
+		s.log().Info("squareoff: token expired or rejected, syncing portfolio", "account_id", accountID)
+		if syncErr := s.syncer.SyncAccountPortfolio(ctx, accountID); syncErr == nil {
+			if refreshedBroker, rErr := s.resolver.ResolveBroker(ctx, accountID); rErr == nil {
+				b = refreshedBroker
+				positions, err = b.GetPositions(ctx)
+			}
+		}
+	}
 	if err != nil {
 		return domain.SquareOffResult{}, fmt.Errorf("fetch positions: %w", err)
 	}

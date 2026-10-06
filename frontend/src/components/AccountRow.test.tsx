@@ -1,7 +1,7 @@
-import { render, screen, fireEvent } from '@solidjs/testing-library'
+import { render, screen, fireEvent, within } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { AccountRow } from './AccountRow'
 import * as api from '../api'
 import type { GroupFollower } from '../api'
@@ -15,6 +15,26 @@ const follower: GroupFollower = {
 }
 
 describe('AccountRow', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.spyOn(api, 'getAccountRebalanceDiff').mockResolvedValue({
+      account_id: 'f1',
+      account_name: 'Follower Account',
+      broker_account_id: 'ZY5678',
+      enabled: true,
+      clone_factor: '1',
+      symbols: [],
+    })
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+  })
   it('calls onToggleCopy when the CopyToggle changes', async () => {
     const onToggleCopy = vi.fn()
     render(() => (
@@ -44,22 +64,6 @@ describe('AccountRow', () => {
     expect(screen.queryByLabelText('Start Copy')).not.toBeInTheDocument()
   })
 
-  it('calls onRebalance immediately, without a confirm modal', async () => {
-    const onRebalance = vi.fn()
-    render(() => (
-      <AccountRow
-        follower={follower}
-        onToggleCopy={() => {}}
-        onRebalance={onRebalance}
-        onSquareOff={() => {}}
-        onExitOpenOrders={() => {}}
-      />
-    ))
-    await userEvent.click(screen.getByLabelText('Rebalance'))
-    expect(onRebalance).toHaveBeenCalled()
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-
   it('gates Square Off behind a confirm modal', async () => {
     vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
       summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
@@ -84,8 +88,45 @@ describe('AccountRow', () => {
     expect(onSquareOff).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByText('Confirm'))
+    await userEvent.click(screen.getByText('Sq-off'))
     expect(onSquareOff).toHaveBeenCalled()
+  })
+
+  it('master row: loads positions using master accountId instead of targetGroupId for Square Off', async () => {
+    const getAccountOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [
+        { product: 'NRML', instrument: 'CRUDEOIL26OCT10200CE', qty: -3, avgPrice: '69.6', ltp: '76.4', mtm: '-3090' },
+      ],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+    const masterFollower: GroupFollower = {
+      accountId: 'master-acc-uuid-1234',
+      name: 'Rohan Singhal',
+      brokerAccountId: 'KU2675',
+      enabled: true,
+      status: 'ok',
+    }
+    render(() => (
+      <AccountRow
+        follower={masterFollower}
+        isMaster
+        targetGroupId="group-uuid-5678"
+        targetGroupName="Test Group"
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+    await userEvent.click(screen.getByLabelText('Square Off'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(getAccountOrdersSpy).toHaveBeenCalledWith('master-acc-uuid-1234', 'open_positions')
+    expect(getAccountOrdersSpy).not.toHaveBeenCalledWith('group-uuid-5678', 'open_positions')
   })
 
   it('gates Exit Open Orders behind a confirm modal', async () => {
@@ -141,9 +182,28 @@ describe('AccountRow', () => {
     expect(onToggleCopy).toHaveBeenCalledWith(true)
   })
 
-  it('spins the Rebalance icon while pending and shows a success toast when it resolves', async () => {
-    let resolveRebalance: () => void = () => {}
-    const onRebalance = vi.fn(() => new Promise<void>((resolve) => (resolveRebalance = resolve)))
+  it('gates Rebalance behind a confirm modal for follower row and executes on confirmation', async () => {
+    vi.spyOn(api, 'getAccountRebalanceDiff').mockResolvedValue({
+      account_id: 'f1',
+      account_name: 'Follower Account',
+      broker_account_id: 'ZY5678',
+      enabled: true,
+      clone_factor: '1',
+      symbols: [
+        {
+          exchange: 'NSE',
+          tradingsymbol: 'RELIANCE',
+          product: 'CNC',
+          lot_size: 1,
+          master_qty: 10,
+          target_qty: 10,
+          follower_qty: 0,
+          drift_qty: 10,
+          action: 'BUY',
+        },
+      ],
+    })
+    const onRebalance = vi.fn().mockResolvedValue(undefined)
     render(() => (
       <AccountRow
         follower={follower}
@@ -156,17 +216,38 @@ describe('AccountRow', () => {
     const rebalanceButton = screen.getByLabelText('Rebalance')
     await userEvent.click(rebalanceButton)
 
-    expect(rebalanceButton.querySelector('svg')).toHaveClass('icon-spin')
-    expect(rebalanceButton).toBeDisabled()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Follower: Follower Account')).toBeInTheDocument()
+    expect(await screen.findByText('RELIANCE')).toBeInTheDocument()
 
-    resolveRebalance()
-    await screen.findByText(/rebalance triggered successfully/i)
-    expect(rebalanceButton.querySelector('svg')).not.toHaveClass('icon-spin')
-    expect(rebalanceButton).not.toBeDisabled()
+    const modal = within(screen.getByRole('dialog'))
+    const confirmBtn = modal.getByRole('button', { name: /Rebalance/i })
+    await userEvent.click(confirmBtn)
+    expect(onRebalance).toHaveBeenCalled()
   })
 
-  it('shows an error toast when Rebalance fails', async () => {
-    const onRebalance = vi.fn(() => Promise.reject(new Error('no master fill to rebalance from')))
+  it('shows an error toast when Rebalance confirmation fails', async () => {
+    vi.spyOn(api, 'getAccountRebalanceDiff').mockResolvedValue({
+      account_id: 'f1',
+      account_name: 'Follower Account',
+      broker_account_id: 'ZY5678',
+      enabled: true,
+      clone_factor: '1',
+      symbols: [
+        {
+          exchange: 'NSE',
+          tradingsymbol: 'RELIANCE',
+          product: 'CNC',
+          lot_size: 1,
+          master_qty: 10,
+          target_qty: 10,
+          follower_qty: 0,
+          drift_qty: 10,
+          action: 'BUY',
+        },
+      ],
+    })
+    const onRebalance = vi.fn().mockRejectedValue(new Error('no master fill to rebalance from'))
     render(() => (
       <AccountRow
         follower={follower}
@@ -177,7 +258,12 @@ describe('AccountRow', () => {
       />
     ))
     await userEvent.click(screen.getByLabelText('Rebalance'))
-    await screen.findByText(/no master fill to rebalance from/i)
+    expect(await screen.findByText('RELIANCE')).toBeInTheDocument()
+
+    const modal = within(screen.getByRole('dialog'))
+    const confirmBtn = modal.getByRole('button', { name: /Rebalance/i })
+    await userEvent.click(confirmBtn)
+    expect(await screen.findByRole('status')).toHaveTextContent(/no master fill to rebalance from/i)
   })
 
   it('marks the row disabled and disables actions when actionsDisabled is true', () => {

@@ -35,6 +35,7 @@ import (
 	"envoytrade/internal/kite/fake"
 	"envoytrade/internal/listener"
 	"envoytrade/internal/queue/memchan"
+	"envoytrade/internal/rebalance"
 	"envoytrade/internal/recon"
 	"envoytrade/internal/squareoff"
 	"envoytrade/internal/store/postgres"
@@ -179,13 +180,21 @@ func run(logger *slog.Logger) error {
 	workerPool.Logger = logger.With("component", "worker_pool")
 	workerPool.Syncer = syncer
 	defer workerPool.Shutdown()
-	followersRegistered, err := registerFollowers(ctx, store, workerPool, brokerResolver)
+	followersRegistered, err := registerFollowers(ctx, store, workerPool, brokerResolver, logger)
 	if err != nil {
 		return fmt.Errorf("register followers: %w", err)
 	}
 	logger.Info("worker pool initialized", "followers_registered", followersRegistered)
 
+	followerRegistrar := &workerFollowerRegistrar{
+		pool:     workerPool,
+		resolver: brokerResolver,
+		store:    store,
+		logger:   logger.With("component", "follower_registrar"),
+	}
+
 	squareOffSvc := squareoff.NewService(store, brokerResolver, syncer, logger.With("component", "squareoff"))
+	rebalanceSvc := rebalance.NewService(store, brokerResolver, syncer, logger.With("component", "rebalance"))
 
 	eng := engine.New(store, workerPool)
 	eng.Logger = logger.With("component", "engine")
@@ -258,13 +267,9 @@ func run(logger *slog.Logger) error {
 		logger.Error("sync active masters tickers failed", "error", err)
 	}
 
-	// Auto-restart master ticker on headless token refresh
+	// Auto-restart master ticker or refresh follower worker on headless token refresh
 	syncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
-		role, err := store.AccountRole(refreshCtx, accountID)
-		if err == nil && role == "master" {
-			return tickerManager.RestartMaster(refreshCtx, accountID)
-		}
-		return nil
+		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
 	}
 
 	// Periodic session expiration cleaner
@@ -299,7 +304,7 @@ func run(logger *slog.Logger) error {
 					continue
 				}
 				for _, a := range accs {
-					if a.Active && a.AuthStatus == "authenticated" {
+					if a.Active {
 						_ = syncer.SyncAccountPortfolio(ctx, a.ID)
 					}
 				}
@@ -314,6 +319,8 @@ func run(logger *slog.Logger) error {
 		httpapi.WithPortfolioSyncer(syncer),
 		httpapi.WithTickerManager(tickerManager),
 		httpapi.WithSquareOffService(squareOffSvc),
+		httpapi.WithRebalanceService(rebalanceSvc),
+		httpapi.WithFollowerRegistrar(followerRegistrar),
 	)
 
 	if frontend.HasEmbeddedUI() {
@@ -354,8 +361,13 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
+type brokerResolverStore interface {
+	AccountAuthInfo(ctx context.Context, id uuid.UUID) (domain.AccountAuthInfo, error)
+	ProxyIPByAddress(ctx context.Context, ip string) (domain.ProxyIP, error)
+}
+
 type serverBrokerResolver struct {
-	store    *postgres.Store
+	store    brokerResolverStore
 	registry *broker.Registry
 	syncer   *kite.PortfolioSyncer
 }
@@ -370,7 +382,7 @@ func (r *serverBrokerResolver) ResolveBroker(ctx context.Context, accountID uuid
 		return &fake.Broker{}, nil
 	}
 
-	if (authInfo.AccessToken == "" || (authInfo.TokenExpiresAt != nil && !time.Now().Before(*authInfo.TokenExpiresAt))) &&
+	if (authInfo.AccessToken == "" || authInfo.AuthStatus == "error" || (authInfo.TokenExpiresAt != nil && !time.Now().Before(*authInfo.TokenExpiresAt))) &&
 		authInfo.EncryptedPassword != "" && authInfo.EncryptedTotpSecret != "" && r.syncer != nil {
 		if err := r.syncer.SyncAccountPortfolio(ctx, accountID); err == nil {
 			if refreshed, err := r.store.AccountAuthInfo(ctx, accountID); err == nil {
@@ -387,10 +399,27 @@ func (r *serverBrokerResolver) ResolveBroker(ctx context.Context, accountID uuid
 		ApiKey:          authInfo.ApiKey,
 		ApiSecret:       authInfo.ApiSecret,
 		AccessToken:     authInfo.AccessToken,
+		IPAddress:       authInfo.IPAddress,
 	}
 
-	if authInfo.IPAddress != "" {
-		if pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress); err == nil {
+	if authInfo.Role == "follower" {
+		if authInfo.IPAddress == "" {
+			return nil, fmt.Errorf("follower account %s: %w", accountID, domain.ErrIPRequired)
+		}
+		pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress)
+		if err != nil {
+			return nil, fmt.Errorf("resolve proxy IP %s for follower %s: %w", authInfo.IPAddress, accountID, err)
+		}
+		acc.ProxyHost = pIP.Host
+		acc.ProxyPort = pIP.Port
+		acc.ProxyUsername = pIP.Username
+		acc.ProxyPassword = pIP.Password
+	} else if authInfo.Role == "master" {
+		if authInfo.IPAddress != "" {
+			pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress)
+			if err != nil {
+				return nil, fmt.Errorf("resolve proxy IP %s for master %s: %w", authInfo.IPAddress, accountID, err)
+			}
 			acc.ProxyHost = pIP.Host
 			acc.ProxyPort = pIP.Port
 			acc.ProxyUsername = pIP.Username
@@ -403,7 +432,7 @@ func (r *serverBrokerResolver) ResolveBroker(ctx context.Context, accountID uuid
 
 // registerFollowers registers every existing follower account with the
 // worker pool so Rebalance can dispatch to it.
-func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, resolver *serverBrokerResolver) (int, error) {
+func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, resolver *serverBrokerResolver, logger *slog.Logger) (int, error) {
 	groups, err := store.Groups(ctx)
 	if err != nil {
 		return 0, err
@@ -417,13 +446,92 @@ func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.
 		for _, f := range detail.Followers {
 			b, err := resolver.ResolveBroker(ctx, f.AccountID)
 			if err != nil {
-				b = &fake.Broker{}
+				logger.Error("failed to resolve broker for follower, skipping registration", "follower_id", f.AccountID, "error", err)
+				continue
 			}
 			pool.Register(ctx, f.AccountID, b, store, 16)
 			count++
 		}
 	}
 	return count, nil
+}
+
+type followerBrokerResolver interface {
+	ResolveBroker(ctx context.Context, accountID uuid.UUID) (broker.Broker, error)
+}
+
+type workerFollowerRegistrar struct {
+	pool     *worker.Pool
+	resolver followerBrokerResolver
+	store    worker.Store
+	logger   *slog.Logger
+}
+
+func (w *workerFollowerRegistrar) log() *slog.Logger {
+	if w.logger != nil {
+		return w.logger
+	}
+	return slog.Default()
+}
+
+func (w *workerFollowerRegistrar) RegisterFollower(ctx context.Context, followerID uuid.UUID) error {
+	b, err := w.resolver.ResolveBroker(ctx, followerID)
+	if err != nil {
+		w.log().Error("dynamic worker registration failed: cannot resolve broker", "follower_id", followerID, "error", err)
+		return err
+	}
+	w.pool.Register(context.Background(), followerID, b, w.store, 16)
+	w.log().Info("follower registered with worker pool", "follower_id", followerID)
+	return nil
+}
+
+func (w *workerFollowerRegistrar) UnregisterFollower(followerID uuid.UUID) {
+	w.pool.Unregister(followerID)
+	w.log().Info("follower unregistered from worker pool", "follower_id", followerID)
+}
+
+type accountRoleStore interface {
+	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
+}
+
+type masterTickerRestarter interface {
+	RestartMaster(ctx context.Context, masterID uuid.UUID) error
+}
+
+type followerRegistrar interface {
+	RegisterFollower(ctx context.Context, followerID uuid.UUID) error
+}
+
+func handleTokenRefreshed(
+	ctx context.Context,
+	accountID uuid.UUID,
+	store accountRoleStore,
+	tickerMgr masterTickerRestarter,
+	registrar followerRegistrar,
+	logger *slog.Logger,
+) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	role, err := store.AccountRole(ctx, accountID)
+	if err != nil {
+		logger.Error("failed to get account role on token refresh", "account_id", accountID, "error", err)
+		return err
+	}
+	switch role {
+	case "master":
+		if tickerMgr != nil {
+			return tickerMgr.RestartMaster(ctx, accountID)
+		}
+	case "follower":
+		if registrar != nil {
+			if err := registrar.RegisterFollower(ctx, accountID); err != nil {
+				logger.Error("failed to register follower worker on token refresh", "account_id", accountID, "error", err)
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type serverMasterReader struct {
@@ -470,20 +578,6 @@ func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, foll
 			tbURL = "http://localhost:8089"
 		}
 		kc.SetBaseURI(tbURL)
-	} else if authInfo.IPAddress != "" {
-		pIP, err := r.store.ProxyIPByAddress(ctx, authInfo.IPAddress)
-		if err == nil {
-			proxyCfg := kite.ProxyConfig{
-				Scheme:       "https",
-				Host:         pIP.Host,
-				Port:         pIP.Port,
-				ClientID:     pIP.Username,
-				ClientSecret: pIP.Password,
-			}
-			if client, err := kite.RESTClientFor(proxyCfg); err == nil {
-				kc.SetHTTPClient(client)
-			}
-		}
 	}
 	return kc.GetOrderHistory(brokerOrderID)
 }

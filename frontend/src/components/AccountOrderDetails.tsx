@@ -1,4 +1,4 @@
-import { createSignal, createResource, createMemo, createEffect, Show, For, onCleanup } from 'solid-js'
+import { createSignal, createResource, createMemo, createEffect, Show, For, onCleanup, untrack } from 'solid-js'
 import { createStore, reconcile } from 'solid-js/store'
 import {
   getAccountOrders,
@@ -96,7 +96,7 @@ function createInitialStoreState(): OrdersStoreState {
       rejectedOrders: 0,
     },
     pagination: {
-      tab: 'open_positions',
+      tab: '' as OrderTabId,
       page: 1,
       limit: 10,
       totalCount: 0,
@@ -117,8 +117,17 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   const [holdingSortField, setHoldingSortField] = createSignal<'instrument' | 'sellableQuantity'>('instrument')
   const [holdingSortDir, setHoldingSortDir] = createSignal<'asc' | 'desc'>('asc')
   const [isPolling, setIsPolling] = createSignal<boolean>(false)
+  const [hasLoaded, setHasLoaded] = createSignal<boolean>(false)
 
   const [store, setStore] = createStore<OrdersStoreState>(createInitialStoreState())
+
+  createEffect((prevId) => {
+    if (prevId !== undefined && prevId !== props.accountId) {
+      setHasLoaded(false)
+      setStore(reconcile(createInitialStoreState()))
+    }
+    return props.accountId
+  })
 
   const isExpanded = () => props.isExpanded ?? true
   const isTableFetching = () => ordersData.loading && !isPolling()
@@ -136,7 +145,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
     ({ accountId, tab, page, limit }) => getAccountOrders(accountId, tab, page, limit),
   )
 
-  const isTabReady = (tab: OrderTabId) => !ordersData.loading && store.pagination?.tab === tab
+  const isTabReady = (tab: OrderTabId) => store.pagination?.tab === tab
 
   function normalizeOrders<T extends OrderDetailItem>(items: T[] | undefined): T[] {
     if (!items) return []
@@ -157,11 +166,13 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
     if (fresh.counts) {
       setStore('counts', reconcile(fresh.counts))
     }
+    const responseTab = fresh.pagination?.tab ?? activeTab()
+
     if (fresh.pagination) {
       setStore('pagination', reconcile(fresh.pagination))
+    } else {
+      setStore('pagination', 'tab', responseTab)
     }
-
-    const responseTab = fresh.pagination?.tab ?? activeTab()
 
     if (responseTab === 'open_positions' || (fresh.openPositions && fresh.openPositions.length > 0)) {
       setStore('openPositions', reconcile(fresh.openPositions ?? [], { key: 'instrument' }))
@@ -190,7 +201,8 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   createEffect(() => {
     const data = ordersData()
     if (data) {
-      applyData(data)
+      setHasLoaded(true)
+      untrack(() => applyData(data))
     }
   })
 
@@ -484,7 +496,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
       {/* 3. Tab Content Panels */}
       <div class="order-drawer-body">
-        <Show when={!ordersData() && ordersData.loading}>
+        <Show when={!hasLoaded() && ordersData.loading}>
           <div class="order-loading-skeleton">
             <div class="skeleton-row" />
             <div class="skeleton-row" />
@@ -492,7 +504,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
           </div>
         </Show>
 
-        <Show when={ordersData()}>
+        <Show when={hasLoaded()}>
           {/* Tab 1: Open Position */}
           <Show when={activeTab() === 'open_positions'}>
             <div class={`order-table-container ${isTableFetching() ? 'is-fetching' : ''}`}>

@@ -361,6 +361,85 @@ export function squareOffAccount(
   }).then((r) => json(r))
 }
 
+export interface SymbolDrift {
+  exchange: string
+  tradingsymbol: string
+  product: string
+  lot_size: number
+  master_qty: number
+  target_qty: number
+  follower_qty: number
+  drift_qty: number
+  action: 'BUY' | 'SELL'
+}
+
+export interface FollowerDrift {
+  account_id: string
+  account_name: string
+  broker_account_id: string
+  enabled: boolean
+  clone_factor: string
+  symbols: SymbolDrift[]
+}
+
+export interface GroupRebalanceDiff {
+  group_id: string
+  master_id: string
+  followers_evaluated: number
+  followers_with_drift: number
+  drifts: FollowerDrift[]
+}
+
+export interface RebalanceOrder {
+  account_id: string
+  role: string
+  broker_order_id: string
+  exchange: string
+  tradingsymbol: string
+  product: string
+  side: string
+  quantity: number
+  status: string
+}
+
+export interface RebalanceResult {
+  action: string
+  status: 'completed' | 'partial' | 'empty'
+  group_id?: string
+  account_id?: string
+  followers_affected: number
+  cancelled_orders: number
+  orders_placed: number
+  orders: RebalanceOrder[]
+  errors?: string[]
+}
+
+export function getGroupRebalanceDiff(groupId: string): Promise<GroupRebalanceDiff> {
+  return apiFetch(`${BASE}/groups/${groupId}/positions/rebalance/diff`).then((r) => json(r))
+}
+
+export function rebalanceGroup(
+  groupId: string,
+  body?: { follower_ids?: string[] }
+): Promise<RebalanceResult> {
+  return apiFetch(`${BASE}/groups/${groupId}/positions/rebalance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  }).then((r) => json(r))
+}
+
+export function getAccountRebalanceDiff(accountId: string): Promise<FollowerDrift> {
+  return apiFetch(`${BASE}/accounts/${accountId}/positions/rebalance/diff`).then((r) => json(r))
+}
+
+export function rebalanceAccount(accountId: string): Promise<RebalanceResult> {
+  return apiFetch(`${BASE}/accounts/${accountId}/positions/rebalance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  }).then((r) => json(r))
+}
+
 export interface AccountSummaryMetrics {
   netQty: number
   openPositionsCount?: number

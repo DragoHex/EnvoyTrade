@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"envoytrade/internal/broker"
+	"envoytrade/internal/domain"
 	"envoytrade/internal/kite"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -81,7 +82,7 @@ func (f *fakeKiteAPI) CancelOrder(variety string, orderID string, parentOrderID 
 
 func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
 	api := &fakeKiteAPI{orderID: "kite-123"}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, true)
 
 	params := broker.OrderParams{
 		Exchange:        "NFO",
@@ -119,7 +120,7 @@ func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
 
 func TestBroker_PlaceOrder_LimitOrder_MapsPriceAndTriggerPrice(t *testing.T) {
 	api := &fakeKiteAPI{orderID: "kite-limit-1"}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, true)
 
 	params := broker.OrderParams{
 		Exchange:        "MCX",
@@ -153,7 +154,7 @@ func TestBroker_PlaceOrder_LimitOrder_MapsPriceAndTriggerPrice(t *testing.T) {
 
 func TestBroker_PlaceOrder_SLMOrder_SetsMarketProtectionAuto(t *testing.T) {
 	api := &fakeKiteAPI{orderID: "kite-slm-1"}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, true)
 
 	params := broker.OrderParams{
 		Exchange:        "MCX",
@@ -176,11 +177,36 @@ func TestBroker_PlaceOrder_SLMOrder_SetsMarketProtectionAuto(t *testing.T) {
 
 func TestBroker_PlaceOrder_PropagatesError(t *testing.T) {
 	api := &fakeKiteAPI{placeErr: errors.New("insufficient funds")}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, true)
 
 	_, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{})
 	if err == nil {
 		t.Fatal("PlaceOrder want error, got nil")
+	}
+}
+
+func TestBroker_Unproxied_BlocksPlaceAndCancel(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "o-unproxied"}
+	b := kite.NewBroker(api, false)
+
+	// Mutating operations should be blocked
+	_, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{})
+	if !errors.Is(err, domain.ErrUnproxiedNotAllowed) {
+		t.Fatalf("PlaceOrder unproxied error = %v, want %v", err, domain.ErrUnproxiedNotAllowed)
+	}
+
+	_, err = b.CancelOrder(context.Background(), "regular", "o-unproxied")
+	if !errors.Is(err, domain.ErrUnproxiedNotAllowed) {
+		t.Fatalf("CancelOrder unproxied error = %v, want %v", err, domain.ErrUnproxiedNotAllowed)
+	}
+
+	// Read operations should still succeed
+	orders, err := b.GetOrders(context.Background())
+	if err != nil {
+		t.Fatalf("GetOrders unproxied failed: %v", err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("GetOrders unexpected count: %d", len(orders))
 	}
 }
 
@@ -189,7 +215,7 @@ func TestBroker_GetOrders_And_History(t *testing.T) {
 		orders:  kiteconnect.Orders{{OrderID: "o1"}},
 		history: []kiteconnect.Order{{OrderID: "o1", Status: "COMPLETE"}},
 	}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, false)
 
 	orders, err := b.GetOrders(context.Background())
 	if err != nil {
@@ -216,7 +242,7 @@ func TestBroker_GetPositions_Delegates(t *testing.T) {
 			},
 		},
 	}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, false)
 
 	pos, err := b.GetPositions(context.Background())
 	if err != nil {
@@ -233,7 +259,7 @@ func TestBroker_GetHoldings_Delegates(t *testing.T) {
 			{Tradingsymbol: "INFY", Quantity: 100, AveragePrice: 1500.0},
 		},
 	}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, false)
 
 	h, err := b.GetHoldings(context.Background())
 	if err != nil {
@@ -252,7 +278,7 @@ func TestBroker_GetUserMargins_Delegates(t *testing.T) {
 			},
 		},
 	}
-	b := kite.NewBroker(api)
+	b := kite.NewBroker(api, false)
 
 	m, err := b.GetUserMargins(context.Background())
 	if err != nil {

@@ -2,13 +2,14 @@ import { createResource, createSignal, createEffect, onCleanup, Show } from 'sol
 import { CopyToggle } from './CopyToggle'
 import { ConfirmActionModal } from './ConfirmActionModal'
 import { SquareOffModal } from './SquareOffModal'
+import { RebalanceModal } from './RebalanceModal'
 import { ResultToast, type ToastResult } from './ResultToast'
 import { StatusDot } from './StatusDot'
 import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, ChevronDownIcon, ThanosBalanceIcon } from './icons'
 import { AccountOrderDetails } from './AccountOrderDetails'
 import { getAccountOrders, type GroupFollower, type AccountSummaryMetrics } from '../api'
 
-type DestructiveAction = 'square_off' | 'exit_open_orders' | null
+type DestructiveAction = 'square_off' | 'exit_open_orders' | 'rebalance' | null
 const TOAST_DISMISS_MS = 4000
 
 function formatCurrency(val: unknown): string {
@@ -23,15 +24,16 @@ function formatCurrency(val: unknown): string {
 export function AccountRow(props: {
   follower: GroupFollower
   isMaster?: boolean
+  targetGroupId?: string
+  targetGroupName?: string
   actionsDisabled?: boolean
   toggleDisabled?: boolean
   onToggleCopy: (next: boolean) => void | Promise<void>
-  onRebalance: () => Promise<void>
+  onRebalance: (followerIds?: string[]) => void | Promise<void>
   onSquareOff: (symbols?: string[]) => void | Promise<void>
   onExitOpenOrders: () => void
 }) {
   const [pending, setPending] = createSignal<DestructiveAction>(null)
-  const [rebalancing, setRebalancing] = createSignal(false)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
   const [expanded, setExpanded] = createSignal(false)
   let dismissTimer: ReturnType<typeof setTimeout> | undefined
@@ -60,18 +62,6 @@ export function AccountRow(props: {
     setToast(result)
     clearTimeout(dismissTimer)
     dismissTimer = setTimeout(() => setToast(null), TOAST_DISMISS_MS)
-  }
-
-  const handleRebalance = async () => {
-    setRebalancing(true)
-    try {
-      await props.onRebalance()
-      showToast({ kind: 'success', message: 'Rebalance triggered successfully.' })
-    } catch (e) {
-      showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Rebalance failed.' })
-    } finally {
-      setRebalancing(false)
-    }
   }
 
   return (
@@ -124,10 +114,10 @@ export function AccountRow(props: {
               class="icon-button icon-button-primary"
               aria-label="Rebalance"
               data-tooltip="Rebalance"
-              disabled={rebalancing() || props.actionsDisabled}
-              onClick={handleRebalance}
+              disabled={props.actionsDisabled}
+              onClick={() => setPending('rebalance')}
             >
-              <ThanosBalanceIcon spinning={rebalancing()} />
+              <ThanosBalanceIcon />
             </button>
             <button
               type="button"
@@ -163,13 +153,36 @@ export function AccountRow(props: {
             <ChevronDownIcon class={`chevron-icon ${expanded() ? 'chevron-rotated' : ''}`} />
           </button>
         </td>
+        <RebalanceModal
+          open={pending() === 'rebalance'}
+          target={{
+            type: props.isMaster ? 'group' : 'account',
+            id: props.isMaster ? (props.targetGroupId || props.follower.accountId) : props.follower.accountId,
+            name: props.isMaster ? (props.targetGroupName || props.follower.name) : props.follower.name,
+            brokerAccountId: props.follower.brokerAccountId,
+          }}
+          onConfirm={async (followerIds) => {
+            try {
+              await props.onRebalance(followerIds)
+              showToast({ kind: 'success', message: 'Rebalance submitted successfully.' })
+            } catch (e) {
+              showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Rebalance failed.' })
+              throw e
+            }
+          }}
+          onCancel={() => setPending(null)}
+          onSuccess={() => {
+            showToast({ kind: 'success', message: 'Rebalance executed successfully.' })
+          }}
+        />
         <SquareOffModal
           open={pending() === 'square_off'}
           target={{
             type: props.isMaster ? 'group' : 'account',
-            id: props.follower.accountId,
-            name: props.follower.name,
+            id: props.isMaster ? (props.targetGroupId || props.follower.accountId) : props.follower.accountId,
+            name: props.isMaster ? (props.targetGroupName || props.follower.name) : props.follower.name,
             brokerAccountId: props.follower.brokerAccountId,
+            masterId: props.isMaster ? props.follower.accountId : undefined,
           }}
           onConfirm={async (symbols) => {
             try {

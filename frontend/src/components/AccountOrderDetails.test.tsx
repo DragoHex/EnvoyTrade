@@ -1146,6 +1146,61 @@ it('locks column header widths with fixed table layout so headers do not shift a
     // Now that fetch completed, "No data" should be displayed
     expect(await screen.findByText('No data')).toBeInTheDocument()
   })
+
+  it('does not unmount or flicker the "No data" empty state during periodic poll on empty tabs', async () => {
+    vi.useFakeTimers()
+    const emptyData = (): api.AccountOrdersResponse => ({
+      accountId: 'acc-empty-poll-test',
+      summary: {
+        netQty: 0,
+        openPositionsCount: 0,
+        closedPositionsCount: 0,
+        pendingOrdersCount: 0,
+        totalMtm: 0,
+        realizedPnl: 0,
+        accountValue: 10000,
+        status: 'online',
+      },
+      counts: {
+        openPositions: 0,
+        closedPositions: 0,
+        holdings: 0,
+        openOrders: 0,
+        closedOrders: 0,
+        rejectedOrders: 0,
+      },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 0, totalPages: 1 },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockImplementation(async () => emptyData())
+
+    try {
+      render(() => <AccountOrderDetails accountId="acc-empty-poll-test" />)
+      expect(await screen.findByText('No data')).toBeInTheDocument()
+
+      const emptyEl = screen.getByText('No data')
+      expect(emptyEl.isConnected).toBe(true)
+
+      // Trigger 3 periodic reloads
+      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(7000)
+
+      expect(getOrdersSpy).toHaveBeenCalledTimes(4)
+
+      // Verify the empty state node was NEVER destroyed or recreated
+      expect(emptyEl.isConnected).toBe(true)
+      expect(screen.getByText('No data')).toBe(emptyEl)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 });
 
 

@@ -63,9 +63,9 @@ export function ThanosBalanceIcon(props: { class?: string; spinning?: boolean })
 
 export { ThanosBalanceIcon as RebalanceIcon }
 
-export function CropSquareIcon() {
+export function CropSquareIcon(props?: { class?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor">
+    <svg viewBox="0 0 24 24" fill="currentColor" class={props?.class}>
       <path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2Zm0 14H6V6h12v12Z" />
     </svg>
   )
@@ -123,6 +123,21 @@ export function ScalesIcon(props: { class?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" class={props.class} width="16" height="16">
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.4z" />
+    </svg>
+  )
+}
+
+export function InfoIcon(props: { class?: string; size?: number }) {
+  const size = () => props.size ?? 16
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      width={size()}
+      height={size()}
+      class={props.class}
+    >
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
     </svg>
   )
 }

@@ -167,7 +167,7 @@ func TestE2E_SquareOff(t *testing.T) {
 		fCliA := h.FollowerClient("follow01a")
 
 		// First ensure group starts completely flat
-		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 		time.Sleep(100 * time.Millisecond)
 
 		ordersBefore, _ := fCliA.GetOrders()
@@ -209,7 +209,7 @@ func TestE2E_SquareOff(t *testing.T) {
 		}
 
 		// 2. Execute Group Square-Off
-		resp, body, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		resp, body, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 		if err != nil || resp.StatusCode != http.StatusOK {
 			t.Fatalf("group square-off failed: status=%d, body=%s, err=%v", resp.StatusCode, string(body), err)
 		}

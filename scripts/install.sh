@@ -76,7 +76,14 @@ ensure_postgres_db() {
         fi
 
         echo "--> Ensuring PostgreSQL role 'envoytrade' and database 'envoytrade' exist..."
-        psql ${psql_flags} -c "
+        local psql_exec="psql"
+        if [ "$(id -u)" -eq 0 ] && id -u postgres >/dev/null 2>&1; then
+            psql_exec="su - postgres -c psql --"
+        elif command -v sudo >/dev/null 2>&1 && sudo -u postgres true 2>/dev/null; then
+            psql_exec="sudo -u postgres psql"
+        fi
+
+        ${psql_exec} ${psql_flags} -c "
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'envoytrade') THEN
@@ -85,8 +92,8 @@ BEGIN
 END
 \$\$;" >/dev/null 2>&1 || true
 
-        psql ${psql_flags} -tc "SELECT 1 FROM pg_database WHERE datname = 'envoytrade'" 2>/dev/null | grep -q 1 || \
-            psql ${psql_flags} -c "CREATE DATABASE envoytrade OWNER envoytrade;" >/dev/null 2>&1 || true
+        ${psql_exec} ${psql_flags} -tc "SELECT 1 FROM pg_database WHERE datname = 'envoytrade'" 2>/dev/null | grep -q 1 || \
+            ${psql_exec} ${psql_flags} -c "CREATE DATABASE envoytrade OWNER envoytrade;" >/dev/null 2>&1 || true
     fi
 }
 

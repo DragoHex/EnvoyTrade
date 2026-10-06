@@ -53,7 +53,7 @@ describe('Dashboard', () => {
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2))
   })
 
-  it('Rebalance calls postAction and refetches the group', async () => {
+  it('Follower Rebalance requires modal confirmation before calling rebalanceAccount', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
       { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
     ])
@@ -66,15 +66,47 @@ describe('Dashboard', () => {
       masterActive: true,
       followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
-    const actionSpy = vi.spyOn(api, 'postAction').mockResolvedValue({ type: 'rebalance', status: 'accepted' })
+    vi.spyOn(api, 'getAccountRebalanceDiff').mockResolvedValue({
+      account_id: 'f1',
+      account_name: 'Follower 1',
+      broker_account_id: 'ZY5678',
+      enabled: true,
+      clone_factor: '1',
+      symbols: [
+        {
+          exchange: 'NSE',
+          tradingsymbol: 'INFY',
+          product: 'CNC',
+          lot_size: 1,
+          master_qty: 10,
+          target_qty: 10,
+          follower_qty: 0,
+          drift_qty: 10,
+          action: 'BUY',
+        },
+      ],
+    })
+    const rebalanceSpy = vi.spyOn(api, 'rebalanceAccount').mockResolvedValue({
+      action: 'rebalance',
+      status: 'completed',
+      account_id: 'f1',
+      followers_affected: 1,
+      cancelled_orders: 0,
+      orders_placed: 1,
+      orders: [],
+    })
 
     render(() => <Dashboard />)
     await screen.findByText('ZY5678')
 
     const followerRow = within(screen.getByTestId('account-row'))
     await userEvent.click(followerRow.getByLabelText('Rebalance'))
+    expect(rebalanceSpy).not.toHaveBeenCalled()
 
-    expect(actionSpy).toHaveBeenCalledWith('f1', 'rebalance')
+    expect(await screen.findByText('INFY')).toBeInTheDocument()
+    const modal = within(screen.getByRole('dialog'))
+    await userEvent.click(modal.getByRole('button', { name: /Rebalance/i }))
+    expect(rebalanceSpy).toHaveBeenCalledWith('f1')
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2))
   })
 
@@ -109,7 +141,7 @@ describe('Dashboard', () => {
     await userEvent.click(followerRow.getByLabelText('Square Off'))
     expect(squareOffSpy).not.toHaveBeenCalled()
 
-    await userEvent.click(screen.getByText('Confirm'))
+    await userEvent.click(screen.getByText('Sq-off'))
     expect(squareOffSpy).toHaveBeenCalledWith('f1', undefined)
   })
 
@@ -149,7 +181,7 @@ describe('Dashboard', () => {
     await userEvent.click(masterRow.getByLabelText('Square Off'))
     expect(squareOffGroupSpy).not.toHaveBeenCalled()
 
-    await userEvent.click(screen.getByText('Confirm'))
+    await userEvent.click(screen.getByText('Sq-off'))
     expect(squareOffGroupSpy).toHaveBeenCalledWith('g1', undefined)
   })
 

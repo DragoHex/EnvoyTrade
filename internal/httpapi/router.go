@@ -19,12 +19,20 @@ import (
 type Option func(*routerConfig)
 
 type routerConfig struct {
-	postbackHandler http.Handler
-	logger          *slog.Logger
-	syncer          PortfolioSyncer
-	tickerMgr       TickerManager
-	squareOffSvc    SquareOffService
-	staticFS        fs.FS
+	postbackHandler   http.Handler
+	logger            *slog.Logger
+	syncer            PortfolioSyncer
+	tickerMgr         TickerManager
+	squareOffSvc      SquareOffService
+	rebalanceSvc      RebalanceService
+	followerRegistrar FollowerRegistrar
+	staticFS          fs.FS
+}
+
+// FollowerRegistrar dynamically manages follower registration in the worker pool.
+type FollowerRegistrar interface {
+	RegisterFollower(ctx context.Context, followerID uuid.UUID) error
+	UnregisterFollower(followerID uuid.UUID)
 }
 
 // PortfolioSyncer provides live portfolio synchronization for an account.
@@ -66,6 +74,20 @@ func WithSquareOffService(svc SquareOffService) Option {
 	}
 }
 
+// WithRebalanceService configures a RebalanceService for portfolio rebalance operations.
+func WithRebalanceService(svc RebalanceService) Option {
+	return func(c *routerConfig) {
+		c.rebalanceSvc = svc
+	}
+}
+
+// WithFollowerRegistrar configures dynamic follower worker pool registration.
+func WithFollowerRegistrar(fr FollowerRegistrar) Option {
+	return func(c *routerConfig) {
+		c.followerRegistrar = fr
+	}
+}
+
 // WithLogger configures structured request logging middleware.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *routerConfig) {
@@ -83,7 +105,15 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer, tickerMgr: cfg.tickerMgr, squareOffSvc: cfg.squareOffSvc}
+	h := &handlers{
+		store:             store,
+		engine:            actionEngine,
+		syncer:            cfg.syncer,
+		tickerMgr:         cfg.tickerMgr,
+		squareOffSvc:      cfg.squareOffSvc,
+		rebalanceSvc:      cfg.rebalanceSvc,
+		followerRegistrar: cfg.followerRegistrar,
+	}
 
 	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", h.postLogin)
@@ -99,12 +129,16 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/groups/{id}", h.deleteGroup)
 	mux.HandleFunc("POST /api/v1/groups/{id}/followers", h.postGroupFollower)
 	mux.HandleFunc("POST /api/v1/groups/{id}/positions/square-off", h.postGroupSquareOff)
+	mux.HandleFunc("GET /api/v1/groups/{id}/positions/rebalance/diff", h.getGroupRebalanceDiff)
+	mux.HandleFunc("POST /api/v1/groups/{id}/positions/rebalance", h.postGroupRebalance)
 	mux.HandleFunc("GET /api/v1/accounts", h.getAccounts)
 	mux.HandleFunc("POST /api/v1/accounts", h.postAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{id}", h.patchAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}", h.deleteAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}/group", h.deleteAccountGroup)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/positions/square-off", h.postAccountSquareOff)
+	mux.HandleFunc("GET /api/v1/accounts/{id}/positions/rebalance/diff", h.getAccountRebalanceDiff)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/positions/rebalance", h.postAccountRebalance)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/actions", h.postAction)
 	mux.HandleFunc("GET /api/v1/accounts/{id}/orders", h.getAccountOrders)
 	mux.HandleFunc("GET /api/v1/proxy-ips", h.getProxyIPs)
@@ -186,11 +220,13 @@ type Store interface {
 }
 
 type handlers struct {
-	store        Store
-	engine       Engine
-	syncer       PortfolioSyncer
-	tickerMgr    TickerManager
-	squareOffSvc SquareOffService
+	store             Store
+	engine            Engine
+	syncer            PortfolioSyncer
+	tickerMgr         TickerManager
+	squareOffSvc      SquareOffService
+	rebalanceSvc      RebalanceService
+	followerRegistrar FollowerRegistrar
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
