@@ -257,4 +257,197 @@ describe('RebalanceModal', () => {
     await userEvent.click(screen.getByText('Cancel'))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('renders pinned list header and scrollable followers list container in group mode', async () => {
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 2,
+      followers_with_drift: 1,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Follower 1',
+          broker_account_id: 'FOLLOW01A',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'INFY',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 5,
+              target_qty: 5,
+              follower_qty: 0,
+              drift_qty: 5,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    })
+
+    const { container } = render(() => (
+      <RebalanceModal open={true} target={groupTarget} onCancel={() => {}} />
+    ))
+
+    expect(await screen.findByText('Follower 1')).toBeInTheDocument()
+    const headerRow = container.querySelector('.rebalance-list-header-row')
+    expect(headerRow).toBeInTheDocument()
+
+    const followersList = container.querySelector('.rebalance-followers-list')
+    expect(followersList).toBeInTheDocument()
+
+    // Expand accordion and verify scrollable dropdown wrapper
+    const expandBtn = screen.getByLabelText('Expand symbols')
+    await userEvent.click(expandBtn)
+
+    const symbolsWrapper = container.querySelector('.follower-symbols-table-wrapper')
+    expect(symbolsWrapper).toBeInTheDocument()
+    expect(container.querySelector('.rebalance-symbols-table')).toBeInTheDocument()
+    expect(screen.getByText('INFY')).toBeInTheDocument()
+  })
+
+  it('renders scrollable account-mode-wrapper in account mode for drifting symbols', async () => {
+    vi.spyOn(api, 'getAccountRebalanceDiff').mockResolvedValue({
+      account_id: 'f1',
+      account_name: 'Follower 1',
+      broker_account_id: 'FOLLOW01A',
+      enabled: true,
+      clone_factor: '1',
+      symbols: [
+        {
+          exchange: 'NSE',
+          tradingsymbol: 'TCS',
+          product: 'CNC',
+          lot_size: 1,
+          master_qty: 15,
+          target_qty: 15,
+          follower_qty: 5,
+          drift_qty: 10,
+          action: 'BUY',
+        },
+      ],
+    })
+
+    const { container } = render(() => (
+      <RebalanceModal open={true} target={accountTarget} onCancel={() => {}} />
+    ))
+
+    expect(await screen.findByText('TCS')).toBeInTheDocument()
+    const accountWrapper = container.querySelector('.follower-symbols-table-wrapper.account-mode-wrapper')
+    expect(accountWrapper).toBeInTheDocument()
+    expect(container.querySelector('.rebalance-symbols-table')).toBeInTheDocument()
+  })
+
+  it('does not fold expanded dropdown menu when background refetch occurs and preserves non-diff rows', async () => {
+    let resolveFirstDiff: (val: any) => void
+    const firstDiffPromise = new Promise((resolve) => {
+      resolveFirstDiff = resolve
+    })
+
+    const diffSpy = vi.spyOn(api, 'getGroupRebalanceDiff').mockImplementation(() => firstDiffPromise as any)
+
+    const initialData: api.GroupRebalanceDiff = {
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 2,
+      followers_with_drift: 2,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Follower 1',
+          broker_account_id: 'FOLLOW01A',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'INFY',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 5,
+              target_qty: 5,
+              follower_qty: 0,
+              drift_qty: 5,
+              action: 'BUY',
+            },
+          ],
+        },
+        {
+          account_id: 'f2',
+          account_name: 'Follower 2',
+          broker_account_id: 'FOLLOW01B',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'WIPRO',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 10,
+              target_qty: 10,
+              follower_qty: 0,
+              drift_qty: 10,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    }
+
+    resolveFirstDiff!(initialData)
+
+    render(() => (
+      <RebalanceModal open={true} target={groupTarget} onCancel={() => {}} />
+    ))
+
+    expect(await screen.findByText('Follower 1')).toBeInTheDocument()
+    expect(screen.getByText('Follower 2')).toBeInTheDocument()
+
+    // Expand Follower 1's dropdown
+    const expandButtons = screen.getAllByLabelText('Expand symbols')
+    await userEvent.click(expandButtons[0])
+
+    // Follower 1's symbols are now visible
+    expect(screen.getByText('INFY')).toBeInTheDocument()
+    expect(screen.queryByText('WIPRO')).not.toBeInTheDocument()
+
+    // Follower 1's dropdown element in the DOM
+    const f1RowBefore = screen.getByTestId('follower-row-f1')
+    expect(f1RowBefore).toBeInTheDocument()
+
+    // Simulate background refetch where Follower 1 is unchanged (non-diff)
+    // and Follower 2 has updated drift quantity
+    const updatedData: api.GroupRebalanceDiff = {
+      ...initialData,
+      drifts: [
+        initialData.drifts[0], // Identical Follower 1 data
+        {
+          ...initialData.drifts[1],
+          symbols: [
+            {
+              ...initialData.drifts[1].symbols[0],
+              follower_qty: 4,
+              drift_qty: 6,
+              action: 'BUY' as const,
+            },
+          ],
+        },
+      ],
+    }
+
+    diffSpy.mockResolvedValue(updatedData)
+
+    // Verify Follower 1's symbols dropdown is STILL OPEN and INFY is still visible
+    expect(screen.getByText('INFY')).toBeInTheDocument()
+    const f1RowAfter = screen.getByTestId('follower-row-f1')
+    expect(f1RowAfter).toBeInTheDocument()
+
+    // Non-diff row DOM node is preserved
+    expect(f1RowAfter).toBe(f1RowBefore)
+  })
 })
+

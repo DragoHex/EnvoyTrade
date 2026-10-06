@@ -1,10 +1,12 @@
-import { createSignal, createResource, createEffect, For, Show } from 'solid-js'
+import { createSignal, createResource, createEffect, createMemo, For, Show } from 'solid-js'
 import {
   getGroupRebalanceDiff,
   getAccountRebalanceDiff,
   rebalanceGroup,
   rebalanceAccount,
   type RebalanceResult,
+  type FollowerDrift,
+  type SymbolDrift,
 } from '../api'
 import { ThanosBalanceIcon, ChevronDownIcon, InfoIcon } from './icons'
 
@@ -21,6 +23,53 @@ export interface RebalanceModalProps {
   onConfirm?: (followerIds?: string[]) => Promise<void> | void
   onCancel: () => void
   onSuccess?: () => void
+}
+
+function isFollowerDriftEqual(a: FollowerDrift, b: FollowerDrift): boolean {
+  if (
+    a.account_id !== b.account_id ||
+    a.account_name !== b.account_name ||
+    a.broker_account_id !== b.broker_account_id ||
+    a.enabled !== b.enabled ||
+    a.clone_factor !== b.clone_factor
+  ) {
+    return false
+  }
+  const sA = a.symbols ?? []
+  const sB = b.symbols ?? []
+  if (sA.length !== sB.length) return false
+  for (let i = 0; i < sA.length; i++) {
+    const s1 = sA[i]
+    const s2 = sB[i]
+    if (
+      s1.exchange !== s2.exchange ||
+      s1.tradingsymbol !== s2.tradingsymbol ||
+      s1.product !== s2.product ||
+      s1.lot_size !== s2.lot_size ||
+      s1.master_qty !== s2.master_qty ||
+      s1.target_qty !== s2.target_qty ||
+      s1.follower_qty !== s2.follower_qty ||
+      s1.drift_qty !== s2.drift_qty ||
+      s1.action !== s2.action
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function isSymbolDriftEqual(s1: SymbolDrift, s2: SymbolDrift): boolean {
+  return (
+    s1.exchange === s2.exchange &&
+    s1.tradingsymbol === s2.tradingsymbol &&
+    s1.product === s2.product &&
+    s1.lot_size === s2.lot_size &&
+    s1.master_qty === s2.master_qty &&
+    s1.target_qty === s2.target_qty &&
+    s1.follower_qty === s2.follower_qty &&
+    s1.drift_qty === s2.drift_qty &&
+    s1.action === s2.action
+  )
 }
 
 export function RebalanceModal(props: RebalanceModalProps) {
@@ -46,13 +95,63 @@ export function RebalanceModal(props: RebalanceModalProps) {
     (props.target?.type === 'group' && groupDiff.loading) ||
     (props.target?.type === 'account' && accountDiff.loading)
 
-  // Extract drifting followers for group mode
-  const driftingFollowers = () => {
+  const hasData = () => {
+    if (props.target?.type === 'group') return groupDiff() !== undefined
+    if (props.target?.type === 'account') return accountDiff() !== undefined
+    return false
+  }
+
+  // Stable memoized follower drift list to avoid remounting non-diff rows
+  let prevFollowersMap = new Map<string, FollowerDrift>()
+  const driftingFollowers = createMemo(() => {
     if (props.target?.type !== 'group') return []
     const diff = groupDiff()
     if (!diff?.drifts) return []
-    return diff.drifts.filter((d) => d.symbols && d.symbols.length > 0)
-  }
+    const newDrifters = diff.drifts.filter((d) => d.symbols && d.symbols.length > 0)
+
+    const nextMap = new Map<string, FollowerDrift>()
+    const result: FollowerDrift[] = []
+
+    for (const item of newDrifters) {
+      const prev = prevFollowersMap.get(item.account_id)
+      if (prev && isFollowerDriftEqual(prev, item)) {
+        result.push(prev)
+        nextMap.set(item.account_id, prev)
+      } else {
+        result.push(item)
+        nextMap.set(item.account_id, item)
+      }
+    }
+
+    prevFollowersMap = nextMap
+    return result
+  })
+
+  // Stable memoized single account symbols to avoid remounting non-diff symbol rows
+  let prevAccountSymbolsMap = new Map<string, SymbolDrift>()
+  const accountSymbols = createMemo(() => {
+    if (props.target?.type !== 'account') return []
+    const acc = accountDiff()
+    if (!acc?.symbols) return []
+
+    const nextMap = new Map<string, SymbolDrift>()
+    const result: SymbolDrift[] = []
+
+    for (const s of acc.symbols) {
+      const key = `${s.exchange}:${s.tradingsymbol}:${s.product}`
+      const prev = prevAccountSymbolsMap.get(key)
+      if (prev && isSymbolDriftEqual(prev, s)) {
+        result.push(prev)
+        nextMap.set(key, prev)
+      } else {
+        result.push(s)
+        nextMap.set(key, s)
+      }
+    }
+
+    prevAccountSymbolsMap = nextMap
+    return result
+  })
 
   let headerCheckboxRef: HTMLInputElement | undefined
 
@@ -65,21 +164,37 @@ export function RebalanceModal(props: RebalanceModalProps) {
     }
   })
 
-  // Reset state and select all drifting followers when diff loads
+  // Only reset state on initial modal open or target change, preserving state on subsequent refetches
+  let lastOpenedTargetKey: string | null = null
   createEffect(() => {
-    if (props.open) {
+    const isOpen = props.open
+    const targetKey = isOpen && props.target ? `${props.target.type}:${props.target.id}` : null
+
+    if (targetKey && targetKey !== lastOpenedTargetKey) {
       setError(null)
       setSubmitting(false)
       setReceipt(null)
-
-      if (props.target?.type === 'group') {
-        const drifters = driftingFollowers()
-        const ids = drifters.map((d) => d.account_id)
-        setSelectedFollowers(ids)
-        // Keep all dropdowns folded by default
-        setExpandedFollowers([])
-      }
+      setExpandedFollowers([])
+      setSelectedFollowers([])
+      lastOpenedTargetKey = targetKey
+    } else if (!isOpen) {
+      lastOpenedTargetKey = null
     }
+  })
+
+  // Synchronize selected followers when drifting followers load without collapsing expanded dropdowns
+  createEffect(() => {
+    if (!props.open || props.target?.type !== 'group') return
+    const drifters = driftingFollowers()
+    if (drifters.length === 0) return
+
+    setSelectedFollowers((prev) => {
+      const currentDrifterIds = drifters.map((d) => d.account_id)
+      if (prev.length === 0) {
+        return currentDrifterIds
+      }
+      return prev.filter((id) => currentDrifterIds.includes(id))
+    })
   })
 
   const toggleSelectAll = () => {
@@ -244,7 +359,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
           {/* Diff Content View */}
           <Show when={!receipt()}>
             <div class="rebalance-diff-section">
-              <Show when={isLoading()}>
+              <Show when={!hasData() && isLoading()}>
                 <div class="rebalance-skeleton" data-testid="rebalance-skeleton">
                   <div class="skeleton-line skeleton-header-line" />
                   <div class="skeleton-line" />
@@ -252,7 +367,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
                 </div>
               </Show>
 
-              <Show when={!isLoading()}>
+              <Show when={hasData()}>
                 {/* Clean Equilibrium State */}
                 <Show when={!hasAnyDrift()}>
                   <div class="rebalance-equilibrium-state" data-testid="rebalance-equilibrium">
@@ -272,26 +387,26 @@ export function RebalanceModal(props: RebalanceModalProps) {
                       </span>
                     </div>
 
-                    <div class="rebalance-followers-list">
-                      <div class="rebalance-list-header-row">
-                        <div class="col-check">
-                          <input
-                            ref={headerCheckboxRef}
-                            type="checkbox"
-                            aria-label="Select All Followers"
-                            checked={
-                              driftingFollowers().length > 0 &&
-                              selectedFollowers().length === driftingFollowers().length
-                            }
-                            onChange={toggleSelectAll}
-                            disabled={submitting()}
-                          />
-                        </div>
-                        <span class="col-follower-header">Follower Account</span>
-                        <span class="col-drift-header">Drift Details</span>
-                        <span class="col-expand-header" />
+                    <div class="rebalance-list-header-row">
+                      <div class="col-check">
+                        <input
+                          ref={headerCheckboxRef}
+                          type="checkbox"
+                          aria-label="Select All Followers"
+                          checked={
+                            driftingFollowers().length > 0 &&
+                            selectedFollowers().length === driftingFollowers().length
+                          }
+                          onChange={toggleSelectAll}
+                          disabled={submitting()}
+                        />
                       </div>
+                      <span class="col-follower-header">Follower Account</span>
+                      <span class="col-drift-header">Drift Details</span>
+                      <span class="col-expand-header" />
+                    </div>
 
+                    <div class="rebalance-followers-list">
                       <For each={driftingFollowers()}>
                         {(f) => {
                           const isSelected = () => selectedFollowers().includes(f.account_id)
@@ -409,7 +524,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        <For each={accountDiff()?.symbols ?? []}>
+                        <For each={accountSymbols()}>
                           {(s) => (
                             <tr>
                               <td class="font-semibold">{s.tradingsymbol}</td>

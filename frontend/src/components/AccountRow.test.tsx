@@ -92,6 +92,43 @@ describe('AccountRow', () => {
     expect(onSquareOff).toHaveBeenCalled()
   })
 
+  it('master row: loads positions using master accountId instead of targetGroupId for Square Off', async () => {
+    const getAccountOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [
+        { product: 'NRML', instrument: 'CRUDEOIL26OCT10200CE', qty: -3, avgPrice: '69.6', ltp: '76.4', mtm: '-3090' },
+      ],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+    const masterFollower: GroupFollower = {
+      accountId: 'master-acc-uuid-1234',
+      name: 'Rohan Singhal',
+      brokerAccountId: 'KU2675',
+      enabled: true,
+      status: 'ok',
+    }
+    render(() => (
+      <AccountRow
+        follower={masterFollower}
+        isMaster
+        targetGroupId="group-uuid-5678"
+        targetGroupName="Test Group"
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+    await userEvent.click(screen.getByLabelText('Square Off'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(getAccountOrdersSpy).toHaveBeenCalledWith('master-acc-uuid-1234', 'open_positions')
+    expect(getAccountOrdersSpy).not.toHaveBeenCalledWith('group-uuid-5678', 'open_positions')
+  })
+
   it('gates Exit Open Orders behind a confirm modal', async () => {
     const onExitOpenOrders = vi.fn()
     render(() => (

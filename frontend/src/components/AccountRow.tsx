@@ -182,6 +182,7 @@ export function AccountRow(props: {
             id: props.isMaster ? (props.targetGroupId || props.follower.accountId) : props.follower.accountId,
             name: props.isMaster ? (props.targetGroupName || props.follower.name) : props.follower.name,
             brokerAccountId: props.follower.brokerAccountId,
+            masterId: props.isMaster ? props.follower.accountId : undefined,
           }}
           onConfirm={async (symbols) => {
             try {
