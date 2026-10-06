@@ -32,7 +32,8 @@ VALUES
   ('148.113.41.46', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u6', 'mock_p6', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.47', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u7', 'mock_p7', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.48', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u8', 'mock_p8', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.49', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u9', 'mock_p9', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY')
+  ('148.113.41.49', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u9', 'mock_p9', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.50', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u10', 'mock_p10', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY')
 ON CONFLICT (ip_address) DO UPDATE SET
   host        = EXCLUDED.host,
   port        = EXCLUDED.port,
@@ -91,12 +92,12 @@ ON CONFLICT (id) DO UPDATE SET
 INSERT INTO follow_links (follower_id, clone_factor, max_qty_per_order, enabled, effective_from, group_id)
 VALUES
   ('a5183e89-6cb2-4d32-91a2-6dc525570185', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000001'),
-  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000001'),
-  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000001'),
+  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 0.500000, NULL, false, '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000001'),
+  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 0.750000, 500,  true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000001'),
   ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000001'),
   ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 1.000000, NULL, true,  '2026-09-10 04:54:59.917762+00', 'b0000000-0000-0000-0000-000000000002'),
   ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000002'),
-  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000002'),
+  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 0.500000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000002'),
   ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 1.000000, NULL, true,  '2026-09-08 02:23:46.867428+00', 'b0000000-0000-0000-0000-000000000002')
 ON CONFLICT (follower_id) DO UPDATE SET
   clone_factor      = EXCLUDED.clone_factor,

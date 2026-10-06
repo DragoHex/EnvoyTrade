@@ -69,6 +69,9 @@ type stubStore struct {
 	setAPISecretErr  error
 	setAPISecretArgs []setAPISecretCall
 
+	setAccessTokenErr  error
+	setAccessTokenArgs []setAccessTokenCall
+
 	setEncryptedCredentialsErr  error
 	setEncryptedCredentialsArgs []setEncryptedCredentialsCall
 
@@ -125,6 +128,14 @@ type setAPIKeyCall struct {
 type setAPISecretCall struct {
 	ID        uuid.UUID
 	ApiSecret string
+}
+
+type setAccessTokenCall struct {
+	ID         uuid.UUID
+	Token      string
+	ExpiresAt  *time.Time
+	AuthStatus string
+	AuthError  string
 }
 
 type updateFollowLinkTermsCall struct {
@@ -258,6 +269,11 @@ func (s *stubStore) SetAccountAPIKey(_ context.Context, id uuid.UUID, apiKey str
 func (s *stubStore) SetAccountAPISecret(_ context.Context, id uuid.UUID, apiSecret string) error {
 	s.setAPISecretArgs = append(s.setAPISecretArgs, setAPISecretCall{id, apiSecret})
 	return s.setAPISecretErr
+}
+
+func (s *stubStore) SetAccountAccessToken(_ context.Context, id uuid.UUID, token string, expiresAt *time.Time, authStatus, authError string) error {
+	s.setAccessTokenArgs = append(s.setAccessTokenArgs, setAccessTokenCall{id, token, expiresAt, authStatus, authError})
+	return s.setAccessTokenErr
 }
 
 func (s *stubStore) SetAccountName(_ context.Context, id uuid.UUID, name string) error {
@@ -394,4 +410,19 @@ type stubActionEngine struct {
 func (e *stubActionEngine) HandleMasterFill(_ context.Context, fill domain.MasterFill) error {
 	e.calls = append(e.calls, fill)
 	return e.err
+}
+
+type stubFollowerRegistrar struct {
+	registered   []uuid.UUID
+	unregistered []uuid.UUID
+	registerErr  error
+}
+
+func (s *stubFollowerRegistrar) RegisterFollower(_ context.Context, followerID uuid.UUID) error {
+	s.registered = append(s.registered, followerID)
+	return s.registerErr
+}
+
+func (s *stubFollowerRegistrar) UnregisterFollower(followerID uuid.UUID) {
+	s.unregistered = append(s.unregistered, followerID)
 }

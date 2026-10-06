@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"time"
 
 	"envoytrade/internal/crypto"
 	"envoytrade/internal/domain"
@@ -22,6 +23,7 @@ import (
 type AccountsStore interface {
 	SetFollowLinkEnabled(ctx context.Context, followerID uuid.UUID, enabled bool) error
 	SetAccountActive(ctx context.Context, id uuid.UUID, active bool) error
+	SetAccountAccessToken(ctx context.Context, id uuid.UUID, token string, expiresAt *time.Time, authStatus, authError string) error
 	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 	CreateAccount(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress string) error
@@ -164,6 +166,7 @@ type postAccountRequest struct {
 	BrokerAccountID string  `json:"brokerAccountId"`
 	ApiKey          string  `json:"apiKey"`
 	ApiSecret       string  `json:"apiSecret"`
+	AccessToken     *string `json:"accessToken"`
 	Password        *string `json:"password"`
 	TotpSecret      *string `json:"totpSecret"`
 	IP              *string `json:"ip"`
@@ -301,6 +304,13 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "" {
+		if err := h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), nil, "authenticated", ""); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to set access token")
+			return
+		}
+	}
+
 	if h.syncer != nil && encPass != "" && encTotp != "" {
 		go func() {
 			_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
@@ -343,6 +353,9 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "account created but failed to attach to group")
 			return
 		}
+		if h.followerRegistrar != nil {
+			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+		}
 		if masterID != uuid.Nil {
 			masterIDStr := masterID.String()
 			resp.MasterID = &masterIDStr
@@ -370,6 +383,7 @@ type patchAccountRequest struct {
 	IPAddress      *string `json:"ipAddress"`
 	ApiKey         *string `json:"apiKey"`
 	ApiSecret      *string `json:"apiSecret"`
+	AccessToken    *string `json:"accessToken"`
 	Password       *string `json:"password"`
 	TotpSecret     *string `json:"totpSecret"`
 }
@@ -543,9 +557,20 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		resp["credentials"] = "updated"
 		updated = true
 	}
+	if req.AccessToken != nil {
+		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, *req.AccessToken, nil, "authenticated", "")) {
+			return
+		}
+		role, _ := h.store.AccountRole(r.Context(), id)
+		if role == "follower" && h.followerRegistrar != nil {
+			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+		}
+		resp["accessToken"] = "updated"
+		updated = true
+	}
 
 	if !updated {
-		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"cloneFactor\", \"maxQtyPerOrder\", \"status\", \"ip\", \"apiKey\", \"apiSecret\", \"password\", or \"totpSecret\" is required")
+		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"cloneFactor\", \"maxQtyPerOrder\", \"status\", \"ip\", \"apiKey\", \"apiSecret\", \"accessToken\", \"password\", or \"totpSecret\" is required")
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

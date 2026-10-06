@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -311,6 +312,125 @@ func TestPostAccount_FollowerWithMasterID_Succeeds(t *testing.T) {
 	}
 	if len(store.createAccountArgs) != 1 || store.createAccountArgs[0].IPAddress != "192.168.1.100" {
 		t.Errorf("createAccountArgs = %+v, want ip 192.168.1.100", store.createAccountArgs)
+	}
+}
+
+func TestPostAccount_Follower_RegistersWithWorkerPool(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "REG001", "apiSecret": "s",
+		"maxQtyPerOrder": 10, "masterId": master.String(), "ip": "192.168.1.100",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(registrar.registered) != 1 {
+		t.Fatalf("RegisterFollower called %d times, want 1", len(registrar.registered))
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["id"] != registrar.registered[0].String() {
+		t.Errorf("registered follower ID = %v, want %v", registrar.registered[0], resp["id"])
+	}
+}
+
+func TestPostAccount_Master_DoesNotRegisterWithWorkerPool(t *testing.T) {
+	store := &stubStore{}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "master", "broker": "kite", "brokerAccountId": "MSTR01", "apiKey": "k", "apiSecret": "s",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(registrar.registered) != 0 {
+		t.Fatalf("RegisterFollower should not be called for master, got %d calls", len(registrar.registered))
+	}
+}
+
+func TestPostAccount_Follower_CreationFails_DoesNotRegister(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{
+		accountRoles:     map[uuid.UUID]string{master: "master"},
+		createAccountErr: errors.New("db insert failed"),
+	}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "FAIL01", "apiSecret": "s",
+		"maxQtyPerOrder": 10, "masterId": master.String(), "ip": "192.168.1.100",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if len(registrar.registered) != 0 {
+		t.Fatalf("RegisterFollower should not be called when creation fails, got %d calls", len(registrar.registered))
+	}
+}
+
+func TestPostAccount_Follower_CreateFollowLinkFails_DoesNotRegister(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{
+		accountRoles:        map[uuid.UUID]string{master: "master"},
+		createFollowLinkErr: errors.New("link failed"),
+	}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "FAIL02", "apiSecret": "s",
+		"maxQtyPerOrder": 10, "masterId": master.String(), "ip": "192.168.1.100",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if len(registrar.registered) != 0 {
+		t.Fatalf("RegisterFollower should not be called when link fails, got %d calls", len(registrar.registered))
+	}
+}
+
+func TestPostAccount_Follower_RegistrarError_StillReturns201(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
+	registrar := &stubFollowerRegistrar{registerErr: errors.New("broker connection refused")}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "REGERR", "apiSecret": "s",
+		"maxQtyPerOrder": 10, "masterId": master.String(), "ip": "192.168.1.100",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(registrar.registered) != 1 {
+		t.Fatalf("RegisterFollower should still have been attempted, got %d calls", len(registrar.registered))
 	}
 }
 
@@ -654,3 +774,66 @@ func TestPatchAccount_MultipleFields_UpdatesAllFields(t *testing.T) {
 		t.Errorf("decrypted totp = %q, err = %v", decTotp, err)
 	}
 }
+
+func TestPostAccount_WithAccessToken_StoresTokenAndRegistersFollower(t *testing.T) {
+	master := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"role":            "follower",
+		"broker":          "testbroker",
+		"brokerAccountId": "NEW01",
+		"apiKey":          "key1",
+		"apiSecret":       "sec1",
+		"accessToken":     "token123",
+		"ip":              "192.168.1.100",
+		"masterId":        master.String(),
+		"maxQtyPerOrder":  100,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setAccessTokenArgs) != 1 {
+		t.Fatalf("setAccessTokenArgs called %d times, want 1", len(store.setAccessTokenArgs))
+	}
+	if store.setAccessTokenArgs[0].Token != "token123" {
+		t.Errorf("got token %q, want %q", store.setAccessTokenArgs[0].Token, "token123")
+	}
+	if len(registrar.registered) != 1 {
+		t.Fatalf("RegisterFollower called %d times, want 1", len(registrar.registered))
+	}
+}
+
+func TestPatchAccount_WithAccessToken_UpdatesTokenAndRegistersFollower(t *testing.T) {
+	followerID := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{followerID: "follower"}}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
+
+	body, _ := json.Marshal(map[string]any{
+		"accessToken": "new_refreshed_token",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+followerID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setAccessTokenArgs) != 1 {
+		t.Fatalf("setAccessTokenArgs called %d times, want 1", len(store.setAccessTokenArgs))
+	}
+	if store.setAccessTokenArgs[0].Token != "new_refreshed_token" {
+		t.Errorf("got token %q, want %q", store.setAccessTokenArgs[0].Token, "new_refreshed_token")
+	}
+	if len(registrar.registered) != 1 || registrar.registered[0] != followerID {
+		t.Errorf("RegisterFollower called with %v, want [%v]", registrar.registered, followerID)
+	}
+}
+

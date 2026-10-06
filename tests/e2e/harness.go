@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -94,7 +93,7 @@ type Harness struct {
 func NewHarness(t *testing.T) *Harness {
 	envoyURL := os.Getenv("ENVOY_URL")
 	if envoyURL == "" {
-		envoyURL = "http://localhost:8080"
+		envoyURL = "http://localhost:8085"
 	}
 	tbURL := os.Getenv("TESTBROKER_URL")
 	if tbURL == "" {
@@ -205,11 +204,15 @@ func (h *Harness) ensureServicesRunning() {
 	// 2. Check EnvoyTrade Server
 	if !isReachable(h.EnvoyURL + "/healthz") {
 		h.t.Logf("EnvoyTrade not running on %s, starting subprocess...", h.EnvoyURL)
+		serverPort := "8085"
+		if u, err := url.Parse(h.EnvoyURL); err == nil && u.Port() != "" {
+			serverPort = u.Port()
+		}
 		serverCmd := exec.Command("go", "run", "./cmd/server")
 		serverCmd.Dir = rootDir
 		serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		serverCmd.Env = append(os.Environ(),
-			"PORT=8080",
+			"PORT="+serverPort,
 			"DATABASE_URL="+h.DatabaseURL,
 			"ENCRYPTION_KEY=envoytrade-e2e-encryption-key-32b",
 			"TESTBROKER_URL="+h.TestBrokerURL,
@@ -362,16 +365,13 @@ func (h *Harness) WaitForFollowerOrder(ctx context.Context, followerID, brokerOr
 }
 
 func isReachable(rawURL string) bool {
-	u, err := url.Parse(rawURL)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		return false
 	}
-	conn, err := net.DialTimeout("tcp", u.Host, 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
+	_ = resp.Body.Close()
+	return resp.StatusCode < 500
 }
 
 func waitForURL(t *testing.T, targetURL string, timeout time.Duration) {

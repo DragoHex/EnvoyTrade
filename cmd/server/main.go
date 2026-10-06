@@ -186,6 +186,13 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("worker pool initialized", "followers_registered", followersRegistered)
 
+	followerRegistrar := &workerFollowerRegistrar{
+		pool:     workerPool,
+		resolver: brokerResolver,
+		store:    store,
+		logger:   logger.With("component", "follower_registrar"),
+	}
+
 	squareOffSvc := squareoff.NewService(store, brokerResolver, syncer, logger.With("component", "squareoff"))
 	rebalanceSvc := rebalance.NewService(store, brokerResolver, syncer, logger.With("component", "rebalance"))
 
@@ -260,13 +267,9 @@ func run(logger *slog.Logger) error {
 		logger.Error("sync active masters tickers failed", "error", err)
 	}
 
-	// Auto-restart master ticker on headless token refresh
+	// Auto-restart master ticker or refresh follower worker on headless token refresh
 	syncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
-		role, err := store.AccountRole(refreshCtx, accountID)
-		if err == nil && role == "master" {
-			return tickerManager.RestartMaster(refreshCtx, accountID)
-		}
-		return nil
+		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
 	}
 
 	// Periodic session expiration cleaner
@@ -317,12 +320,7 @@ func run(logger *slog.Logger) error {
 		httpapi.WithTickerManager(tickerManager),
 		httpapi.WithSquareOffService(squareOffSvc),
 		httpapi.WithRebalanceService(rebalanceSvc),
-		httpapi.WithFollowerRegistrar(&workerFollowerRegistrar{
-			pool:     workerPool,
-			resolver: brokerResolver,
-			store:    store,
-			logger:   logger.With("component", "follower_registrar"),
-		}),
+		httpapi.WithFollowerRegistrar(followerRegistrar),
 	)
 
 	if frontend.HasEmbeddedUI() {
@@ -458,27 +456,82 @@ func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.
 	return count, nil
 }
 
+type followerBrokerResolver interface {
+	ResolveBroker(ctx context.Context, accountID uuid.UUID) (broker.Broker, error)
+}
+
 type workerFollowerRegistrar struct {
 	pool     *worker.Pool
-	resolver *serverBrokerResolver
-	store    *postgres.Store
+	resolver followerBrokerResolver
+	store    worker.Store
 	logger   *slog.Logger
+}
+
+func (w *workerFollowerRegistrar) log() *slog.Logger {
+	if w.logger != nil {
+		return w.logger
+	}
+	return slog.Default()
 }
 
 func (w *workerFollowerRegistrar) RegisterFollower(ctx context.Context, followerID uuid.UUID) error {
 	b, err := w.resolver.ResolveBroker(ctx, followerID)
 	if err != nil {
-		w.logger.Error("dynamic worker registration failed: cannot resolve broker", "follower_id", followerID, "error", err)
+		w.log().Error("dynamic worker registration failed: cannot resolve broker", "follower_id", followerID, "error", err)
 		return err
 	}
-	w.pool.Register(ctx, followerID, b, w.store, 16)
-	w.logger.Info("follower registered with worker pool", "follower_id", followerID)
+	w.pool.Register(context.Background(), followerID, b, w.store, 16)
+	w.log().Info("follower registered with worker pool", "follower_id", followerID)
 	return nil
 }
 
 func (w *workerFollowerRegistrar) UnregisterFollower(followerID uuid.UUID) {
 	w.pool.Unregister(followerID)
-	w.logger.Info("follower unregistered from worker pool", "follower_id", followerID)
+	w.log().Info("follower unregistered from worker pool", "follower_id", followerID)
+}
+
+type accountRoleStore interface {
+	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
+}
+
+type masterTickerRestarter interface {
+	RestartMaster(ctx context.Context, masterID uuid.UUID) error
+}
+
+type followerRegistrar interface {
+	RegisterFollower(ctx context.Context, followerID uuid.UUID) error
+}
+
+func handleTokenRefreshed(
+	ctx context.Context,
+	accountID uuid.UUID,
+	store accountRoleStore,
+	tickerMgr masterTickerRestarter,
+	registrar followerRegistrar,
+	logger *slog.Logger,
+) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	role, err := store.AccountRole(ctx, accountID)
+	if err != nil {
+		logger.Error("failed to get account role on token refresh", "account_id", accountID, "error", err)
+		return err
+	}
+	switch role {
+	case "master":
+		if tickerMgr != nil {
+			return tickerMgr.RestartMaster(ctx, accountID)
+		}
+	case "follower":
+		if registrar != nil {
+			if err := registrar.RegisterFollower(ctx, accountID); err != nil {
+				logger.Error("failed to register follower worker on token refresh", "account_id", accountID, "error", err)
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type serverMasterReader struct {
