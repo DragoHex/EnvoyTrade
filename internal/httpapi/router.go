@@ -19,13 +19,20 @@ import (
 type Option func(*routerConfig)
 
 type routerConfig struct {
-	postbackHandler http.Handler
-	logger          *slog.Logger
-	syncer          PortfolioSyncer
-	tickerMgr       TickerManager
-	squareOffSvc    SquareOffService
-	rebalanceSvc    RebalanceService
-	staticFS        fs.FS
+	postbackHandler   http.Handler
+	logger            *slog.Logger
+	syncer            PortfolioSyncer
+	tickerMgr         TickerManager
+	squareOffSvc      SquareOffService
+	rebalanceSvc      RebalanceService
+	followerRegistrar FollowerRegistrar
+	staticFS          fs.FS
+}
+
+// FollowerRegistrar dynamically manages follower registration in the worker pool.
+type FollowerRegistrar interface {
+	RegisterFollower(ctx context.Context, followerID uuid.UUID) error
+	UnregisterFollower(followerID uuid.UUID)
 }
 
 // PortfolioSyncer provides live portfolio synchronization for an account.
@@ -74,6 +81,12 @@ func WithRebalanceService(svc RebalanceService) Option {
 	}
 }
 
+// WithFollowerRegistrar configures dynamic follower worker pool registration.
+func WithFollowerRegistrar(fr FollowerRegistrar) Option {
+	return func(c *routerConfig) {
+		c.followerRegistrar = fr
+	}
+}
 
 // WithLogger configures structured request logging middleware.
 func WithLogger(logger *slog.Logger) Option {
@@ -92,7 +105,15 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	h := &handlers{store: store, engine: actionEngine, syncer: cfg.syncer, tickerMgr: cfg.tickerMgr, squareOffSvc: cfg.squareOffSvc, rebalanceSvc: cfg.rebalanceSvc}
+	h := &handlers{
+		store:             store,
+		engine:            actionEngine,
+		syncer:            cfg.syncer,
+		tickerMgr:         cfg.tickerMgr,
+		squareOffSvc:      cfg.squareOffSvc,
+		rebalanceSvc:      cfg.rebalanceSvc,
+		followerRegistrar: cfg.followerRegistrar,
+	}
 
 	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", h.postLogin)
@@ -199,12 +220,13 @@ type Store interface {
 }
 
 type handlers struct {
-	store        Store
-	engine       Engine
-	syncer       PortfolioSyncer
-	tickerMgr    TickerManager
-	squareOffSvc SquareOffService
-	rebalanceSvc RebalanceService
+	store             Store
+	engine            Engine
+	syncer            PortfolioSyncer
+	tickerMgr         TickerManager
+	squareOffSvc      SquareOffService
+	rebalanceSvc      RebalanceService
+	followerRegistrar FollowerRegistrar
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

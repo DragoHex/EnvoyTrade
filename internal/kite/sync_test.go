@@ -275,3 +275,61 @@ func TestSyncAccountPortfolio_LoginFailure_RecordsAuthError(t *testing.T) {
 		t.Errorf("AuthError = %s, want invalid credentials", store.setTokenCalls[0].AuthError)
 	}
 }
+
+func TestSyncAccountPortfolio_TokenRejectedUpstream_ReloginsAndRetries(t *testing.T) {
+	accID := uuid.New()
+	validFuture := time.Now().Add(12 * time.Hour)
+
+	encPass, _ := crypto.Encrypt("mypassword")
+	encTotp, _ := crypto.Encrypt("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+
+	store := &mockSyncStore{
+		authInfo: domain.AccountAuthInfo{
+			ID:                  accID,
+			Role:                "master",
+			Broker:              "kite",
+			BrokerAccountID:     "TEST01",
+			ApiKey:              "test_api_key",
+			ApiSecret:           "test_api_secret",
+			EncryptedPassword:   encPass,
+			EncryptedTotpSecret: encTotp,
+			AccessToken:         "stale_rejected_token",
+			TokenExpiresAt:      &validFuture,
+			AuthStatus:          "authenticated",
+		},
+	}
+
+	callCount := 0
+	loginCalled := false
+
+	syncer := &kite.PortfolioSyncer{
+		Store: store,
+		APIFactory: func(apiKey, accessToken string) (kite.API, error) {
+			if accessToken == "stale_rejected_token" {
+				return &fakeKiteAPI{
+					holdingsErr: errors.New("Incorrect `api_key` or `access_token`."),
+				}, nil
+			}
+			return &fakeKiteAPI{
+				holdings: kiteconnect.Holdings{},
+			}, nil
+		},
+		LoginFunc: func(ctx context.Context, userID, password, totpSecret, apiKey, apiSecret string) (string, error) {
+			loginCalled = true
+			callCount++
+			return "fresh_token_888", nil
+		},
+	}
+
+	err := syncer.SyncAccountPortfolio(context.Background(), accID)
+	if err != nil {
+		t.Fatalf("SyncAccountPortfolio should recover after upstream rejection, got: %v", err)
+	}
+	if !loginCalled {
+		t.Fatalf("expected LoginFunc to be invoked on token rejection")
+	}
+	if len(store.setTokenCalls) != 1 || store.setTokenCalls[0].Token != "fresh_token_888" {
+		t.Fatalf("expected setTokenCall with fresh_token_888, got: %+v", store.setTokenCalls)
+	}
+}
+

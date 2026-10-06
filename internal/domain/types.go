@@ -115,6 +115,13 @@ var ErrConflict = errors.New("domain: conflict")
 // while the current master account still has open positions.
 var ErrMasterHasOpenPositions = errors.New("domain: master has open positions")
 
+// ErrUnproxiedNotAllowed is returned when an order routing or execution operation
+// is attempted on a broker that is not configured with a static proxy.
+var ErrUnproxiedNotAllowed = errors.New("domain: unproxied order routing is not allowed: IP needs to be set for this operation")
+
+// ErrIPRequired is returned when an account operation requires a dedicated IP address.
+var ErrIPRequired = errors.New("domain: IP address is required for follower accounts")
+
 // Account is the flat, ungrouped view of a single account (master or
 // follower) the Accounts page manages — unlike GroupSummary/GroupDetail,
 // which model the master+followers rollup, this is one row per account

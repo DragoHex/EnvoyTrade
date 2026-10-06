@@ -377,5 +377,8 @@ func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to attach account to group")
 		return
 	}
+	if h.followerRegistrar != nil {
+		_ = h.followerRegistrar.RegisterFollower(r.Context(), accountID)
+	}
 	w.WriteHeader(http.StatusCreated)
 }

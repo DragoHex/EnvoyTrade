@@ -45,6 +45,22 @@ func NextKiteExpiry(now time.Time) time.Time {
 	return target
 }
 
+// IsAuthError reports whether an error indicates Kite Connect access token expiration or invalidity.
+func IsAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var kErr kiteconnect.Error
+	if errors.As(err, &kErr) {
+		return kErr.ErrorType == kiteconnect.TokenError || kErr.Code == http.StatusForbidden || kErr.Code == http.StatusUnauthorized
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "tokenexception") ||
+		strings.Contains(msg, "incorrect `api_key` or `access_token`") ||
+		strings.Contains(msg, "incorrect api_key or access_token") ||
+		strings.Contains(msg, "invalid token")
+}
+
 // SyncAccountPortfolio syncs holdings, positions, and margins for an account,
 // performing headless login if the access token is missing or expired.
 func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error {
@@ -73,7 +89,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	accessToken := authInfo.AccessToken
 	tokenExpired := accessToken == "" || (authInfo.TokenExpiresAt != nil && !time.Now().Before(*authInfo.TokenExpiresAt))
 
-	if tokenExpired {
+	performLogin := func() error {
 		if authInfo.EncryptedPassword == "" || authInfo.EncryptedTotpSecret == "" {
 			return errors.New("no active access token or stored credentials")
 		}
@@ -109,6 +125,13 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		if s.OnTokenRefreshed != nil {
 			_ = s.OnTokenRefreshed(ctx, accountID)
 		}
+		return nil
+	}
+
+	if tokenExpired {
+		if err := performLogin(); err != nil {
+			return err
+		}
 	}
 
 	apiFactory := s.APIFactory
@@ -135,6 +158,14 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	}
 
 	holdings, err := client.GetHoldings()
+	if err != nil && IsAuthError(err) && !tokenExpired && authInfo.EncryptedPassword != "" && authInfo.EncryptedTotpSecret != "" {
+		if reloginErr := performLogin(); reloginErr == nil {
+			if newClient, cErr := apiFactory(authInfo.ApiKey, accessToken); cErr == nil {
+				client = newClient
+				holdings, err = client.GetHoldings()
+			}
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("fetch holdings: %w", err)
 	}

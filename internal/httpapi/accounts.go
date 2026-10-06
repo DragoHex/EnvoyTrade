@@ -494,6 +494,9 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		if writePatchStoreError(w, setErr) {
 			return
 		}
+		if role == "follower" && h.followerRegistrar != nil {
+			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+		}
 		resp["ip"] = validIP
 		updated = true
 	}
@@ -626,6 +629,9 @@ func (h *handlers) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		if h.tickerMgr != nil {
 			_ = h.tickerMgr.StopMaster(id)
 		}
+		if h.followerRegistrar != nil {
+			h.followerRegistrar.UnregisterFollower(id)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -646,6 +652,9 @@ func (h *handlers) deleteAccountGroup(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to remove account from group")
 	default:
+		if h.followerRegistrar != nil {
+			h.followerRegistrar.UnregisterFollower(id)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

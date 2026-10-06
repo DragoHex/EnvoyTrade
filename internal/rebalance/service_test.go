@@ -536,3 +536,115 @@ func TestRebalanceGroup_PartialBrokerFailure(t *testing.T) {
 	}
 }
 
+type authFailingBroker struct {
+	*fake.Broker
+	failFirst bool
+	hasFailed bool
+}
+
+type fakeSyncer struct {
+	syncFn func(ctx context.Context, id uuid.UUID) error
+}
+
+func (s *fakeSyncer) SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error {
+	if s.syncFn != nil {
+		return s.syncFn(ctx, accountID)
+	}
+	return nil
+}
+
+func (b *authFailingBroker) GetPositions(ctx context.Context) ([]broker.Position, error) {
+	if b.failFirst && !b.hasFailed {
+		b.hasFailed = true
+		return nil, errors.New("kite get positions: Incorrect `api_key` or `access_token`.")
+	}
+	return b.Broker.GetPositions(ctx)
+}
+
+func TestComputeGroupDiff_MasterAuthError_SyncsAndRecovers(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{
+			masterID: "master",
+			f1ID:     "follower",
+		},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{
+						AccountID:       f1ID,
+						Name:            "Follower 1",
+						BrokerAccountID: "BRK_F1",
+						Enabled:         true,
+					},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {
+				ID:              f1ID,
+				Name:            "Follower 1",
+				BrokerAccountID: "BRK_F1",
+				Role:            "follower",
+				MasterID:        &masterID,
+				Enabled:         true,
+				CloneFactor:     &cloneFactor,
+			},
+		},
+		lotSizes: map[string]int{
+			"NFO:NIFTY26OCTFUT": 75,
+		},
+	}
+
+	bMaster := &authFailingBroker{
+		Broker: &fake.Broker{
+			Positions: []broker.Position{
+				{Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT", Product: "NRML", Quantity: 75},
+			},
+		},
+		failFirst: true,
+	}
+	bF1 := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT", Product: "NRML", Quantity: 75},
+		},
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID: bMaster,
+			f1ID:     bF1,
+		},
+	}
+
+	syncedMaster := false
+	syncer := &fakeSyncer{
+		syncFn: func(ctx context.Context, id uuid.UUID) error {
+			if id == masterID {
+				syncedMaster = true
+			}
+			return nil
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, syncer, nil)
+
+	diff, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff should recover after auth error, got: %v", err)
+	}
+	if !syncedMaster {
+		t.Fatalf("expected syncer to be called for master")
+	}
+	if diff.FollowersEvaluated != 1 {
+		t.Errorf("FollowersEvaluated = %d, want 1", diff.FollowersEvaluated)
+	}
+}
+
+

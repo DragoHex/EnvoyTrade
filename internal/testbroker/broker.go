@@ -6,27 +6,45 @@ import (
 	"os"
 
 	"envoytrade/internal/broker"
+	"envoytrade/internal/domain"
 	"testbroker/sdk"
 )
 
 const defaultBaseURI = "http://localhost:8089"
 
+// ProxyConfig allows testbroker to accept the same proxy structure as Kite.
+type ProxyConfig struct {
+	Scheme       string
+	Host         string
+	Port         int
+	ClientID     string
+	ClientSecret string
+}
+
 // Broker adapts testbroker/sdk.Client to broker.Broker.
 type Broker struct {
 	client  *sdk.Client
 	baseURI string
+	proxied bool
 }
 
 // NewBroker wraps an initialized sdk.Client.
-func NewBroker(client *sdk.Client, baseURI string) *Broker {
+func NewBroker(client *sdk.Client, baseURI string, proxied bool) *Broker {
 	return &Broker{
 		client:  client,
 		baseURI: baseURI,
+		proxied: proxied,
 	}
 }
 
-// NewLiveBroker creates a testbroker adapter instance from account credentials and optional baseURI.
-func NewLiveBroker(apiKey, accessToken, baseURI string) *Broker {
+// IsProxied reports whether this broker instance was configured with proxy details.
+func (b *Broker) IsProxied() bool {
+	return b.proxied
+}
+
+// NewLiveBroker creates a testbroker adapter instance from account credentials, optional baseURI, and optional proxy config.
+// The mock trader accepts the mock proxy config for interface parity, but internally ignores it and makes unproxied calls to baseURI.
+func NewLiveBroker(apiKey, accessToken, baseURI string, proxyCfg *ProxyConfig) *Broker {
 	if baseURI == "" {
 		baseURI = os.Getenv("TESTBROKER_URL")
 	}
@@ -38,7 +56,8 @@ func NewLiveBroker(apiKey, accessToken, baseURI string) *Broker {
 	client.SetAccessToken(accessToken)
 	client.SetBaseURI(baseURI)
 
-	return NewBroker(client, baseURI)
+	proxied := (proxyCfg != nil && proxyCfg.Host != "")
+	return NewBroker(client, baseURI, proxied)
 }
 
 // BaseURI returns the configured base URI for the mock server.
@@ -47,7 +66,11 @@ func (b *Broker) BaseURI() string {
 }
 
 // PlaceOrder translates broker.OrderParams into sdk.OrderParams and places the order.
+// Mutating order placement requires proxy configuration.
 func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.OrderParams) (broker.OrderResponse, error) {
+	if !b.proxied {
+		return broker.OrderResponse{}, fmt.Errorf("testbroker place order: %w", domain.ErrUnproxiedNotAllowed)
+	}
 	resp, err := b.client.PlaceOrder(variety, sdk.OrderParams{
 		Exchange:        params.Exchange,
 		Tradingsymbol:   params.Tradingsymbol,
@@ -109,8 +132,11 @@ func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
 	return out, nil
 }
 
-// CancelOrder cancels an open order on testbroker.
+// CancelOrder cancels an open order on testbroker. Mutating cancellation requires proxy configuration.
 func (b *Broker) CancelOrder(ctx context.Context, variety, orderID string) (broker.OrderResponse, error) {
+	if !b.proxied {
+		return broker.OrderResponse{}, fmt.Errorf("testbroker cancel order: %w", domain.ErrUnproxiedNotAllowed)
+	}
 	if variety == "" {
 		variety = sdk.VarietyRegular
 	}
@@ -135,5 +161,15 @@ func NewBrokerFactory() broker.Factory {
 
 // CreateBroker builds a testbroker Broker for the account.
 func (f *Factory) CreateBroker(ctx context.Context, account broker.BrokerAccount) (broker.Broker, error) {
-	return NewLiveBroker(account.ApiKey, account.AccessToken, f.baseURI), nil
+	var proxyCfg *ProxyConfig
+	if account.ProxyHost != "" {
+		proxyCfg = &ProxyConfig{
+			Scheme:       "https",
+			Host:         account.ProxyHost,
+			Port:         account.ProxyPort,
+			ClientID:     account.ProxyUsername,
+			ClientSecret: account.ProxyPassword,
+		}
+	}
+	return NewLiveBroker(account.ApiKey, account.AccessToken, f.baseURI, proxyCfg), nil
 }

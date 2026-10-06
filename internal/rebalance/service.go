@@ -69,6 +69,31 @@ func abs(x int) int {
 	return x
 }
 
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "tokenexception") ||
+		strings.Contains(msg, "incorrect `api_key` or `access_token`") ||
+		strings.Contains(msg, "incorrect api_key or access_token") ||
+		strings.Contains(msg, "invalid token")
+}
+
+func (s *Service) getPositionsWithRetry(ctx context.Context, b broker.Broker, accountID uuid.UUID) ([]broker.Position, broker.Broker, error) {
+	positions, err := b.GetPositions(ctx)
+	if err != nil && s.syncer != nil && isAuthError(err) {
+		s.log().Info("rebalance: token expired or rejected, syncing portfolio", "account_id", accountID)
+		if syncErr := s.syncer.SyncAccountPortfolio(ctx, accountID); syncErr == nil {
+			if refreshedBroker, rErr := s.resolver.ResolveBroker(ctx, accountID); rErr == nil {
+				b = refreshedBroker
+				positions, err = b.GetPositions(ctx)
+			}
+		}
+	}
+	return positions, b, err
+}
+
 // ComputeAccountDiff calculates position drift for one follower relative to its master.
 func (s *Service) ComputeAccountDiff(ctx context.Context, followerID uuid.UUID) (domain.FollowerDrift, error) {
 	accs, err := s.store.Accounts(ctx, []uuid.UUID{followerID})
@@ -93,11 +118,11 @@ func (s *Service) ComputeAccountDiff(ctx context.Context, followerID uuid.UUID) 
 		return domain.FollowerDrift{}, fmt.Errorf("resolve follower broker: %w", err)
 	}
 
-	masterPositions, err := bMaster.GetPositions(ctx)
+	masterPositions, _, err := s.getPositionsWithRetry(ctx, bMaster, masterID)
 	if err != nil {
 		return domain.FollowerDrift{}, fmt.Errorf("fetch master positions: %w", err)
 	}
-	followerPositions, err := bFollower.GetPositions(ctx)
+	followerPositions, _, err := s.getPositionsWithRetry(ctx, bFollower, followerID)
 	if err != nil {
 		return domain.FollowerDrift{}, fmt.Errorf("fetch follower positions: %w", err)
 	}
@@ -118,7 +143,7 @@ func (s *Service) ComputeGroupDiff(ctx context.Context, groupID uuid.UUID) (doma
 		return domain.GroupRebalanceDiff{}, fmt.Errorf("resolve master broker: %w", err)
 	}
 
-	masterPositions, err := bMaster.GetPositions(ctx)
+	masterPositions, _, err := s.getPositionsWithRetry(ctx, bMaster, masterID)
 	if err != nil {
 		return domain.GroupRebalanceDiff{}, fmt.Errorf("fetch master positions: %w", err)
 	}
@@ -161,7 +186,7 @@ func (s *Service) ComputeGroupDiff(ctx context.Context, groupID uuid.UUID) (doma
 			continue
 		}
 
-		fPositions, err := bFollower.GetPositions(ctx)
+		fPositions, _, err := s.getPositionsWithRetry(ctx, bFollower, gf.AccountID)
 		if err != nil {
 			s.log().Warn("rebalance: fetch follower positions failed", "follower_id", gf.AccountID, "error", err)
 			continue

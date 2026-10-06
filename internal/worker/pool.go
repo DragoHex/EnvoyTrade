@@ -43,12 +43,17 @@ type Broker interface {
 	PlaceOrder(ctx context.Context, variety string, params broker.OrderParams) (broker.OrderResponse, error)
 }
 
+type workerItem struct {
+	ch     chan domain.Job
+	cancel context.CancelFunc
+}
+
 // Pool owns one goroutine and one bounded channel per registered
 // follower. It satisfies engine.Dispatcher structurally — engine never
 // imports this package, only the interface it declared.
 type Pool struct {
 	mu                sync.Mutex
-	workers           map[uuid.UUID]chan domain.Job
+	workers           map[uuid.UUID]workerItem
 	wg                sync.WaitGroup
 	done              chan struct{}
 	shutdown          sync.Once
@@ -62,7 +67,7 @@ type Pool struct {
 // NewPool creates an empty pool. Followers are added with Register.
 func NewPool() *Pool {
 	return &Pool{
-		workers:           make(map[uuid.UUID]chan domain.Job),
+		workers:           make(map[uuid.UUID]workerItem),
 		done:              make(chan struct{}),
 		RateLimitInterval: 100 * time.Millisecond,
 		MaxRetries:        3,
@@ -81,15 +86,31 @@ func (p *Pool) log() *slog.Logger {
 // channel of the given buffer size until ctx is cancelled or Shutdown is
 // called — Shutdown is authoritative regardless of which context (if
 // any) a caller passes in, so it always terminates every worker.
+// If the follower is already registered, the old worker goroutine is cancelled
+// and replaced.
 func (p *Pool) Register(ctx context.Context, followerID uuid.UUID, b Broker, store Store, bufferSize int) {
+	workerCtx, cancel := context.WithCancel(ctx)
 	ch := make(chan domain.Job, bufferSize)
 
 	p.mu.Lock()
-	p.workers[followerID] = ch
+	if old, exists := p.workers[followerID]; exists {
+		old.cancel()
+	}
+	p.workers[followerID] = workerItem{ch: ch, cancel: cancel}
 	p.mu.Unlock()
 
 	p.wg.Add(1)
-	go p.run(ctx, ch, b, store)
+	go p.run(workerCtx, ch, b, store)
+}
+
+// Unregister cancels and removes a follower's dedicated worker goroutine.
+func (p *Pool) Unregister(followerID uuid.UUID) {
+	p.mu.Lock()
+	if old, exists := p.workers[followerID]; exists {
+		old.cancel()
+		delete(p.workers, followerID)
+	}
+	p.mu.Unlock()
 }
 
 // Dispatch attempts a non-blocking hand-off to the given follower's
@@ -98,13 +119,13 @@ func (p *Pool) Register(ctx context.Context, followerID uuid.UUID, b Broker, sto
 // letter rather than blocking fan-out to other followers.
 func (p *Pool) Dispatch(followerID uuid.UUID, job domain.Job) bool {
 	p.mu.Lock()
-	ch, ok := p.workers[followerID]
+	item, ok := p.workers[followerID]
 	p.mu.Unlock()
 	if !ok {
 		return false
 	}
 	select {
-	case ch <- job:
+	case item.ch <- job:
 		return true
 	default:
 		return false
