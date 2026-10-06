@@ -26,7 +26,7 @@ func TestE2E_Rebalance(t *testing.T) {
 		fCliA := h.FollowerClient("follow01a")
 
 		// 1. Flatten all positions in the group first
-		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 		time.Sleep(100 * time.Millisecond)
 
 		// 2. Setup drift scenario:
@@ -74,7 +74,7 @@ func TestE2E_Rebalance(t *testing.T) {
 		}
 
 		// 3. Query Diff via GET /api/v1/groups/{id}/positions/rebalance/diff
-		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance/diff", Master01ID), nil)
+		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance/diff", Group01ID), nil)
 		if err != nil {
 			t.Fatalf("get group diff failed: %v", err)
 		}
@@ -124,7 +124,7 @@ func TestE2E_Rebalance(t *testing.T) {
 		}
 
 		// 4. Execute Group Rebalance via POST /api/v1/groups/{id}/positions/rebalance
-		rebalResp, rebalBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance", Master01ID), map[string]any{
+		rebalResp, rebalBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance", Group01ID), map[string]any{
 			"follower_ids": []string{Follow01AID},
 		})
 		if err != nil {
@@ -166,14 +166,14 @@ func TestE2E_Rebalance(t *testing.T) {
 		}
 
 		// 6. Clean up: square off group
-		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 	})
 
 	t.Run("Single_Follower_Rebalance_DiffAndExecution", func(t *testing.T) {
 		fCliA := h.FollowerClient("follow01a")
 
 		// 1. Flatten all positions in the group first
-		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 		time.Sleep(100 * time.Millisecond)
 
 		// 2. Place rogue position on Follower 01A: BUY 10 RELIANCE
@@ -233,11 +233,11 @@ func TestE2E_Rebalance(t *testing.T) {
 		fCliB := h.FollowerClient("follow01b")
 
 		// 1. Ensure clean flat state
-		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 		time.Sleep(100 * time.Millisecond)
 
 		// 2. Equilibrium check: diff should report 0 followers with drift
-		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance/diff", Master01ID), nil)
+		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance/diff", Group01ID), nil)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			t.Fatalf("get diff: status=%d, err=%v", resp.StatusCode, err)
 		}
@@ -274,7 +274,7 @@ func TestE2E_Rebalance(t *testing.T) {
 		}
 
 		// 4. Selective rebalance: ONLY select Follower 01A
-		rebalResp, rebalBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance", Master01ID), map[string]any{
+		rebalResp, rebalBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance", Group01ID), map[string]any{
 			"follower_ids": []string{Follow01AID},
 		})
 		if err != nil || rebalResp.StatusCode != http.StatusOK {
@@ -311,6 +311,6 @@ func TestE2E_Rebalance(t *testing.T) {
 		}
 
 		// Cleanup
-		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Master01ID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 	})
 }
