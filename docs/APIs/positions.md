@@ -35,7 +35,7 @@ Flattens open positions across the entire trading cluster (the group's Master ac
 {
   "action": "square_off",
   "status": "completed",
-  "group_id": "f6e70723-b904-4427-83ee-a85771dee2e4",
+  "group_id": "b0000000-0000-0000-0000-000000000001",
   "master_id": "f6e70723-b904-4427-83ee-a85771dee2e4",
   "followers_affected": 4,
   "cancelled_orders": 2,

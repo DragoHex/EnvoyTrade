@@ -16,7 +16,7 @@ Computes live position drifts across all linked followers in a group relative to
 **Response** (`200 OK`):
 ```json
 {
-  "group_id": "f6e70723-b904-4427-83ee-a85771dee2e4",
+  "group_id": "b0000000-0000-0000-0000-000000000001",
   "master_id": "f6e70723-b904-4427-83ee-a85771dee2e4",
   "followers_evaluated": 3,
   "followers_with_drift": 2,
@@ -97,7 +97,7 @@ Brings selected followers (or all drifting followers) into alignment with the ma
 {
   "action": "rebalance",
   "status": "completed",
-  "group_id": "f6e70723-b904-4427-83ee-a85771dee2e4",
+  "group_id": "b0000000-0000-0000-0000-000000000001",
   "followers_affected": 1,
   "orders_placed": 1,
   "orders": [
