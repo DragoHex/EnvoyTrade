@@ -19,6 +19,22 @@ type RebalanceService interface {
 	RebalanceAccount(ctx context.Context, accountID uuid.UUID) (domain.RebalanceResult, error)
 }
 
+func writeRebalanceError(w http.ResponseWriter, err error) {
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrAuthExpired) {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrBrokerUnreachable) {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err.Error())
+}
+
 func (h *handlers) getGroupRebalanceDiff(w http.ResponseWriter, r *http.Request) {
 	if h.rebalanceSvc == nil {
 		writeError(w, http.StatusNotImplemented, "rebalance service not configured")
@@ -33,11 +49,7 @@ func (h *handlers) getGroupRebalanceDiff(w http.ResponseWriter, r *http.Request)
 
 	diff, err := h.rebalanceSvc.ComputeGroupDiff(r.Context(), groupID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "group not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeRebalanceError(w, err)
 		return
 	}
 
@@ -66,11 +78,7 @@ func (h *handlers) postGroupRebalance(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.rebalanceSvc.RebalanceGroup(r.Context(), groupID, req.FollowerIDs)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "group not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeRebalanceError(w, err)
 		return
 	}
 
@@ -91,11 +99,7 @@ func (h *handlers) getAccountRebalanceDiff(w http.ResponseWriter, r *http.Reques
 
 	diff, err := h.rebalanceSvc.ComputeAccountDiff(r.Context(), accountID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "account not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeRebalanceError(w, err)
 		return
 	}
 
@@ -116,11 +120,7 @@ func (h *handlers) postAccountRebalance(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.rebalanceSvc.RebalanceAccount(r.Context(), accountID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "account not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeRebalanceError(w, err)
 		return
 	}
 

@@ -80,6 +80,32 @@ func isAuthError(err error) bool {
 		strings.Contains(msg, "invalid token")
 }
 
+func isBrokerUnreachableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504") ||
+		strings.Contains(msg, "network") ||
+		strings.Contains(msg, "broker is not reachable")
+}
+
+func wrapBrokerError(prefix string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if isAuthError(err) {
+		return fmt.Errorf("%s: %w (%v)", prefix, domain.ErrAuthExpired, err)
+	}
+	return fmt.Errorf("%s: %w (%v)", prefix, domain.ErrBrokerUnreachable, err)
+}
+
 func (s *Service) getPositionsWithRetry(ctx context.Context, b broker.Broker, accountID uuid.UUID) ([]broker.Position, broker.Broker, error) {
 	positions, err := b.GetPositions(ctx)
 	if err != nil && s.syncer != nil && isAuthError(err) {
@@ -111,20 +137,20 @@ func (s *Service) ComputeAccountDiff(ctx context.Context, followerID uuid.UUID) 
 	masterID := *followerAcc.MasterID
 	bMaster, err := s.resolver.ResolveBroker(ctx, masterID)
 	if err != nil {
-		return domain.FollowerDrift{}, fmt.Errorf("resolve master broker: %w", err)
+		return domain.FollowerDrift{}, wrapBrokerError("resolve master broker", err)
 	}
 	bFollower, err := s.resolver.ResolveBroker(ctx, followerID)
 	if err != nil {
-		return domain.FollowerDrift{}, fmt.Errorf("resolve follower broker: %w", err)
+		return domain.FollowerDrift{}, wrapBrokerError("resolve follower broker", err)
 	}
 
 	masterPositions, _, err := s.getPositionsWithRetry(ctx, bMaster, masterID)
 	if err != nil {
-		return domain.FollowerDrift{}, fmt.Errorf("fetch master positions: %w", err)
+		return domain.FollowerDrift{}, wrapBrokerError("fetch master positions", err)
 	}
 	followerPositions, _, err := s.getPositionsWithRetry(ctx, bFollower, followerID)
 	if err != nil {
-		return domain.FollowerDrift{}, fmt.Errorf("fetch follower positions: %w", err)
+		return domain.FollowerDrift{}, wrapBrokerError("fetch follower positions", err)
 	}
 
 	return s.calculateFollowerDrift(ctx, followerAcc, masterPositions, followerPositions)
@@ -140,12 +166,12 @@ func (s *Service) ComputeGroupDiff(ctx context.Context, groupID uuid.UUID) (doma
 	masterID := groupDetail.MasterID
 	bMaster, err := s.resolver.ResolveBroker(ctx, masterID)
 	if err != nil {
-		return domain.GroupRebalanceDiff{}, fmt.Errorf("resolve master broker: %w", err)
+		return domain.GroupRebalanceDiff{}, wrapBrokerError("resolve master broker", err)
 	}
 
 	masterPositions, _, err := s.getPositionsWithRetry(ctx, bMaster, masterID)
 	if err != nil {
-		return domain.GroupRebalanceDiff{}, fmt.Errorf("fetch master positions: %w", err)
+		return domain.GroupRebalanceDiff{}, wrapBrokerError("fetch master positions", err)
 	}
 
 	followerIDs := make([]uuid.UUID, 0, len(groupDetail.Followers))
@@ -180,22 +206,27 @@ func (s *Service) ComputeGroupDiff(ctx context.Context, groupID uuid.UUID) (doma
 			}
 		}
 
+		displayName := gf.Name
+		if displayName == "" {
+			displayName = gf.BrokerAccountID
+		}
+
 		bFollower, err := s.resolver.ResolveBroker(ctx, gf.AccountID)
 		if err != nil {
 			s.log().Warn("rebalance: resolve follower broker failed", "follower_id", gf.AccountID, "error", err)
-			continue
+			return domain.GroupRebalanceDiff{}, wrapBrokerError(fmt.Sprintf("resolve follower %s broker", displayName), err)
 		}
 
 		fPositions, _, err := s.getPositionsWithRetry(ctx, bFollower, gf.AccountID)
 		if err != nil {
 			s.log().Warn("rebalance: fetch follower positions failed", "follower_id", gf.AccountID, "error", err)
-			continue
+			return domain.GroupRebalanceDiff{}, wrapBrokerError(fmt.Sprintf("fetch follower %s positions", displayName), err)
 		}
 
 		fDrift, err := s.calculateFollowerDrift(ctx, fAcc, masterPositions, fPositions)
 		if err != nil {
 			s.log().Warn("rebalance: calculate follower drift failed", "follower_id", gf.AccountID, "error", err)
-			continue
+			return domain.GroupRebalanceDiff{}, fmt.Errorf("calculate follower %s drift: %w", displayName, err)
 		}
 
 		if len(fDrift.Symbols) > 0 {

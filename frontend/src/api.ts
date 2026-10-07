@@ -159,8 +159,12 @@ function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Res
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(body.error ?? `request failed: ${res.status}`)
+    const body = await res.json().catch(() => null)
+    const errMsg =
+      body && typeof body === 'object'
+        ? (body.error || body.message || body.detail || res.statusText)
+        : res.statusText
+    throw new Error(errMsg || `request failed: ${res.status}`)
   }
   return res.json()
 }

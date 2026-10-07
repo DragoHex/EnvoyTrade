@@ -235,3 +235,63 @@ func TestPostAccountRebalance_Success(t *testing.T) {
 		t.Errorf("expected accountID %s, got %s", fID, rebSvc.lastAccountID)
 	}
 }
+
+func TestGetGroupRebalanceDiff_BrokerUnreachable(t *testing.T) {
+	groupID := uuid.New()
+	rebSvc := &fakeRebalanceService{
+		groupDiffErr: domain.ErrBrokerUnreachable,
+	}
+
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	router := httpapi.NewRouter(store, engine, httpapi.WithRebalanceService(rebSvc))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/groups/"+groupID.String()+"/positions/rebalance/diff", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 Bad Gateway, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetGroupRebalanceDiff_AuthExpired(t *testing.T) {
+	groupID := uuid.New()
+	rebSvc := &fakeRebalanceService{
+		groupDiffErr: domain.ErrAuthExpired,
+	}
+
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	router := httpapi.NewRouter(store, engine, httpapi.WithRebalanceService(rebSvc))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/groups/"+groupID.String()+"/positions/rebalance/diff", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostGroupRebalance_BrokerUnreachable(t *testing.T) {
+	groupID := uuid.New()
+	rebSvc := &fakeRebalanceService{
+		rebalanceGroupErr: domain.ErrBrokerUnreachable,
+	}
+
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	router := httpapi.NewRouter(store, engine, httpapi.WithRebalanceService(rebSvc))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID.String()+"/positions/rebalance", bytes.NewBufferString("{}"))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 Bad Gateway, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

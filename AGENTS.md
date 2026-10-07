@@ -63,7 +63,16 @@ Interfaces are defined in the **consuming** package, not the implementing one �
 - `internal/queue.Publisher[T]`/`Consumer[T]` is the dispatch-transport seam — generic over event type (`domain.MasterFill`, `domain.OrderUpdate`), so `memchan.Queue[T]` serves both without a second implementation. Swapping `memchan` for Redis Streams/Kafka later should be a drop-in.
 - `internal/kite/callback.AccountLookup` and `internal/listener.MasterFillStore`/`FollowerStatusStore`/`MasterFillEngine` are each declared by their consumer, satisfied structurally by `internal/store/postgres.Store` / `internal/engine.Engine` — same pattern as the fan-out seams, no shared "Store" interface.
 
-`internal/domain` has zero dependencies beyond `shopspring/decimal` — no store, no broker, no queue. It holds pure types (`MasterFill`, `FollowLink`, `FollowerOrder`, `Job`, `Instrument`, `OrderEvent`) and pure logic (`SizeOrder`, `IdempotencyTag`), and the two sentinel errors (`ErrDuplicate`, `ErrNotFound`) other packages recognize without importing a concrete store.
+`internal/domain` has zero dependencies beyond `shopspring/decimal` — no store, no broker, no queue. It holds pure types (`MasterFill`, `FollowLink`, `FollowerOrder`, `Job`, `Instrument`, `OrderEvent`) and pure logic (`SizeOrder`, `IdempotencyTag`), and sentinel errors (`ErrDuplicate`, `ErrNotFound`, `ErrBrokerUnreachable`, `ErrAuthExpired`) other packages recognize without importing a concrete store.
+
+### Idiomatic Go error handling
+
+Every Go code change in this repository MUST follow idiomatic Go standards:
+- **Standard `(T, error)` returns**: Functions and methods return results alongside `error`. Never embed ad-hoc `Errors []string` or untyped error slices inside domain data models/DTOs to signal operation failure.
+- **Domain sentinel errors**: Sentinel errors live in `internal/domain` so packages can inspect errors with `errors.Is(err, domain.Err...)` without coupling to concrete implementations.
+- **Error wrapping**: Always wrap lower-level errors with `fmt.Errorf("...: %w", err)` to preserve causal chains and enable inspection up the stack.
+- **Fail-fast on unverified state**: For copy-trade calculations (such as position drift / rebalance), fail fast with an error if a broker or dependency is unreachable. Never return partially-evaluated or unverified drift as valid data.
+- **HTTP error translation**: HTTP handlers in `internal/httpapi` map sentinel errors directly to appropriate HTTP status codes (`domain.ErrNotFound` → 404, `domain.ErrAuthExpired` → 401, `domain.ErrBrokerUnreachable` → 502, client input → 400).
 
 ### Fan-out data flow
 

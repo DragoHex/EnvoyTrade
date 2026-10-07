@@ -647,4 +647,165 @@ func TestComputeGroupDiff_MasterAuthError_SyncsAndRecovers(t *testing.T) {
 	}
 }
 
+func TestComputeGroupDiff_MasterBrokerUnreachable(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	store := &fakeRebalanceStore{
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "Follower 1", Enabled: true},
+				},
+			},
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Err: errors.New("dial tcp: connection refused"),
+	}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID: bMaster,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+	_, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrBrokerUnreachable) {
+		t.Fatalf("expected domain.ErrBrokerUnreachable, got: %v", err)
+	}
+}
+
+func TestComputeGroupDiff_MasterAuthExpired(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	store := &fakeRebalanceStore{
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "Follower 1", Enabled: true},
+				},
+			},
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Err: errors.New("TokenException: Token is invalid"),
+	}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID: bMaster,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+	_, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrAuthExpired) {
+		t.Fatalf("expected domain.ErrAuthExpired, got: %v", err)
+	}
+}
+
+func TestComputeGroupDiff_FollowerBrokerUnreachable(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	store := &fakeRebalanceStore{
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "Follower 1", Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {
+				ID:       f1ID,
+				Role:     "follower",
+				Name:     "Follower 1",
+				Enabled:  true,
+				MasterID: &masterID,
+			},
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{},
+	}
+	bFollower := &fake.Broker{
+		Err: errors.New("context deadline exceeded: timeout"),
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID:  bMaster,
+			f1ID:      bFollower,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+	_, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrBrokerUnreachable) {
+		t.Fatalf("expected domain.ErrBrokerUnreachable, got: %v", err)
+	}
+}
+
+func TestRebalanceGroup_DisallowsRebalanceWhenBrokerUnreachable(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	store := &fakeRebalanceStore{
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "Follower 1", Enabled: true},
+				},
+			},
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Err: errors.New("503 Service Unavailable"),
+	}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID: bMaster,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+	res, err := svc.RebalanceGroup(context.Background(), gID, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrBrokerUnreachable) {
+		t.Fatalf("expected domain.ErrBrokerUnreachable, got: %v", err)
+	}
+	if res.OrdersPlaced > 0 || len(res.Orders) > 0 {
+		t.Fatalf("expected zero orders placed on failed live check, got %d", res.OrdersPlaced)
+	}
+}
+
 
