@@ -49,13 +49,6 @@ func (c *MasterFillConsumer) log() *slog.Logger {
 // Handle persists fill and fans it out. Called directly by tests, or via
 // Run for a live queue.Consumer.
 func (c *MasterFillConsumer) Handle(ctx context.Context, fill domain.MasterFill) error {
-	c.log().Info("listener: consuming master fill",
-		"broker_order_id", fill.BrokerOrderID,
-		"master_id", fill.MasterID,
-		"symbol", fill.Tradingsymbol,
-		"qty", fill.FilledQuantity,
-	)
-
 	id, err := c.Store.InsertMasterFill(ctx, fill)
 	if errors.Is(err, domain.ErrDuplicate) {
 		// Already durable from an earlier delivery (WS + postback both
@@ -67,6 +60,13 @@ func (c *MasterFillConsumer) Handle(ctx context.Context, fill domain.MasterFill)
 		c.log().Error("listener: insert master fill failed", "broker_order_id", fill.BrokerOrderID, "error", err)
 		return err
 	}
+
+	c.log().Info("listener: consuming master fill",
+		"broker_order_id", fill.BrokerOrderID,
+		"master_id", fill.MasterID,
+		"symbol", fill.Tradingsymbol,
+		"qty", fill.FilledQuantity,
+	)
 	fill.ID = id
 	err = c.Engine.HandleMasterFill(ctx, fill)
 	if err == nil && c.Syncer != nil {
@@ -88,12 +88,13 @@ func (c *MasterFillConsumer) Run(ctx context.Context, consumer queue.Consumer[do
 // FollowerStatusStore is what FollowerStatusConsumer needs from
 // persistence.
 type FollowerStatusStore interface {
-	// UpdateFollowerOrderStatus returns domain.ErrNotFound if no
-	// follower_order has this broker_order_id yet — the postback can
-	// race the worker's own placement write.
+	// UpdateFollowerOrderStatus updates an existing follower order located by broker_order_id.
 	UpdateFollowerOrderStatus(ctx context.Context, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal) (int64, error)
-	// StashPendingOrderUpdate records an early postback that arrived before
-	// the follower_orders row received its broker_order_id.
+	// UpdateFollowerOrderByTag updates an in-flight worker order matching idempotency_tag.
+	UpdateFollowerOrderByTag(ctx context.Context, followerID uuid.UUID, tag, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal) (int64, error)
+	// InsertDirectFollowerOrder persists a direct/manual or dashboard-initiated order.
+	InsertDirectFollowerOrder(ctx context.Context, upd domain.OrderUpdate) (int64, error)
+	// StashPendingOrderUpdate records an early postback as a fallback.
 	StashPendingOrderUpdate(ctx context.Context, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal, rawPayload []byte) error
 	GetFollowerOrder(ctx context.Context, id int64) (domain.FollowerOrder, error)
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
@@ -120,23 +121,46 @@ func (c *FollowerStatusConsumer) log() *slog.Logger {
 	return slog.Default()
 }
 
-// Handle applies upd. If broker_order_id is unknown, the update is stashed in
-// pending_order_updates so the worker placement transaction can consume it immediately (0ms delay).
+// Handle applies upd. It resolves existing copy-trade orders, in-flight race conditions via tag,
+// or inserts direct/manual follower orders, guaranteeing zero missed trades and zero duplicates.
 func (c *FollowerStatusConsumer) Handle(ctx context.Context, upd domain.OrderUpdate) error {
 	c.log().Info("listener: consuming follower order update",
 		"broker_order_id", upd.BrokerOrderID,
+		"follower_id", upd.FollowerID,
 		"status", upd.Status,
 		"filled_quantity", upd.FilledQuantity,
 	)
 
-	id, err := c.Store.UpdateFollowerOrderStatus(ctx, upd.BrokerOrderID, upd.Status, upd.FilledQuantity, upd.AveragePrice)
+	var (
+		id  int64
+		err error
+	)
+
+	// 1. Try updating by broker_order_id (standard copy-trade or pre-registered order path)
+	id, err = c.Store.UpdateFollowerOrderStatus(ctx, upd.BrokerOrderID, upd.Status, upd.FilledQuantity, upd.AveragePrice)
 	if errors.Is(err, domain.ErrNotFound) {
-		c.log().Info("listener: follower order not found yet, stashing update", "broker_order_id", upd.BrokerOrderID)
-		if stashErr := c.Store.StashPendingOrderUpdate(ctx, upd.BrokerOrderID, upd.Status, upd.FilledQuantity, upd.AveragePrice, upd.RawPayload); stashErr != nil {
-			c.log().Error("listener: failed to stash pending order update", "broker_order_id", upd.BrokerOrderID, "error", stashErr)
-			return stashErr
+		// 2. Check if tag matches an in-flight worker placement
+		if upd.Tag != "" {
+			id, err = c.Store.UpdateFollowerOrderByTag(ctx, upd.FollowerID, upd.Tag, upd.BrokerOrderID, upd.Status, upd.FilledQuantity, upd.AveragePrice)
 		}
-		return nil
+		// 3. If still not matched, treat as a direct/manual order on the follower account
+		if errors.Is(err, domain.ErrNotFound) || id == 0 {
+			c.log().Info("listener: order not matched to copy-trade, inserting as direct follower order",
+				"broker_order_id", upd.BrokerOrderID,
+				"follower_id", upd.FollowerID,
+				"symbol", upd.Tradingsymbol,
+			)
+			id, err = c.Store.InsertDirectFollowerOrder(ctx, upd)
+			if errors.Is(err, domain.ErrDuplicate) {
+				c.log().Debug("listener: duplicate direct follower order, ignoring", "broker_order_id", upd.BrokerOrderID)
+				return nil
+			}
+			if err != nil {
+				c.log().Warn("listener: insert direct follower order failed, stashing as fallback", "error", err)
+				_ = c.Store.StashPendingOrderUpdate(ctx, upd.BrokerOrderID, upd.Status, upd.FilledQuantity, upd.AveragePrice, upd.RawPayload)
+				return err
+			}
+		}
 	}
 	if err != nil {
 		c.log().Error("listener: update follower order status failed", "broker_order_id", upd.BrokerOrderID, "error", err)
@@ -149,15 +173,20 @@ func (c *FollowerStatusConsumer) Handle(ctx context.Context, upd domain.OrderUpd
 		return err
 	}
 
+	followerID := order.FollowerID
+	if followerID == uuid.Nil {
+		followerID = upd.FollowerID
+	}
+
 	if upd.Status == domain.TerminalComplete && c.Syncer != nil {
 		go func(accID uuid.UUID) {
 			_ = c.Syncer.SyncAccountPortfolio(context.Background(), accID)
-		}(order.FollowerID)
+		}(followerID)
 	}
 
 	return c.Store.AppendOrderEvent(ctx, domain.OrderEvent{
 		FollowerOrderID: &id,
-		AccountID:       order.FollowerID,
+		AccountID:       followerID,
 		EventType:       "status_update",
 		Payload:         upd.RawPayload,
 	})

@@ -74,22 +74,28 @@ const (
 // before any broker call is attempted so an idempotency tag exists prior
 // to the order ever going live.
 type FollowerOrder struct {
-	ID             int64
-	MasterFillID   int64
-	FollowerID     uuid.UUID
-	IdempotencyTag string
-	IntendedQty    int
-	LotSize        int
-	SizingReason   SizingReason
-	PlacedQty      *int
-	BrokerOrderID  string
-	TerminalStatus string
-	FilledQty      int
-	AveragePrice   decimal.Decimal
-	AttemptCount   int
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              int64
+	MasterFillID    int64
+	FollowerID      uuid.UUID
+	IdempotencyTag  string
+	IntendedQty     int
+	LotSize         int
+	SizingReason    SizingReason
+	PlacedQty       *int
+	BrokerOrderID   string
+	TerminalStatus  string
+	FilledQty       int
+	AveragePrice    decimal.Decimal
+	AttemptCount    int
+	LastError       string
+	Origin          string
+	Tradingsymbol   string
+	Exchange        string
+	Product         string
+	TransactionType string
+	OrderType       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // ErrDuplicate is returned by a store when an insert collides with a
@@ -237,18 +243,23 @@ type Instrument struct {
 	RefreshedAt     time.Time
 }
 
-// OrderUpdate is a status change on an order already placed (almost always
-// a follower's), delivered by postback or WS after the initial place call.
-// It carries only what's needed to locate and update the matching
-// follower_orders row by BrokerOrderID — unlike MasterFill, it never
-// creates a new row.
+// OrderUpdate is a status change or terminal execution report for a follower order,
+// delivered by broker postback or WS after placement, or on external/direct execution.
 type OrderUpdate struct {
-	BrokerOrderID  string
-	Status         string
-	FilledQuantity int
-	AveragePrice   decimal.Decimal
-	OrderTimestamp time.Time
-	RawPayload     []byte
+	FollowerID      uuid.UUID
+	BrokerOrderID   string
+	Tradingsymbol   string
+	Exchange        string
+	Product         string
+	TransactionType string
+	OrderType       string
+	Quantity        int
+	Status          string
+	FilledQuantity  int
+	AveragePrice    decimal.Decimal
+	OrderTimestamp  time.Time
+	Tag             string
+	RawPayload      []byte
 }
 
 // Job is a fully-sized, tagged instruction to place one follower order.

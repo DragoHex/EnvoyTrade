@@ -158,12 +158,18 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 	)
 
 	orderID, err := e.store.InsertFollowerOrder(ctx, domain.FollowerOrder{
-		MasterFillID:   fill.ID,
-		FollowerID:     link.FollowerID,
-		IdempotencyTag: tag,
-		IntendedQty:    qty,
-		LotSize:        lotSize,
-		SizingReason:   reason,
+		MasterFillID:    fill.ID,
+		FollowerID:      link.FollowerID,
+		IdempotencyTag:  tag,
+		IntendedQty:     qty,
+		LotSize:         lotSize,
+		SizingReason:    reason,
+		Origin:          "copy_trade",
+		Tradingsymbol:   fill.Tradingsymbol,
+		Exchange:        fill.Exchange,
+		Product:         fill.Product,
+		TransactionType: fill.TransactionType,
+		OrderType:       fill.OrderType,
 	})
 	if errors.Is(err, domain.ErrDuplicate) {
 		// Already fanned out for this (fill, follower) pair — a

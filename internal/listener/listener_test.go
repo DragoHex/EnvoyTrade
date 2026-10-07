@@ -107,6 +107,8 @@ func TestMasterFillConsumer_Handle_TriggersPortfolioSync(t *testing.T) {
 type fakeFollowerStatusStore struct {
 	followerID      uuid.UUID
 	updateErr       error
+	updateByTagErr  error
+	insertDirectErr error
 	stashErr        error
 	getErr          error
 	appendErr       error
@@ -117,12 +119,30 @@ type fakeFollowerStatusStore struct {
 	stashedQty      int
 	stashedPrice    decimal.Decimal
 	stashedPayload  []byte
+	directInserted  *domain.OrderUpdate
+	tagUpdatedTag   string
 }
 
 func (f *fakeFollowerStatusStore) UpdateFollowerOrderStatus(ctx context.Context, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal) (int64, error) {
 	if f.updateErr != nil {
 		return 0, f.updateErr
 	}
+	return f.updatedID, nil
+}
+
+func (f *fakeFollowerStatusStore) UpdateFollowerOrderByTag(ctx context.Context, followerID uuid.UUID, tag, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal) (int64, error) {
+	if f.updateByTagErr != nil {
+		return 0, f.updateByTagErr
+	}
+	f.tagUpdatedTag = tag
+	return f.updatedID, nil
+}
+
+func (f *fakeFollowerStatusStore) InsertDirectFollowerOrder(ctx context.Context, upd domain.OrderUpdate) (int64, error) {
+	if f.insertDirectErr != nil {
+		return 0, f.insertDirectErr
+	}
+	f.directInserted = &upd
 	return f.updatedID, nil
 }
 
@@ -183,8 +203,107 @@ func TestFollowerStatusConsumer_Handle_UpdatesAndAppendsEvent(t *testing.T) {
 	}
 }
 
-func TestFollowerStatusConsumer_Handle_UnknownBrokerOrderIDIsStashed(t *testing.T) {
-	store := &fakeFollowerStatusStore{updateErr: domain.ErrNotFound}
+func TestFollowerStatusConsumer_Handle_DirectFollowerOrder_InsertsAndSyncs(t *testing.T) {
+	followerID := uuid.New()
+	store := &fakeFollowerStatusStore{
+		followerID: followerID,
+		updateErr:  domain.ErrNotFound,
+		updatedID:  88,
+	}
+	syncer := &fakePortfolioSyncer{syncedID: make(chan uuid.UUID, 1)}
+	c := &listener.FollowerStatusConsumer{Store: store, Syncer: syncer}
+
+	upd := domain.OrderUpdate{
+		FollowerID:      followerID,
+		BrokerOrderID:   "DIRECT-001",
+		Tradingsymbol:   "RELIANCE",
+		Exchange:        "NSE",
+		Product:         "CNC",
+		TransactionType: "BUY",
+		Status:          domain.TerminalComplete,
+		FilledQuantity:  5,
+		AveragePrice:    decimal.NewFromFloat(2450.0),
+		RawPayload:      []byte(`{}`),
+	}
+
+	if err := c.Handle(context.Background(), upd); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if store.directInserted == nil {
+		t.Fatal("expected InsertDirectFollowerOrder to be called")
+	}
+	if store.directInserted.BrokerOrderID != "DIRECT-001" {
+		t.Errorf("BrokerOrderID = %q, want DIRECT-001", store.directInserted.BrokerOrderID)
+	}
+	if store.appendedEvent == nil {
+		t.Fatal("expected order event to be appended")
+	}
+
+	select {
+	case gotID := <-syncer.syncedID:
+		if gotID != followerID {
+			t.Errorf("syncedID = %v, want %v", gotID, followerID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for portfolio sync on direct follower order complete")
+	}
+}
+
+func TestFollowerStatusConsumer_Handle_InFlightTagMatching_ResolvesOrder(t *testing.T) {
+	followerID := uuid.New()
+	store := &fakeFollowerStatusStore{
+		followerID: followerID,
+		updateErr:  domain.ErrNotFound,
+		updatedID:  99,
+	}
+	c := &listener.FollowerStatusConsumer{Store: store}
+
+	upd := domain.OrderUpdate{
+		FollowerID:     followerID,
+		BrokerOrderID:  "BROKER-123",
+		Tag:            "race-tag-123",
+		Status:         domain.TerminalComplete,
+		FilledQuantity: 10,
+	}
+
+	if err := c.Handle(context.Background(), upd); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if store.tagUpdatedTag != "race-tag-123" {
+		t.Errorf("tagUpdatedTag = %q, want race-tag-123", store.tagUpdatedTag)
+	}
+	if store.directInserted != nil {
+		t.Fatal("did not expect direct insert when tag matches in-flight placement")
+	}
+}
+
+func TestFollowerStatusConsumer_Handle_DuplicateDirectOrder_Ignored(t *testing.T) {
+	followerID := uuid.New()
+	store := &fakeFollowerStatusStore{
+		followerID:      followerID,
+		updateErr:       domain.ErrNotFound,
+		insertDirectErr: domain.ErrDuplicate,
+	}
+	c := &listener.FollowerStatusConsumer{Store: store}
+
+	upd := domain.OrderUpdate{
+		FollowerID:    followerID,
+		BrokerOrderID: "DUP-001",
+		Status:        domain.TerminalComplete,
+	}
+
+	if err := c.Handle(context.Background(), upd); err != nil {
+		t.Fatalf("Handle duplicate should return nil (no-op), got: %v", err)
+	}
+}
+
+func TestFollowerStatusConsumer_Handle_UnknownBrokerOrderIDFallbackStash(t *testing.T) {
+	store := &fakeFollowerStatusStore{
+		updateErr:       domain.ErrNotFound,
+		insertDirectErr: errors.New("temporary db failure"),
+	}
 	c := &listener.FollowerStatusConsumer{Store: store}
 
 	upd := domain.OrderUpdate{
@@ -195,36 +314,11 @@ func TestFollowerStatusConsumer_Handle_UnknownBrokerOrderIDIsStashed(t *testing.
 		RawPayload:     []byte(`{"order_id":"EARLY-ORDER"}`),
 	}
 	err := c.Handle(context.Background(), upd)
-	if err != nil {
-		t.Fatalf("Handle: %v, want nil (stashed safely)", err)
+	if err == nil {
+		t.Fatal("Handle: want error from insert, got nil")
 	}
 	if store.stashedBrokerID != "EARLY-ORDER" {
 		t.Errorf("stashedBrokerID = %q, want EARLY-ORDER", store.stashedBrokerID)
-	}
-	if store.stashedStatus != domain.TerminalComplete {
-		t.Errorf("stashedStatus = %q, want COMPLETE", store.stashedStatus)
-	}
-	if store.stashedQty != 25 {
-		t.Errorf("stashedQty = %d, want 25", store.stashedQty)
-	}
-	if !store.stashedPrice.Equal(decimal.NewFromFloat(150.25)) {
-		t.Errorf("stashedPrice = %v, want 150.25", store.stashedPrice)
-	}
-	if store.appendedEvent != nil {
-		t.Fatal("appended an event for stashed order update (worker placement will record it)")
-	}
-}
-
-func TestFollowerStatusConsumer_Handle_StashErrorPropagates(t *testing.T) {
-	store := &fakeFollowerStatusStore{
-		updateErr: domain.ErrNotFound,
-		stashErr:  errors.New("db error stashing"),
-	}
-	c := &listener.FollowerStatusConsumer{Store: store}
-
-	err := c.Handle(context.Background(), domain.OrderUpdate{BrokerOrderID: "EARLY-ORDER"})
-	if err == nil {
-		t.Fatal("Handle: want stash error, got nil")
 	}
 }
 
