@@ -113,8 +113,8 @@ export function AccountRow(props: {
               type="button"
               class="icon-button icon-button-primary"
               aria-label="Rebalance"
-              data-tooltip="Rebalance"
-              disabled={props.actionsDisabled}
+              data-tooltip={props.isMaster || props.follower.enabled ? 'Rebalance' : 'Account is disabled'}
+              disabled={props.actionsDisabled || (!props.isMaster && !props.follower.enabled)}
               onClick={() => setPending('rebalance')}
             >
               <ThanosBalanceIcon />
@@ -123,12 +123,13 @@ export function AccountRow(props: {
               type="button"
               class="icon-button icon-button-danger"
               aria-label="Square Off"
-              data-tooltip="Sq.off"
-              disabled={props.actionsDisabled}
+              data-tooltip={props.isMaster || props.follower.enabled ? 'Sq.off' : 'Account is disabled'}
+              disabled={props.actionsDisabled || (!props.isMaster && !props.follower.enabled)}
               onClick={() => setPending('square_off')}
             >
               <CropSquareIcon />
             </button>
+
             <button
               type="button"
               class="icon-button icon-button-danger"

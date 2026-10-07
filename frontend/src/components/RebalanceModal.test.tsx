@@ -579,5 +579,135 @@ describe('RebalanceModal', () => {
     await userEvent.click(cancelBtn)
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
+
+  it('greys out disabled followers, disables checkbox, excludes from Select All and submission', async () => {
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 2,
+      followers_with_drift: 2,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Enabled Follower',
+          broker_account_id: 'FOLLOW01A',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'INFY',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 5,
+              target_qty: 5,
+              follower_qty: 0,
+              drift_qty: 5,
+              action: 'BUY',
+            },
+          ],
+        },
+        {
+          account_id: 'f2',
+          account_name: 'Disabled Follower',
+          broker_account_id: 'FOLLOW01B',
+          enabled: false,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'TCS',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 10,
+              target_qty: 10,
+              follower_qty: 0,
+              drift_qty: 10,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    })
+
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+
+    const { container } = render(() => (
+      <RebalanceModal
+        open={true}
+        target={groupTarget}
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+      />
+    ))
+
+    // Both followers appear in the list
+    expect(await screen.findByText('Enabled Follower')).toBeInTheDocument()
+    expect(screen.getByText('Disabled Follower')).toBeInTheDocument()
+
+    // Static "Disabled" badge text is removed
+    expect(screen.queryByText('Disabled')).not.toBeInTheDocument()
+
+    // Disabled follower row has disabled styling class
+    const disabledRow = container.querySelector('[data-testid="follower-row-f2"]')
+    expect(disabledRow).toHaveClass('disabled-follower-item')
+
+    // Disabled follower drift pill is greyed out
+    const disabledPill = disabledRow!.querySelector('.follower-drift-badge')
+    expect(disabledPill).toHaveClass('disabled-drift-badge')
+    expect(disabledPill!.querySelector('span')).toHaveClass('pill-disabled')
+
+    // Enabled follower drift pill is not greyed out
+    const enabledRow = container.querySelector('[data-testid="follower-row-f1"]')
+    const enabledPill = enabledRow!.querySelector('.follower-drift-badge')
+    expect(enabledPill).not.toHaveClass('disabled-drift-badge')
+    expect(enabledPill!.querySelector('span')).not.toHaveClass('pill-disabled')
+
+    // Exactly one data-tooltip on the header, not on the row or inner elements
+    const disabledHeader = disabledRow!.querySelector('.follower-accordion-header')
+    expect(disabledHeader).toHaveAttribute('data-tooltip', 'Disabled')
+    expect(disabledRow).not.toHaveAttribute('data-tooltip')
+
+    // Disabled follower checkbox is disabled and unchecked
+    const disabledCheckbox = screen.getByLabelText('Select Disabled Follower') as HTMLInputElement
+    expect(disabledCheckbox).toBeDisabled()
+    expect(disabledCheckbox.checked).toBe(false)
+
+    // Dropdown button does NOT have any tooltip ("View symbols" / "View Details")
+    const expandBtns = screen.getAllByLabelText(/symbols/i)
+    for (const btn of expandBtns) {
+      expect(btn).not.toHaveAttribute('data-tooltip')
+    }
+
+
+    // Enabled follower checkbox is enabled and checked
+
+    const enabledCheckbox = screen.getByLabelText('Select Enabled Follower') as HTMLInputElement
+    expect(enabledCheckbox).not.toBeDisabled()
+    expect(enabledCheckbox.checked).toBe(true)
+
+    // Selection count reflects enabled accounts: 1 of 1 selected (1 disabled)
+    expect(screen.getByText(/1 of 1 selected/)).toBeInTheDocument()
+
+    // Clicking on disabled row does not select it
+    await userEvent.click(disabledRow!.querySelector('.follower-accordion-header')!)
+    expect(disabledCheckbox.checked).toBe(false)
+
+    // Clicking "Select All" toggles only enabled accounts
+    const selectAllCheckbox = screen.getByLabelText('Select All Followers')
+    await userEvent.click(selectAllCheckbox)
+    expect(enabledCheckbox.checked).toBe(false)
+    expect(disabledCheckbox.checked).toBe(false)
+
+    await userEvent.click(selectAllCheckbox)
+    expect(enabledCheckbox.checked).toBe(true)
+    expect(disabledCheckbox.checked).toBe(false)
+
+    // Submitting only submits enabled follower 'f1'
+    const rebalanceBtn = screen.getByRole('button', { name: /Rebalance \(1\)/i })
+    await userEvent.click(rebalanceBtn)
+    expect(onConfirm).toHaveBeenCalledWith(['f1'])
+  })
 })
+
 

@@ -527,5 +527,30 @@ describe('AccountRow', () => {
       expect(netQtyCell.textContent).toBe('12')
     })
   })
+
+  it('disables Rebalance and Square-off buttons when follower is disabled', () => {
+    const disabledFollower: GroupFollower = {
+      ...follower,
+      enabled: false,
+    }
+    render(() => (
+      <AccountRow
+        follower={disabledFollower}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
+    expect(rebalanceBtn).toBeDisabled()
+    expect(rebalanceBtn).toHaveAttribute('data-tooltip', 'Account is disabled')
+
+    const sqOffBtn = screen.getByRole('button', { name: 'Square Off' })
+    expect(sqOffBtn).toBeDisabled()
+    expect(sqOffBtn).toHaveAttribute('data-tooltip', 'Account is disabled')
+  })
 })
+
 
