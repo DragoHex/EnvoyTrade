@@ -297,7 +297,7 @@ func masterFillToOrderItem(f sqlcgen.MasterFill) domain.OrderDetailItem {
 	item := domain.OrderDetailItem{
 		ID:         fmt.Sprintf("%d", f.ID),
 		Product:    f.Product,
-		Time:       f.OrderTimestamp.Time.Format("2006-01-02 15:04:05"),
+		Time:       domain.FormatIST(f.OrderTimestamp.Time),
 		Instrument: f.Tradingsymbol,
 		Quantity:   int(f.FilledQuantity),
 		Type:       transactionTypeLetter(f.TransactionType),
@@ -342,7 +342,7 @@ func followerOrderRowToOrderItem(
 	item := domain.OrderDetailItem{
 		ID:         fmt.Sprintf("%d", id),
 		Product:    product,
-		Time:       createdAt.Format("2006-01-02 15:04:05"),
+		Time:       domain.FormatIST(createdAt),
 		Instrument: tradingsymbol,
 		Quantity:   int(intendedQty),
 		Type:       transactionTypeLetter(txType),

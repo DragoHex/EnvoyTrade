@@ -62,13 +62,13 @@ ORDER BY p.ip_type ASC, p.ip_address ASC;`
 			return nil, err
 		}
 		if validFrom.Valid {
-			p.ValidFrom = validFrom.Time
+			p.ValidFrom = validFrom.Time.In(domain.IST)
 		}
 		if validUntil.Valid {
-			p.ValidUntil = validUntil.Time
+			p.ValidUntil = validUntil.Time.In(domain.IST)
 		}
 		if createdAt.Valid {
-			p.CreatedAt = createdAt.Time
+			p.CreatedAt = createdAt.Time.In(domain.IST)
 		}
 		if accountID.Valid {
 			u := uuid.UUID(accountID.Bytes)
@@ -127,13 +127,13 @@ ORDER BY p.ip_address ASC;`
 			return nil, err
 		}
 		if validFrom.Valid {
-			p.ValidFrom = validFrom.Time
+			p.ValidFrom = validFrom.Time.In(domain.IST)
 		}
 		if validUntil.Valid {
-			p.ValidUntil = validUntil.Time
+			p.ValidUntil = validUntil.Time.In(domain.IST)
 		}
 		if createdAt.Valid {
-			p.CreatedAt = createdAt.Time
+			p.CreatedAt = createdAt.Time.In(domain.IST)
 		}
 		result = append(result, p)
 	}
@@ -182,13 +182,13 @@ WHERE p.ip_address = $1;`
 		return domain.ProxyIP{}, err
 	}
 	if validFrom.Valid {
-		p.ValidFrom = validFrom.Time
+		p.ValidFrom = validFrom.Time.In(domain.IST)
 	}
 	if validUntil.Valid {
-		p.ValidUntil = validUntil.Time
+		p.ValidUntil = validUntil.Time.In(domain.IST)
 	}
 	if createdAt.Valid {
-		p.CreatedAt = createdAt.Time
+		p.CreatedAt = createdAt.Time.In(domain.IST)
 	}
 	return p, nil
 }

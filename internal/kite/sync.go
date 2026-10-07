@@ -36,9 +36,8 @@ type PortfolioSyncer struct {
 
 // NextKiteExpiry returns the next 06:00 AM IST cutoff for Kite access tokens.
 func NextKiteExpiry(now time.Time) time.Time {
-	ist := time.FixedZone("IST", 5*3600+1800)
-	nowIST := now.In(ist)
-	target := time.Date(nowIST.Year(), nowIST.Month(), nowIST.Day(), 6, 0, 0, 0, ist)
+	nowIST := now.In(domain.IST)
+	target := time.Date(nowIST.Year(), nowIST.Month(), nowIST.Day(), 6, 0, 0, 0, domain.IST)
 	if !nowIST.Before(target) {
 		target = target.AddDate(0, 0, 1)
 	}

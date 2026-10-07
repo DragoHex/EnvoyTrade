@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Enforce Indian Standard Time (IST) for maintenance logs and timestamped backups
+export TZ="Asia/Kolkata"
+
 # ==============================================================================
 # db_maintenance.sh - PostgreSQL Maintenance & Backup for EnvoyTrade
 #

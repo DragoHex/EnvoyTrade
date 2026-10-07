@@ -168,7 +168,7 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 				"follower_order_id": fo.ID,
 				"follower_id":       fo.FollowerID,
 				"master_fill_id":    fo.MasterFillID,
-				"created_at":        fo.CreatedAt,
+				"created_at":        fo.CreatedAt.In(domain.IST),
 			})
 			continue
 		}
