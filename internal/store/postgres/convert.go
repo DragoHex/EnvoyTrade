@@ -31,8 +31,8 @@ func toFollowerOrder(row sqlcgen.FollowerOrder) domain.FollowerOrder {
 		SizingReason:   domain.SizingReason(row.SizingReason),
 		FilledQty:      int(row.FilledQty),
 		AttemptCount:   int(row.AttemptCount),
-		CreatedAt:      row.CreatedAt.Time,
-		UpdatedAt:      row.UpdatedAt.Time,
+		CreatedAt:      row.CreatedAt.Time.In(domain.IST),
+		UpdatedAt:      row.UpdatedAt.Time.In(domain.IST),
 	}
 	if row.PlacedQty != nil {
 		placedQty := int(*row.PlacedQty)

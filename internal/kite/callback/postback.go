@@ -74,7 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !VerifyChecksum(apiSecret, p.OrderID, p.OrderTimestamp.Format("2006-01-02 15:04:05"), p.Checksum) {
+	if !VerifyChecksum(apiSecret, p.OrderID, p.OrderTimestamp.In(domain.IST).Format("2006-01-02 15:04:05"), p.Checksum) {
 		h.log().Warn("postback: checksum mismatch, dropping", "order_id", p.OrderID, "user_id", p.UserID)
 		w.WriteHeader(http.StatusOK)
 		return

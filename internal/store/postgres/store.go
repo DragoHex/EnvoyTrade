@@ -55,6 +55,9 @@ func NewPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
 	}
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		decimalpgx.Register(conn.TypeMap())
+		if _, err := conn.Exec(ctx, "SET TIME ZONE 'Asia/Kolkata';"); err != nil {
+			return fmt.Errorf("set timezone to Asia/Kolkata: %w", err)
+		}
 		return nil
 	}
 	return pgxpool.NewWithConfig(ctx, cfg)
@@ -178,7 +181,7 @@ func (s *Store) AccountAuthInfo(ctx context.Context, id uuid.UUID) (domain.Accou
 	}
 	var expiresAt *time.Time
 	if row.TokenExpiresAt.Valid {
-		t := row.TokenExpiresAt.Time
+		t := row.TokenExpiresAt.Time.In(domain.IST)
 		expiresAt = &t
 	}
 	return domain.AccountAuthInfo{
@@ -270,7 +273,7 @@ func (s *Store) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]d
 			CloneFactor:    r.CloneFactor,
 			MaxQtyPerOrder: int(r.MaxQtyPerOrder),
 			Enabled:        r.Enabled,
-			EffectiveFrom:  r.EffectiveFrom.Time,
+			EffectiveFrom:  r.EffectiveFrom.Time.In(domain.IST),
 		})
 	}
 	return links, nil
@@ -345,8 +348,8 @@ func (s *Store) GetFollowerOrder(ctx context.Context, id int64) (domain.Follower
 		SizingReason:   domain.SizingReason(row.SizingReason),
 		FilledQty:      int(row.FilledQty),
 		AttemptCount:   int(row.AttemptCount),
-		CreatedAt:      row.CreatedAt.Time,
-		UpdatedAt:      row.UpdatedAt.Time,
+		CreatedAt:      row.CreatedAt.Time.In(domain.IST),
+		UpdatedAt:      row.UpdatedAt.Time.In(domain.IST),
 	}
 	if row.PlacedQty != nil {
 		placedQty := int(*row.PlacedQty)
@@ -533,7 +536,7 @@ func (s *Store) OrderEventsByFollowerOrder(ctx context.Context, followerOrderID 
 			AccountID:       r.AccountID,
 			EventType:       r.EventType,
 			Payload:         r.Payload,
-			OccurredAt:      r.OccurredAt.Time,
+			OccurredAt:      r.OccurredAt.Time.In(domain.IST),
 		})
 	}
 	return events, nil

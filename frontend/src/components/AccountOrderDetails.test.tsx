@@ -606,7 +606,7 @@ it('locks column header widths with fixed table layout so headers do not shift a
 
     // Headers are still rendered!
     expect(screen.getByRole('columnheader', { name: 'Product' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Time (IST)' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Instrument' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Quantity' })).toBeInTheDocument()
 

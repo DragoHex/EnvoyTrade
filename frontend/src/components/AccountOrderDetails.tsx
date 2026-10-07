@@ -11,6 +11,7 @@ import {
   type AccountOrdersResponse,
 } from '../api'
 import { isOrdersDataEqual } from '../utils/ordersDiff'
+import { formatISTDateTime } from '../utils/time'
 import {
   ExitSquareIcon,
   ProhibitIcon,
@@ -730,7 +731,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                 <thead>
                   <tr>
                     <th style={{ width: '9%' }}>Product</th>
-                    <th style={{ width: '16%' }}>Time</th>
+                    <th style={{ width: '16%' }}>Time (IST)</th>
                     <th style={{ width: '23%' }}>Instrument</th>
                     <th class="text-right" style={{ width: '10%' }}>Quantity</th>
                     <th class="text-right" style={{ width: '12%' }}>Trigger Price</th>
@@ -758,7 +759,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           <td>
                             <span class="product-badge">{ord.product ?? 'CNC'}</span>
                           </td>
-                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
+                          <td class="font-mono text-sm text-muted">{formatISTDateTime(ord.time)}</td>
                           <td class="font-medium">{ord.instrument}</td>
                           <td class="text-right font-mono">{ord.quantity}</td>
                           <td class="text-right font-mono">{formatPrice(ord.triggerPrice)}</td>
@@ -798,7 +799,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                 <thead>
                   <tr>
                     <th style={{ width: '11%' }}>Product</th>
-                    <th style={{ width: '17%' }}>Time</th>
+                    <th style={{ width: '17%' }}>Time (IST)</th>
                     <th style={{ width: '28%' }}>Instrument</th>
                     <th class="text-right" style={{ width: '12%' }}>Quantity</th>
                     <th class="text-right" style={{ width: '18%' }}>Price</th>
@@ -824,7 +825,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                           <td>
                             <span class="product-badge">{ord.product ?? 'CNC'}</span>
                           </td>
-                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
+                          <td class="font-mono text-sm text-muted">{formatISTDateTime(ord.time)}</td>
                           <td class="font-medium">{ord.instrument}</td>
                           <td class="text-right font-mono">{ord.quantity}</td>
                           <td class="text-right font-mono">{formatPrice(ord.price)}</td>
@@ -852,7 +853,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
               <table class="order-subtable">
                 <thead>
                   <tr>
-                    <th style={{ width: '16%' }}>Time</th>
+                    <th style={{ width: '16%' }}>Time (IST)</th>
                     <th style={{ width: '24%' }}>Instrument</th>
                     <th class="text-right" style={{ width: '12%' }}>Quantity</th>
                     <th class="text-center" style={{ width: '12%' }}>Type</th>
@@ -875,7 +876,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
                     <For each={rejectedOrders()}>
                       {(ord) => (
                         <tr>
-                          <td class="font-mono text-sm text-muted">{ord.time ?? '—'}</td>
+                          <td class="font-mono text-sm text-muted">{formatISTDateTime(ord.time)}</td>
                           <td class="font-medium">{ord.instrument}</td>
                           <td class="text-right font-mono">{ord.quantity}</td>
                           <td class="text-center">

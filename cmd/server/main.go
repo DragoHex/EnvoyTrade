@@ -629,6 +629,12 @@ func setupLogger() (*slog.Logger, func(), error) {
 
 	opts := &slog.HandlerOptions{
 		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
+				return slog.String(slog.TimeKey, a.Value.Time().In(domain.IST).Format("2006-01-02T15:04:05.000+05:30"))
+			}
+			return a
+		},
 	}
 
 	var handler slog.Handler

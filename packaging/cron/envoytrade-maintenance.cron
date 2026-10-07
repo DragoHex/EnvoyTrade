@@ -7,10 +7,7 @@
 #   markets have completed post-market settlement, avoiding trading day lockups.
 # ==============================================================================
 #
-# Option A: If server timezone is set to Asia/Kolkata (IST):
-# 01:00 AM IST daily
+# Canonical schedule in Indian Standard Time:
+CRON_TZ=Asia/Kolkata
 0 1 * * * envoytrade /usr/local/bin/envoytrade-db-maintenance >> /var/log/envoytrade/maintenance.log 2>&1
-#
-# Option B: If server timezone is set to UTC:
-# 20:30 UTC = 01:00 AM IST next day
-# 30 20 * * * envoytrade /usr/local/bin/envoytrade-db-maintenance >> /var/log/envoytrade/maintenance.log 2>&1
+
