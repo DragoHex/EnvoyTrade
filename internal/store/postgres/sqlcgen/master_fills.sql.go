@@ -354,6 +354,32 @@ func (q *Queries) ListRejectedMasterOrdersPaginated(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const masterFillExists = `-- name: MasterFillExists :one
+SELECT EXISTS(
+  SELECT 1 FROM master_fills
+  WHERE master_id = $1 AND broker_order_id = $2 AND filled_quantity = $3 AND status = $4
+)
+`
+
+type MasterFillExistsParams struct {
+	MasterID       uuid.UUID
+	BrokerOrderID  string
+	FilledQuantity int32
+	Status         string
+}
+
+func (q *Queries) MasterFillExists(ctx context.Context, arg MasterFillExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, masterFillExists,
+		arg.MasterID,
+		arg.BrokerOrderID,
+		arg.FilledQuantity,
+		arg.Status,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const setMasterFillDispatchState = `-- name: SetMasterFillDispatchState :exec
 UPDATE master_fills SET dispatch_state = $2, dispatched_at = CASE WHEN $2 = 'dispatched' THEN now() ELSE dispatched_at END
 WHERE id = $1

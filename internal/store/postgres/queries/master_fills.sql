@@ -64,3 +64,10 @@ LIMIT $2 OFFSET $3;
 -- name: CountRejectedMasterOrders :one
 SELECT COUNT(*) FROM master_fills
 WHERE master_id = $1 AND status IN ('REJECTED', 'CANCELLED');
+
+-- name: MasterFillExists :one
+SELECT EXISTS(
+  SELECT 1 FROM master_fills
+  WHERE master_id = $1 AND broker_order_id = $2 AND filled_quantity = $3 AND status = $4
+);
+

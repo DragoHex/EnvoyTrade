@@ -39,7 +39,7 @@ func (q *Queries) CountOpenFollowerOrders(ctx context.Context, followerID uuid.U
 
 const countRejectedFollowerOrders = `-- name: CountRejectedFollowerOrders :one
 SELECT COUNT(*) FROM follower_orders fo
-WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', 'FAILED', 'error', 'failed', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
 `
 
 func (q *Queries) CountRejectedFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error) {
@@ -47,6 +47,25 @@ func (q *Queries) CountRejectedFollowerOrders(ctx context.Context, followerID uu
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const followerOrderTerminalExists = `-- name: FollowerOrderTerminalExists :one
+SELECT EXISTS(
+  SELECT 1 FROM follower_orders
+  WHERE follower_id = $1 AND broker_order_id = $2 AND terminal_status IS NOT NULL
+)
+`
+
+type FollowerOrderTerminalExistsParams struct {
+	FollowerID    uuid.UUID
+	BrokerOrderID *string
+}
+
+func (q *Queries) FollowerOrderTerminalExists(ctx context.Context, arg FollowerOrderTerminalExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, followerOrderTerminalExists, arg.FollowerID, arg.BrokerOrderID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const followerOrdersByMasterFill = `-- name: FollowerOrdersByMasterFill :many
@@ -58,7 +77,7 @@ type FollowerOrdersByMasterFillRow struct {
 	FollowerID uuid.UUID
 }
 
-func (q *Queries) FollowerOrdersByMasterFill(ctx context.Context, masterFillID int64) ([]FollowerOrdersByMasterFillRow, error) {
+func (q *Queries) FollowerOrdersByMasterFill(ctx context.Context, masterFillID *int64) ([]FollowerOrdersByMasterFillRow, error) {
 	rows, err := q.db.Query(ctx, followerOrdersByMasterFill, masterFillID)
 	if err != nil {
 		return nil, err
@@ -81,7 +100,8 @@ func (q *Queries) FollowerOrdersByMasterFill(ctx context.Context, masterFillID i
 const getFollowerOrder = `-- name: GetFollowerOrder :one
 SELECT id, master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
        placed_qty, broker_order_id, terminal_status, filled_qty, average_price, attempt_count,
-       last_error, created_at, updated_at
+       last_error, origin, tradingsymbol, exchange, product, transaction_type, order_type,
+       created_at, updated_at
 FROM follower_orders WHERE id = $1
 `
 
@@ -103,26 +123,94 @@ func (q *Queries) GetFollowerOrder(ctx context.Context, id int64) (FollowerOrder
 		&i.AveragePrice,
 		&i.AttemptCount,
 		&i.LastError,
+		&i.Origin,
+		&i.Tradingsymbol,
+		&i.Exchange,
+		&i.Product,
+		&i.TransactionType,
+		&i.OrderType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const insertDirectFollowerOrder = `-- name: InsertDirectFollowerOrder :one
+INSERT INTO follower_orders
+  (follower_id, broker_order_id, idempotency_tag, intended_qty, placed_qty, filled_qty, lot_size, sizing_reason, terminal_status, average_price, origin, tradingsymbol, exchange, product, transaction_type, order_type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT (follower_id, broker_order_id) WHERE broker_order_id IS NOT NULL
+DO UPDATE SET
+  terminal_status = EXCLUDED.terminal_status,
+  filled_qty = EXCLUDED.filled_qty,
+  average_price = EXCLUDED.average_price,
+  updated_at = now()
+RETURNING id
+`
+
+type InsertDirectFollowerOrderParams struct {
+	FollowerID      uuid.UUID
+	BrokerOrderID   *string
+	IdempotencyTag  string
+	IntendedQty     int32
+	PlacedQty       *int32
+	FilledQty       int32
+	LotSize         int32
+	SizingReason    int32
+	TerminalStatus  *string
+	AveragePrice    decimal.NullDecimal
+	Origin          string
+	Tradingsymbol   string
+	Exchange        string
+	Product         string
+	TransactionType string
+	OrderType       string
+}
+
+func (q *Queries) InsertDirectFollowerOrder(ctx context.Context, arg InsertDirectFollowerOrderParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertDirectFollowerOrder,
+		arg.FollowerID,
+		arg.BrokerOrderID,
+		arg.IdempotencyTag,
+		arg.IntendedQty,
+		arg.PlacedQty,
+		arg.FilledQty,
+		arg.LotSize,
+		arg.SizingReason,
+		arg.TerminalStatus,
+		arg.AveragePrice,
+		arg.Origin,
+		arg.Tradingsymbol,
+		arg.Exchange,
+		arg.Product,
+		arg.TransactionType,
+		arg.OrderType,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertFollowerOrder = `-- name: InsertFollowerOrder :one
 INSERT INTO follower_orders
-  (master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason)
-VALUES ($1,$2,$3,$4,$5,$6)
+  (master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason, origin, tradingsymbol, exchange, product, transaction_type, order_type)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 RETURNING id
 `
 
 type InsertFollowerOrderParams struct {
-	MasterFillID   int64
-	FollowerID     uuid.UUID
-	IdempotencyTag string
-	IntendedQty    int32
-	LotSize        int32
-	SizingReason   int32
+	MasterFillID    *int64
+	FollowerID      uuid.UUID
+	IdempotencyTag  string
+	IntendedQty     int32
+	LotSize         int32
+	SizingReason    int32
+	Origin          string
+	Tradingsymbol   string
+	Exchange        string
+	Product         string
+	TransactionType string
+	OrderType       string
 }
 
 func (q *Queries) InsertFollowerOrder(ctx context.Context, arg InsertFollowerOrderParams) (int64, error) {
@@ -133,6 +221,12 @@ func (q *Queries) InsertFollowerOrder(ctx context.Context, arg InsertFollowerOrd
 		arg.IntendedQty,
 		arg.LotSize,
 		arg.SizingReason,
+		arg.Origin,
+		arg.Tradingsymbol,
+		arg.Exchange,
+		arg.Product,
+		arg.TransactionType,
+		arg.OrderType,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -143,10 +237,15 @@ const listClosedFollowerOrdersPaginated = `-- name: ListClosedFollowerOrdersPagi
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
 WHERE fo.follower_id = $1 AND fo.terminal_status = 'COMPLETE'
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3
@@ -160,7 +259,7 @@ type ListClosedFollowerOrdersPaginatedParams struct {
 
 type ListClosedFollowerOrdersPaginatedRow struct {
 	ID                   int64
-	MasterFillID         int64
+	MasterFillID         *int64
 	FollowerID           uuid.UUID
 	IdempotencyTag       string
 	IntendedQty          int32
@@ -175,6 +274,7 @@ type ListClosedFollowerOrdersPaginatedRow struct {
 	LastError            *string
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+	Origin               string
 	Tradingsymbol        string
 	Exchange             string
 	TransactionType      string
@@ -210,6 +310,7 @@ func (q *Queries) ListClosedFollowerOrdersPaginated(ctx context.Context, arg Lis
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
 			&i.Tradingsymbol,
 			&i.Exchange,
 			&i.TransactionType,
@@ -232,10 +333,15 @@ const listFollowerOrdersWithMasterFillByAccount = `-- name: ListFollowerOrdersWi
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
 WHERE fo.follower_id = $1
 ORDER BY fo.created_at DESC
 LIMIT 100
@@ -243,7 +349,7 @@ LIMIT 100
 
 type ListFollowerOrdersWithMasterFillByAccountRow struct {
 	ID                   int64
-	MasterFillID         int64
+	MasterFillID         *int64
 	FollowerID           uuid.UUID
 	IdempotencyTag       string
 	IntendedQty          int32
@@ -258,6 +364,7 @@ type ListFollowerOrdersWithMasterFillByAccountRow struct {
 	LastError            *string
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+	Origin               string
 	Tradingsymbol        string
 	Exchange             string
 	TransactionType      string
@@ -293,6 +400,7 @@ func (q *Queries) ListFollowerOrdersWithMasterFillByAccount(ctx context.Context,
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
 			&i.Tradingsymbol,
 			&i.Exchange,
 			&i.TransactionType,
@@ -315,10 +423,15 @@ const listOpenFollowerOrdersPaginated = `-- name: ListOpenFollowerOrdersPaginate
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
 WHERE fo.follower_id = $1 AND fo.terminal_status IS NULL AND fo.intended_qty > 0
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3
@@ -332,7 +445,7 @@ type ListOpenFollowerOrdersPaginatedParams struct {
 
 type ListOpenFollowerOrdersPaginatedRow struct {
 	ID                   int64
-	MasterFillID         int64
+	MasterFillID         *int64
 	FollowerID           uuid.UUID
 	IdempotencyTag       string
 	IntendedQty          int32
@@ -347,6 +460,7 @@ type ListOpenFollowerOrdersPaginatedRow struct {
 	LastError            *string
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+	Origin               string
 	Tradingsymbol        string
 	Exchange             string
 	TransactionType      string
@@ -382,6 +496,7 @@ func (q *Queries) ListOpenFollowerOrdersPaginated(ctx context.Context, arg ListO
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
 			&i.Tradingsymbol,
 			&i.Exchange,
 			&i.TransactionType,
@@ -404,11 +519,16 @@ const listRejectedFollowerOrdersPaginated = `-- name: ListRejectedFollowerOrders
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
-WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', 'FAILED', 'error', 'failed', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3
 `
@@ -421,7 +541,7 @@ type ListRejectedFollowerOrdersPaginatedParams struct {
 
 type ListRejectedFollowerOrdersPaginatedRow struct {
 	ID                   int64
-	MasterFillID         int64
+	MasterFillID         *int64
 	FollowerID           uuid.UUID
 	IdempotencyTag       string
 	IntendedQty          int32
@@ -436,6 +556,7 @@ type ListRejectedFollowerOrdersPaginatedRow struct {
 	LastError            *string
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+	Origin               string
 	Tradingsymbol        string
 	Exchange             string
 	TransactionType      string
@@ -471,6 +592,7 @@ func (q *Queries) ListRejectedFollowerOrdersPaginated(ctx context.Context, arg L
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
 			&i.Tradingsymbol,
 			&i.Exchange,
 			&i.TransactionType,
@@ -492,7 +614,8 @@ func (q *Queries) ListRejectedFollowerOrdersPaginated(ctx context.Context, arg L
 const pendingFollowerOrders = `-- name: PendingFollowerOrders :many
 SELECT id, master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
        placed_qty, broker_order_id, terminal_status, filled_qty, average_price, attempt_count,
-       last_error, created_at, updated_at
+       last_error, origin, tradingsymbol, exchange, product, transaction_type, order_type,
+       created_at, updated_at
 FROM follower_orders
 WHERE terminal_status IS NULL AND intended_qty > 0 AND created_at < $1
 ORDER BY id ASC
@@ -522,6 +645,12 @@ func (q *Queries) PendingFollowerOrders(ctx context.Context, createdAt pgtype.Ti
 			&i.AveragePrice,
 			&i.AttemptCount,
 			&i.LastError,
+			&i.Origin,
+			&i.Tradingsymbol,
+			&i.Exchange,
+			&i.Product,
+			&i.TransactionType,
+			&i.OrderType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -533,6 +662,36 @@ func (q *Queries) PendingFollowerOrders(ctx context.Context, createdAt pgtype.Ti
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateFollowerOrderByTag = `-- name: UpdateFollowerOrderByTag :one
+UPDATE follower_orders
+SET broker_order_id = $2, terminal_status = $3, filled_qty = $4, average_price = $5, updated_at = now()
+WHERE follower_id = $1 AND idempotency_tag = $6
+RETURNING id
+`
+
+type UpdateFollowerOrderByTagParams struct {
+	FollowerID     uuid.UUID
+	BrokerOrderID  *string
+	TerminalStatus *string
+	FilledQty      int32
+	AveragePrice   decimal.NullDecimal
+	IdempotencyTag string
+}
+
+func (q *Queries) UpdateFollowerOrderByTag(ctx context.Context, arg UpdateFollowerOrderByTagParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateFollowerOrderByTag,
+		arg.FollowerID,
+		arg.BrokerOrderID,
+		arg.TerminalStatus,
+		arg.FilledQty,
+		arg.AveragePrice,
+		arg.IdempotencyTag,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateFollowerOrderFailed = `-- name: UpdateFollowerOrderFailed :exec

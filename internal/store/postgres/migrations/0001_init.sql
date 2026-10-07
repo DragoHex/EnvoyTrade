@@ -146,7 +146,7 @@ CREATE INDEX IF NOT EXISTS master_fills_master_id_idx ON master_fills (master_id
 
 CREATE TABLE IF NOT EXISTS follower_orders (
     id              bigserial PRIMARY KEY,
-    master_fill_id  bigint NOT NULL REFERENCES master_fills(id),
+    master_fill_id  bigint REFERENCES master_fills(id),
     follower_id     uuid NOT NULL REFERENCES accounts(id),
     idempotency_tag text NOT NULL UNIQUE,
     intended_qty    integer NOT NULL,
@@ -159,12 +159,36 @@ CREATE TABLE IF NOT EXISTS follower_orders (
     average_price   numeric(18,4),
     attempt_count   integer NOT NULL DEFAULT 0,
     last_error      text,
+    origin          text NOT NULL DEFAULT 'copy_trade',
+    tradingsymbol   text NOT NULL DEFAULT '',
+    exchange        text NOT NULL DEFAULT '',
+    product         text NOT NULL DEFAULT '',
+    transaction_type text NOT NULL DEFAULT '',
+    order_type      text NOT NULL DEFAULT '',
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
     UNIQUE (master_fill_id, follower_id)
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'follower_orders' AND column_name = 'master_fill_id' AND is_nullable = 'NO'
+    ) THEN
+        ALTER TABLE follower_orders ALTER COLUMN master_fill_id DROP NOT NULL;
+    END IF;
+END $$;
+
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'copy_trade';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS tradingsymbol text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS exchange text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS product text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS transaction_type text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS order_type text NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS follower_orders_follower_id_idx ON follower_orders (follower_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS follower_orders_follower_broker_order_id_idx ON follower_orders (follower_id, broker_order_id) WHERE broker_order_id IS NOT NULL;
 
 -- 8. Audit Event Trail
 CREATE TABLE IF NOT EXISTS order_events (
