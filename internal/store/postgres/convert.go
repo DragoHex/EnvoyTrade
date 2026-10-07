@@ -21,18 +21,28 @@ func pgdate(t *time.Time) pgtype.Date {
 }
 
 func toFollowerOrder(row sqlcgen.FollowerOrder) domain.FollowerOrder {
+	var masterFillID int64
+	if row.MasterFillID != nil {
+		masterFillID = *row.MasterFillID
+	}
 	o := domain.FollowerOrder{
-		ID:             row.ID,
-		MasterFillID:   row.MasterFillID,
-		FollowerID:     row.FollowerID,
-		IdempotencyTag: row.IdempotencyTag,
-		IntendedQty:    int(row.IntendedQty),
-		LotSize:        int(row.LotSize),
-		SizingReason:   domain.SizingReason(row.SizingReason),
-		FilledQty:      int(row.FilledQty),
-		AttemptCount:   int(row.AttemptCount),
-		CreatedAt:      row.CreatedAt.Time.In(domain.IST),
-		UpdatedAt:      row.UpdatedAt.Time.In(domain.IST),
+		ID:              row.ID,
+		MasterFillID:    masterFillID,
+		FollowerID:      row.FollowerID,
+		IdempotencyTag:  row.IdempotencyTag,
+		IntendedQty:     int(row.IntendedQty),
+		LotSize:         int(row.LotSize),
+		SizingReason:    domain.SizingReason(row.SizingReason),
+		FilledQty:       int(row.FilledQty),
+		AttemptCount:    int(row.AttemptCount),
+		Origin:          row.Origin,
+		Tradingsymbol:   row.Tradingsymbol,
+		Exchange:        row.Exchange,
+		Product:         row.Product,
+		TransactionType: row.TransactionType,
+		OrderType:       row.OrderType,
+		CreatedAt:       row.CreatedAt.Time.In(domain.IST),
+		UpdatedAt:       row.UpdatedAt.Time.In(domain.IST),
 	}
 	if row.PlacedQty != nil {
 		placedQty := int(*row.PlacedQty)

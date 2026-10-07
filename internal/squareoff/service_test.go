@@ -17,6 +17,30 @@ type fakeSquareOffStore struct {
 	roles       map[uuid.UUID]string
 	groupDetail map[uuid.UUID]domain.GroupDetail
 	accounts    map[uuid.UUID]domain.Account
+	insertedOrders []domain.FollowerOrder
+	placedOrders   map[int64]string
+	failedOrders   map[int64]string
+}
+
+func (s *fakeSquareOffStore) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error) {
+	s.insertedOrders = append(s.insertedOrders, o)
+	return int64(len(s.insertedOrders)), nil
+}
+
+func (s *fakeSquareOffStore) UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error {
+	if s.placedOrders == nil {
+		s.placedOrders = make(map[int64]string)
+	}
+	s.placedOrders[id] = brokerOrderID
+	return nil
+}
+
+func (s *fakeSquareOffStore) UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error {
+	if s.failedOrders == nil {
+		s.failedOrders = make(map[int64]string)
+	}
+	s.failedOrders[id] = errMsg
+	return nil
 }
 
 func (s *fakeSquareOffStore) AccountRole(ctx context.Context, id uuid.UUID) (string, error) {
@@ -105,6 +129,20 @@ func TestSquareOffAccount_FollowerLongPosition(t *testing.T) {
 	call := b.Calls[0]
 	if call.TransactionType != "SELL" || call.Quantity != 75 || call.Tradingsymbol != "NIFTY26OCTFUT" {
 		t.Errorf("unexpected counter order: %+v", call)
+	}
+
+	if len(store.insertedOrders) != 1 {
+		t.Fatalf("expected 1 inserted follower order, got %d", len(store.insertedOrders))
+	}
+	insOrder := store.insertedOrders[0]
+	if insOrder.Origin != "square_off" {
+		t.Errorf("origin = %s, want square_off", insOrder.Origin)
+	}
+	if insOrder.Tradingsymbol != "NIFTY26OCTFUT" || insOrder.IntendedQty != 75 || insOrder.TransactionType != "SELL" {
+		t.Errorf("unexpected inserted order: %+v", insOrder)
+	}
+	if store.placedOrders[1] != "ORD_EXIT_1" {
+		t.Errorf("placedOrders[1] = %s, want ORD_EXIT_1", store.placedOrders[1])
 	}
 }
 

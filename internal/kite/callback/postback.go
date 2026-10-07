@@ -101,7 +101,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.log().Warn("postback: master fill queue full, dropping", "order_id", p.OrderID, "error", err)
 		}
 	case RoleFollower:
-		if err := h.FollowerUpdates.Publish(ctx, ToOrderUpdate(p.Order)); err != nil {
+		if err := h.FollowerUpdates.Publish(ctx, ToOrderUpdate(p.Order, id)); err != nil {
 			h.log().Warn("postback: order update queue full, dropping", "order_id", p.OrderID, "error", err)
 		}
 	default:

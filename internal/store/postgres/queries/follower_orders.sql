@@ -1,13 +1,32 @@
 -- name: InsertFollowerOrder :one
 INSERT INTO follower_orders
-  (master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason)
-VALUES ($1,$2,$3,$4,$5,$6)
+  (master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason, origin, tradingsymbol, exchange, product, transaction_type, order_type)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+RETURNING id;
+
+-- name: InsertDirectFollowerOrder :one
+INSERT INTO follower_orders
+  (follower_id, broker_order_id, idempotency_tag, intended_qty, placed_qty, filled_qty, lot_size, sizing_reason, terminal_status, average_price, origin, tradingsymbol, exchange, product, transaction_type, order_type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT (follower_id, broker_order_id) WHERE broker_order_id IS NOT NULL
+DO UPDATE SET
+  terminal_status = EXCLUDED.terminal_status,
+  filled_qty = EXCLUDED.filled_qty,
+  average_price = EXCLUDED.average_price,
+  updated_at = now()
+RETURNING id;
+
+-- name: UpdateFollowerOrderByTag :one
+UPDATE follower_orders
+SET broker_order_id = $2, terminal_status = $3, filled_qty = $4, average_price = $5, updated_at = now()
+WHERE follower_id = $1 AND idempotency_tag = $6
 RETURNING id;
 
 -- name: GetFollowerOrder :one
 SELECT id, master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
        placed_qty, broker_order_id, terminal_status, filled_qty, average_price, attempt_count,
-       last_error, created_at, updated_at
+       last_error, origin, tradingsymbol, exchange, product, transaction_type, order_type,
+       created_at, updated_at
 FROM follower_orders WHERE id = $1;
 
 -- name: FollowerOrdersByMasterFill :many
@@ -30,7 +49,8 @@ RETURNING id;
 -- name: PendingFollowerOrders :many
 SELECT id, master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
        placed_qty, broker_order_id, terminal_status, filled_qty, average_price, attempt_count,
-       last_error, created_at, updated_at
+       last_error, origin, tradingsymbol, exchange, product, transaction_type, order_type,
+       created_at, updated_at
 FROM follower_orders
 WHERE terminal_status IS NULL AND intended_qty > 0 AND created_at < $1
 ORDER BY id ASC;
@@ -39,10 +59,15 @@ ORDER BY id ASC;
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
 WHERE fo.follower_id = $1
 ORDER BY fo.created_at DESC
 LIMIT 100;
@@ -51,10 +76,15 @@ LIMIT 100;
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
 WHERE fo.follower_id = $1 AND fo.terminal_status IS NULL AND fo.intended_qty > 0
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3;
@@ -67,10 +97,15 @@ WHERE fo.follower_id = $1 AND fo.terminal_status IS NULL AND fo.intended_qty > 0
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
 WHERE fo.follower_id = $1 AND fo.terminal_status = 'COMPLETE'
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3;
@@ -83,14 +118,26 @@ WHERE fo.follower_id = $1 AND fo.terminal_status = 'COMPLETE';
 SELECT fo.id, fo.master_fill_id, fo.follower_id, fo.idempotency_tag, fo.intended_qty,
        fo.lot_size, fo.sizing_reason, fo.placed_qty, fo.broker_order_id, fo.terminal_status,
        fo.filled_qty, fo.average_price, fo.attempt_count, fo.last_error, fo.created_at, fo.updated_at,
-       mf.tradingsymbol, mf.exchange, mf.transaction_type, mf.product, mf.order_type,
+       fo.origin,
+       COALESCE(NULLIF(fo.tradingsymbol, ''), mf.tradingsymbol, '') AS tradingsymbol,
+       COALESCE(NULLIF(fo.exchange, ''), mf.exchange, '') AS exchange,
+       COALESCE(NULLIF(fo.transaction_type, ''), mf.transaction_type, '') AS transaction_type,
+       COALESCE(NULLIF(fo.product, ''), mf.product, '') AS product,
+       COALESCE(NULLIF(fo.order_type, ''), mf.order_type, '') AS order_type,
        mf.order_timestamp AS master_order_timestamp, mf.raw_payload AS master_raw_payload
 FROM follower_orders fo
-JOIN master_fills mf ON fo.master_fill_id = mf.id
-WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
+LEFT JOIN master_fills mf ON fo.master_fill_id = mf.id
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', 'FAILED', 'error', 'failed', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''))
 ORDER BY fo.created_at DESC, fo.id DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountRejectedFollowerOrders :one
 SELECT COUNT(*) FROM follower_orders fo
-WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''));
+WHERE fo.follower_id = $1 AND (fo.terminal_status IN ('REJECTED', 'CANCELLED', 'DEAD_LETTERED', 'dead_lettered', 'FAILED', 'error', 'failed', '') OR fo.intended_qty = 0 OR (fo.last_error IS NOT NULL AND fo.last_error != ''));
+
+-- name: FollowerOrderTerminalExists :one
+SELECT EXISTS(
+  SELECT 1 FROM follower_orders
+  WHERE follower_id = $1 AND broker_order_id = $2 AND terminal_status IS NOT NULL
+);
+

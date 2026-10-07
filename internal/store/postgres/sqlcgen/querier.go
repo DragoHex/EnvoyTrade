@@ -41,7 +41,8 @@ type Querier interface {
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (int64, error)
 	DeleteSession(ctx context.Context, tokenHash string) (int64, error)
 	EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]EnabledFollowLinksRow, error)
-	FollowerOrdersByMasterFill(ctx context.Context, masterFillID int64) ([]FollowerOrdersByMasterFillRow, error)
+	FollowerOrderTerminalExists(ctx context.Context, arg FollowerOrderTerminalExistsParams) (bool, error)
+	FollowerOrdersByMasterFill(ctx context.Context, masterFillID *int64) ([]FollowerOrdersByMasterFillRow, error)
 	GetAccountMargins(ctx context.Context, accountID uuid.UUID) (AccountMargin, error)
 	GetFollowerOrder(ctx context.Context, id int64) (FollowerOrder, error)
 	GetSessionWithUser(ctx context.Context, tokenHash string) (GetSessionWithUserRow, error)
@@ -54,6 +55,7 @@ type Querier interface {
 	GroupIDForFollower(ctx context.Context, followerID uuid.UUID) (uuid.UUID, error)
 	GroupInfo(ctx context.Context, arg GroupInfoParams) (GroupInfoRow, error)
 	Groups(ctx context.Context, userID *uuid.UUID) ([]GroupsRow, error)
+	InsertDirectFollowerOrder(ctx context.Context, arg InsertDirectFollowerOrderParams) (int64, error)
 	InsertFollowerOrder(ctx context.Context, arg InsertFollowerOrderParams) (int64, error)
 	InsertMasterFill(ctx context.Context, arg InsertMasterFillParams) (int64, error)
 	InstrumentLotSize(ctx context.Context, arg InstrumentLotSizeParams) (int32, error)
@@ -73,6 +75,7 @@ type Querier interface {
 	ListRejectedFollowerOrdersPaginated(ctx context.Context, arg ListRejectedFollowerOrdersPaginatedParams) ([]ListRejectedFollowerOrdersPaginatedRow, error)
 	ListRejectedMasterOrdersPaginated(ctx context.Context, arg ListRejectedMasterOrdersPaginatedParams) ([]MasterFill, error)
 	MasterActive(ctx context.Context, id uuid.UUID) (bool, error)
+	MasterFillExists(ctx context.Context, arg MasterFillExistsParams) (bool, error)
 	MasterIDForFollower(ctx context.Context, followerID uuid.UUID) (uuid.UUID, error)
 	OrderEventsByFollowerOrder(ctx context.Context, followerOrderID *int64) ([]OrderEventsByFollowerOrderRow, error)
 	PendingFollowerOrders(ctx context.Context, createdAt pgtype.Timestamptz) ([]FollowerOrder, error)
@@ -89,6 +92,7 @@ type Querier interface {
 	SetMasterFillDispatchState(ctx context.Context, arg SetMasterFillDispatchStateParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)
 	UpdateFollowLinkTerms(ctx context.Context, arg UpdateFollowLinkTermsParams) (int64, error)
+	UpdateFollowerOrderByTag(ctx context.Context, arg UpdateFollowerOrderByTagParams) (int64, error)
 	UpdateFollowerOrderFailed(ctx context.Context, arg UpdateFollowerOrderFailedParams) error
 	UpdateFollowerOrderPlaced(ctx context.Context, arg UpdateFollowerOrderPlacedParams) error
 	UpdateFollowerOrderStatus(ctx context.Context, arg UpdateFollowerOrderStatusParams) (int64, error)

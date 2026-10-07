@@ -13,26 +13,29 @@ import {
 import { GroupCard } from '../components/GroupCard'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
 import { EmptyState } from '../components/EmptyState'
+import { registerSyncSubscriber, triggerSyncNow } from '../utils/syncBus'
 
 function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
 
   onMount(() => {
-    const timer = setInterval(() => {
+    const unregister = registerSyncSubscriber(() => {
       refetch()
-    }, 7000)
-    onCleanup(() => clearInterval(timer))
+    })
+    onCleanup(unregister)
   })
 
   const onToggleCopy = async (accountId: string, next: boolean) => {
     await patchAccount(accountId, { enabled: next })
     refetch()
+    triggerSyncNow()
   }
 
   const onToggleMasterActive = async (next: boolean) => {
     const masterId = detail()?.masterId || props.id
     await patchAccount(masterId, { active: next })
     refetch()
+    triggerSyncNow()
   }
 
   const onAction = async (accountId: string, type: ActionType) => {
@@ -40,6 +43,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await postAction(accountId, type)
     } finally {
       refetch()
+      triggerSyncNow()
     }
   }
 
@@ -48,6 +52,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await squareOffGroup(groupId, symbols ? { symbols } : undefined)
     } finally {
       refetch()
+      triggerSyncNow()
     }
   }
 
@@ -56,6 +61,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await squareOffAccount(accountId, symbols ? { symbols } : undefined)
     } finally {
       refetch()
+      triggerSyncNow()
     }
   }
 
@@ -64,6 +70,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await rebalanceGroup(groupId, followerIds ? { follower_ids: followerIds } : undefined)
     } finally {
       refetch()
+      triggerSyncNow()
     }
   }
 
@@ -72,6 +79,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await rebalanceAccount(accountId)
     } finally {
       refetch()
+      triggerSyncNow()
     }
   }
 

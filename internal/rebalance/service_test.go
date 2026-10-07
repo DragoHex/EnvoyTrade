@@ -15,10 +15,34 @@ import (
 )
 
 type fakeRebalanceStore struct {
-	roles       map[uuid.UUID]string
-	groupDetail map[uuid.UUID]domain.GroupDetail
-	lotSizes    map[string]int // "EXCHANGE:SYMBOL" -> lotSize
-	accounts    map[uuid.UUID]domain.Account
+	roles          map[uuid.UUID]string
+	groupDetail    map[uuid.UUID]domain.GroupDetail
+	lotSizes       map[string]int // "EXCHANGE:SYMBOL" -> lotSize
+	accounts       map[uuid.UUID]domain.Account
+	insertedOrders []domain.FollowerOrder
+	placedOrders   map[int64]string
+	failedOrders   map[int64]string
+}
+
+func (s *fakeRebalanceStore) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error) {
+	s.insertedOrders = append(s.insertedOrders, o)
+	return int64(len(s.insertedOrders)), nil
+}
+
+func (s *fakeRebalanceStore) UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error {
+	if s.placedOrders == nil {
+		s.placedOrders = make(map[int64]string)
+	}
+	s.placedOrders[id] = brokerOrderID
+	return nil
+}
+
+func (s *fakeRebalanceStore) UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error {
+	if s.failedOrders == nil {
+		s.failedOrders = make(map[int64]string)
+	}
+	s.failedOrders[id] = errMsg
+	return nil
 }
 
 func (s *fakeRebalanceStore) AccountRole(ctx context.Context, id uuid.UUID) (string, error) {
@@ -389,6 +413,20 @@ func TestRebalanceAccount_SingleFollower(t *testing.T) {
 	}
 	if len(bF1.Calls) != 1 || bF1.Calls[0].Quantity != 50 || bF1.Calls[0].TransactionType != "BUY" {
 		t.Errorf("unexpected order placed: %+v", bF1.Calls)
+	}
+
+	if len(store.insertedOrders) != 1 {
+		t.Fatalf("expected 1 inserted follower order, got %d", len(store.insertedOrders))
+	}
+	insOrder := store.insertedOrders[0]
+	if insOrder.Origin != "rebalance" {
+		t.Errorf("origin = %s, want rebalance", insOrder.Origin)
+	}
+	if insOrder.Tradingsymbol != "NIFTY26OCTFUT" || insOrder.IntendedQty != 50 || insOrder.TransactionType != "BUY" {
+		t.Errorf("unexpected inserted order: %+v", insOrder)
+	}
+	if store.placedOrders[1] != "ORD_REBAL_F1" {
+		t.Errorf("placedOrders[1] = %s, want ORD_REBAL_F1", store.placedOrders[1])
 	}
 }
 

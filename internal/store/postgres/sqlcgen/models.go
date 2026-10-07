@@ -85,22 +85,28 @@ type FollowLink struct {
 }
 
 type FollowerOrder struct {
-	ID             int64
-	MasterFillID   int64
-	FollowerID     uuid.UUID
-	IdempotencyTag string
-	IntendedQty    int32
-	LotSize        int32
-	SizingReason   int32
-	PlacedQty      *int32
-	BrokerOrderID  *string
-	TerminalStatus *string
-	FilledQty      int32
-	AveragePrice   decimal.NullDecimal
-	AttemptCount   int32
-	LastError      *string
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID              int64
+	MasterFillID    *int64
+	FollowerID      uuid.UUID
+	IdempotencyTag  string
+	IntendedQty     int32
+	LotSize         int32
+	SizingReason    int32
+	PlacedQty       *int32
+	BrokerOrderID   *string
+	TerminalStatus  *string
+	FilledQty       int32
+	AveragePrice    decimal.NullDecimal
+	AttemptCount    int32
+	LastError       *string
+	Origin          string
+	Tradingsymbol   string
+	Exchange        string
+	Product         string
+	TransactionType string
+	OrderType       string
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type Group struct {

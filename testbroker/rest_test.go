@@ -398,3 +398,123 @@ func TestREST_AdminAPI_UsersAndOrders(t *testing.T) {
 		t.Errorf("expected mode delayed, got %s", recModeGet.Body.String())
 	}
 }
+
+func TestREST_GetPositions_TotalMTM_Calculation(t *testing.T) {
+	router, eng, _ := setupTestServer()
+	eng.config.ExecutionMode = "instant"
+
+	// 1. Master buys 150 NIFTY @ 25000
+	_, err := eng.PlaceOrder("MASTER01", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "BUY", Product: "NRML", OrderType: "MARKET", Quantity: 150,
+	})
+	if err != nil {
+		t.Fatalf("place order master: %v", err)
+	}
+
+	// 2. Follower buys 75 NIFTY @ 25000
+	_, err = eng.PlaceOrder("FOLLOWER01", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "BUY", Product: "NRML", OrderType: "MARKET", Quantity: 75,
+	})
+	if err != nil {
+		t.Fatalf("place order follower: %v", err)
+	}
+
+	// 3. Update LTP: NIFTY rises to 25150 (+150 pts)
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25150.0); err != nil {
+		t.Fatalf("update LTP: %v", err)
+	}
+
+	// 4. Master sells short 10 RELIANCE @ 2450
+	_, err = eng.PlaceOrder("MASTER01", "regular", OrderParams{
+		Exchange: "NSE", Tradingsymbol: "RELIANCE",
+		TransactionType: "SELL", Product: "MIS", OrderType: "MARKET", Quantity: 10,
+	})
+	if err != nil {
+		t.Fatalf("place short order master: %v", err)
+	}
+
+	// 5. Update LTP: RELIANCE falls to 2420 (+30 pts gain on short)
+	if err := eng.UpdateLTP("NSE", "RELIANCE", 2420.0); err != nil {
+		t.Fatalf("update LTP RELIANCE: %v", err)
+	}
+
+	type posResp struct {
+		Status string `json:"status"`
+		Data   struct {
+			Net []Position `json:"net"`
+		} `json:"data"`
+	}
+
+	// Helper to fetch positions via REST
+	getPositionsViaREST := func(token string) []Position {
+		req := httptest.NewRequest(http.MethodGet, "/portfolio/positions", nil)
+		req.Header.Set("Authorization", "token "+token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /portfolio/positions failed with status %d: %s", rec.Code, rec.Body.String())
+		}
+		var resp posResp
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal positions: %v", err)
+		}
+		return resp.Data.Net
+	}
+
+	// Calculate total MTM from positions
+	calcTotalMtm := func(positions []Position) float64 {
+		total := 0.0
+		for _, p := range positions {
+			total += p.M2M
+		}
+		return total
+	}
+
+	// Validate Scenario A: Bullish NIFTY, Bearish RELIANCE
+	masterPositions := getPositionsViaREST("key_master:tok_master")
+	if len(masterPositions) != 2 {
+		t.Fatalf("expected 2 positions for master, got %d", len(masterPositions))
+	}
+	masterTotalMTM := calcTotalMtm(masterPositions)
+	// Expected Master: 150 * (+150) + 10 * (+30) = 22500 + 300 = 22800.0
+	expectedMasterMTM := 22800.0
+	if masterTotalMTM != expectedMasterMTM {
+		t.Errorf("Master Total MTM = %f, want %f", masterTotalMTM, expectedMasterMTM)
+	}
+
+	followerPositions := getPositionsViaREST("key_f1:tok_f1")
+	if len(followerPositions) != 1 {
+		t.Fatalf("expected 1 position for follower, got %d", len(followerPositions))
+	}
+	followerTotalMTM := calcTotalMtm(followerPositions)
+	// Expected Follower: 75 * (+150) = 11250.0
+	expectedFollowerMTM := 11250.0
+	if followerTotalMTM != expectedFollowerMTM {
+		t.Errorf("Follower Total MTM = %f, want %f", followerTotalMTM, expectedFollowerMTM)
+	}
+
+	// Validate Scenario B: Adverse price movements
+	// NIFTY drops to 24900 (-100 pts from entry 25000)
+	// RELIANCE rises to 2500 (-50 pts against short entry 2450)
+	_ = eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 24900.0)
+	_ = eng.UpdateLTP("NSE", "RELIANCE", 2500.0)
+
+	masterPositionsB := getPositionsViaREST("key_master:tok_master")
+	masterTotalMTMB := calcTotalMtm(masterPositionsB)
+	// Expected Master: 150 * (-100) + 10 * (-50) = -15000 + -500 = -15500.0
+	expectedMasterMTMB := -15500.0
+	if masterTotalMTMB != expectedMasterMTMB {
+		t.Errorf("Adverse Master Total MTM = %f, want %f", masterTotalMTMB, expectedMasterMTMB)
+	}
+
+	followerPositionsB := getPositionsViaREST("key_f1:tok_f1")
+	followerTotalMTMB := calcTotalMtm(followerPositionsB)
+	// Expected Follower: 75 * (-100) = -7500.0
+	expectedFollowerMTMB := -7500.0
+	if followerTotalMTMB != expectedFollowerMTMB {
+		t.Errorf("Adverse Follower Total MTM = %f, want %f", followerTotalMTMB, expectedFollowerMTMB)
+	}
+}
+

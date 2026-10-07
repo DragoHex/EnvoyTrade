@@ -23,8 +23,39 @@ type fakeStore struct {
 	pendingErr   error
 	updatedOrder map[string]string // brokerOrderID -> status
 	events       []domain.OrderEvent
-	sweptIDs     []string
-	sweepErr     error
+	sweptIDs         []string
+	sweepErr         error
+	masterFillsExist    map[string]bool
+	followerOrdersExist map[string]bool
+	failedOrders        map[int64]string
+}
+
+func (s *fakeStore) MasterFillExists(ctx context.Context, masterID uuid.UUID, brokerOrderID string, filledQty int, status string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.masterFillsExist == nil {
+		return false, nil
+	}
+	return s.masterFillsExist[masterID.String()+":"+brokerOrderID], nil
+}
+
+func (s *fakeStore) FollowerOrderTerminalExists(ctx context.Context, followerID uuid.UUID, brokerOrderID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.followerOrdersExist == nil {
+		return false, nil
+	}
+	return s.followerOrdersExist[followerID.String()+":"+brokerOrderID], nil
+}
+
+func (s *fakeStore) UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failedOrders == nil {
+		s.failedOrders = make(map[int64]string)
+	}
+	s.failedOrders[id] = errMsg
+	return nil
 }
 
 func (s *fakeStore) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error) {
@@ -80,6 +111,7 @@ func (r *fakeMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UU
 type fakeFollowerReader struct {
 	mu      sync.Mutex
 	history map[string][]kiteconnect.Order
+	orders  map[uuid.UUID][]kiteconnect.Order
 	err     error
 }
 
@@ -90,6 +122,28 @@ func (r *fakeFollowerReader) GetFollowerOrderHistory(ctx context.Context, follow
 		return nil, r.err
 	}
 	return r.history[brokerOrderID], nil
+}
+
+func (r *fakeFollowerReader) GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]kiteconnect.Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.orders[followerID], nil
+}
+
+type fakeFollowerConsumer struct {
+	mu      sync.Mutex
+	handled []domain.OrderUpdate
+	err     error
+}
+
+func (c *fakeFollowerConsumer) Handle(ctx context.Context, upd domain.OrderUpdate) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.handled = append(c.handled, upd)
+	return c.err
 }
 
 type fakeConsumer struct {
@@ -332,6 +386,118 @@ func TestPoller_ReconcileMaster_OnlyReconcilesSpecifiedMaster(t *testing.T) {
 	}
 	if consumer.handled[0].MasterID != master1 {
 		t.Errorf("handled master ID = %s, want %s", consumer.handled[0].MasterID, master1)
+	}
+}
+
+func TestPoller_SkipsExistingMasterFill(t *testing.T) {
+	masterID := uuid.New()
+	store := &fakeStore{
+		accounts: []domain.Account{
+			{ID: masterID, Role: "master", Active: true},
+		},
+		masterFillsExist: map[string]bool{
+			masterID.String() + ":MO-EXISTS": true,
+		},
+	}
+	masterReader := &fakeMasterReader{
+		orders: map[uuid.UUID][]kiteconnect.Order{
+			masterID: {
+				{
+					OrderID:        "MO-EXISTS",
+					Status:         "COMPLETE",
+					FilledQuantity: 100,
+					TradingSymbol:  "INFY",
+				},
+			},
+		},
+	}
+	consumer := &fakeConsumer{}
+	alerter := &fakeAlerter{}
+
+	poller := recon.NewPoller(store, masterReader, &fakeFollowerReader{}, consumer, alerter, recon.DefaultConfig(), nil)
+	if err := poller.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if len(consumer.handled) != 0 {
+		t.Fatalf("expected 0 fills handled since fill already exists, got %d", len(consumer.handled))
+	}
+}
+
+func TestPoller_BackfillsFollowerOrders(t *testing.T) {
+	followerID := uuid.New()
+	store := &fakeStore{
+		accounts: []domain.Account{
+			{ID: followerID, Role: "follower", Active: true},
+		},
+	}
+	followerReader := &fakeFollowerReader{
+		orders: map[uuid.UUID][]kiteconnect.Order{
+			followerID: {
+				{
+					OrderID:        "FO-MISSED",
+					Status:         "COMPLETE",
+					FilledQuantity: 50,
+					TradingSymbol:  "TCS",
+					Exchange:       "NSE",
+					Product:        "CNC",
+					TransactionType: "BUY",
+				},
+			},
+		},
+	}
+	consumer := &fakeConsumer{}
+	followerConsumer := &fakeFollowerConsumer{}
+	alerter := &fakeAlerter{}
+
+	poller := recon.NewPoller(store, &fakeMasterReader{}, followerReader, consumer, alerter, recon.DefaultConfig(), nil)
+	poller.FollowerConsumer = followerConsumer
+
+	if err := poller.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if len(followerConsumer.handled) != 1 {
+		t.Fatalf("expected 1 follower order backfilled, got %d", len(followerConsumer.handled))
+	}
+	if followerConsumer.handled[0].BrokerOrderID != "FO-MISSED" {
+		t.Errorf("BrokerOrderID = %s, want FO-MISSED", followerConsumer.handled[0].BrokerOrderID)
+	}
+	if followerConsumer.handled[0].FollowerID != followerID {
+		t.Errorf("FollowerID = %s, want %s", followerConsumer.handled[0].FollowerID, followerID)
+	}
+}
+
+func TestPoller_FailsUnresolvableFollowerOrderPast5Minutes(t *testing.T) {
+	followerID := uuid.New()
+	store := &fakeStore{
+		accounts: []domain.Account{
+			{ID: followerID, Role: "follower", Active: true},
+		},
+		pending: []domain.FollowerOrder{
+			{
+				ID:            101,
+				FollowerID:    followerID,
+				BrokerOrderID: "FO-STUCK",
+				CreatedAt:     time.Now().Add(-6 * time.Minute),
+			},
+		},
+	}
+	followerReader := &fakeFollowerReader{
+		history: map[string][]kiteconnect.Order{
+			"FO-STUCK": {}, // Not found at broker
+		},
+	}
+	consumer := &fakeConsumer{}
+	alerter := &fakeAlerter{}
+
+	poller := recon.NewPoller(store, &fakeMasterReader{}, followerReader, consumer, alerter, recon.DefaultConfig(), nil)
+	if err := poller.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if store.failedOrders[101] != "order not found at broker past 5m" {
+		t.Errorf("failedOrders[101] = %q, want 'order not found at broker past 5m'", store.failedOrders[101])
 	}
 }
 

@@ -141,3 +141,68 @@ func TestHoldingConversion(t *testing.T) {
 		t.Errorf("Pnl = %s, want 6925.00", converted.Pnl)
 	}
 }
+
+func TestCalculatePositionMetrics_DynamicMTMScenarios(t *testing.T) {
+	margins := kiteconnect.AllMargins{}
+
+	t.Run("Scenario A: Multi-position mixed gains and losses", func(t *testing.T) {
+		positions := []kiteconnect.Position{
+			{Tradingsymbol: "NIFTY26OCTFUT", Quantity: 150, M2M: 22500.0, Realised: 0.0},
+			{Tradingsymbol: "RELIANCE", Quantity: -10, M2M: 300.0, Realised: 0.0},
+			{Tradingsymbol: "INFY", Quantity: 100, M2M: -1500.0, Realised: 0.0},
+		}
+		summary := kite.CalculatePositionMetrics(positions, margins)
+		expectedMtm := decimal.NewFromFloat(21300.0) // 22500 + 300 - 1500
+		if !summary.TotalMtm.Equal(expectedMtm) {
+			t.Errorf("TotalMtm = %s, want %s", summary.TotalMtm, expectedMtm)
+		}
+		if summary.NetQty != 240 { // 150 - 10 + 100
+			t.Errorf("NetQty = %d, want 240", summary.NetQty)
+		}
+		if summary.OpenPositions != 3 || summary.ClosedPositions != 0 {
+			t.Errorf("Open=%d Closed=%d, want 3 and 0", summary.OpenPositions, summary.ClosedPositions)
+		}
+	})
+
+	t.Run("Scenario B: Mix of open and closed positions with realized PnL", func(t *testing.T) {
+		positions := []kiteconnect.Position{
+			{Tradingsymbol: "NIFTY26OCTFUT", Quantity: 75, M2M: 37500.0, Realised: 15000.0},
+			{Tradingsymbol: "GOLD26OCTFUT", Quantity: 0, M2M: -5000.0, Realised: -5000.0},
+		}
+		summary := kite.CalculatePositionMetrics(positions, margins)
+		expectedMtm := decimal.NewFromFloat(32500.0) // 37500 + (-5000)
+		expectedRealized := decimal.NewFromFloat(10000.0) // 15000 + (-5000)
+		if !summary.TotalMtm.Equal(expectedMtm) {
+			t.Errorf("TotalMtm = %s, want %s", summary.TotalMtm, expectedMtm)
+		}
+		if !summary.RealizedPnl.Equal(expectedRealized) {
+			t.Errorf("RealizedPnl = %s, want %s", summary.RealizedPnl, expectedRealized)
+		}
+		if summary.OpenPositions != 1 || summary.ClosedPositions != 1 {
+			t.Errorf("Open=%d Closed=%d, want 1 and 1", summary.OpenPositions, summary.ClosedPositions)
+		}
+	})
+
+	t.Run("Scenario C: Adverse movements across portfolio", func(t *testing.T) {
+		positions := []kiteconnect.Position{
+			{Tradingsymbol: "NIFTY26OCTFUT", Quantity: 150, M2M: -15000.0, Realised: 0.0},
+			{Tradingsymbol: "RELIANCE", Quantity: -10, M2M: -500.0, Realised: 0.0},
+		}
+		summary := kite.CalculatePositionMetrics(positions, margins)
+		expectedMtm := decimal.NewFromFloat(-15500.0)
+		if !summary.TotalMtm.Equal(expectedMtm) {
+			t.Errorf("TotalMtm = %s, want %s", summary.TotalMtm, expectedMtm)
+		}
+	})
+
+	t.Run("Scenario D: Empty portfolio", func(t *testing.T) {
+		summary := kite.CalculatePositionMetrics(nil, margins)
+		if !summary.TotalMtm.IsZero() {
+			t.Errorf("TotalMtm = %s, want 0", summary.TotalMtm)
+		}
+		if summary.NetQty != 0 || summary.OpenPositions != 0 || summary.ClosedPositions != 0 {
+			t.Errorf("unexpected counts: %+v", summary)
+		}
+	})
+}
+

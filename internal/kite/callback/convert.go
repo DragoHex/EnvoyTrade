@@ -52,17 +52,25 @@ func ToMasterFill(o kiteconnect.Order, masterID uuid.UUID) domain.MasterFill {
 	}
 }
 
-// ToOrderUpdate converts a Kite order update into a status change for an
-// order already placed — used to update a follower_orders row located by
-// BrokerOrderID.
-func ToOrderUpdate(o kiteconnect.Order) domain.OrderUpdate {
+// ToOrderUpdate converts a Kite order update into an OrderUpdate event for a follower.
+// It maps the full order parameters, facilitating both in-flight status updates
+// and direct/manual order recording.
+func ToOrderUpdate(o kiteconnect.Order, followerID uuid.UUID) domain.OrderUpdate {
 	raw, _ := json.Marshal(o)
 	return domain.OrderUpdate{
-		BrokerOrderID:  o.OrderID,
-		Status:         o.Status,
-		FilledQuantity: int(o.FilledQuantity),
-		AveragePrice:   decimal.NewFromFloat(o.AveragePrice),
-		OrderTimestamp: o.OrderTimestamp.Time,
-		RawPayload:     raw,
+		FollowerID:      followerID,
+		BrokerOrderID:   o.OrderID,
+		Tradingsymbol:   o.TradingSymbol,
+		Exchange:        o.Exchange,
+		Product:         o.Product,
+		TransactionType: o.TransactionType,
+		OrderType:       o.OrderType,
+		Quantity:        int(o.Quantity),
+		Status:          o.Status,
+		FilledQuantity:  int(o.FilledQuantity),
+		AveragePrice:    decimal.NewFromFloat(o.AveragePrice),
+		OrderTimestamp:  o.OrderTimestamp.Time,
+		Tag:             o.Tag,
+		RawPayload:      raw,
 	}
 }

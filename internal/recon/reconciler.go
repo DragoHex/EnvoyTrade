@@ -23,14 +23,20 @@ type MasterOrderReader interface {
 	GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error)
 }
 
-// FollowerOrderReader fetches transition history for a follower's order via REST.
+// FollowerOrderReader fetches transition history and orders for a follower's order via REST.
 type FollowerOrderReader interface {
 	GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]kiteconnect.Order, error)
+	GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]kiteconnect.Order, error)
 }
 
 // MasterFillConsumer handles a master fill (idempotently inserting and fanning out).
 type MasterFillConsumer interface {
 	Handle(ctx context.Context, fill domain.MasterFill) error
+}
+
+// FollowerStatusConsumer handles follower order updates (backfilling or status updating).
+type FollowerStatusConsumer interface {
+	Handle(ctx context.Context, upd domain.OrderUpdate) error
 }
 
 // Store is everything the reconciler needs from persistence.
@@ -40,6 +46,9 @@ type Store interface {
 	UpdateFollowerOrderStatus(ctx context.Context, brokerOrderID, status string, filledQty int, averagePrice decimal.Decimal) (int64, error)
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
 	SweepPendingOrderUpdates(ctx context.Context, cutoff time.Time) ([]string, error)
+	MasterFillExists(ctx context.Context, masterID uuid.UUID, brokerOrderID string, filledQty int, status string) (bool, error)
+	FollowerOrderTerminalExists(ctx context.Context, followerID uuid.UUID, brokerOrderID string) (bool, error)
+	UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error
 }
 
 // Alerter receives notifications about drift and unresolvable states.
@@ -83,13 +92,14 @@ func DefaultConfig() Config {
 
 // Poller runs periodic reconciliation cycles.
 type Poller struct {
-	store          Store
-	masterReader   MasterOrderReader
-	followerReader FollowerOrderReader
-	masterConsumer MasterFillConsumer
-	alerter        Alerter
-	cfg            Config
-	logger         *slog.Logger
+	store            Store
+	masterReader     MasterOrderReader
+	followerReader   FollowerOrderReader
+	masterConsumer   MasterFillConsumer
+	FollowerConsumer FollowerStatusConsumer
+	alerter          Alerter
+	cfg              Config
+	logger           *slog.Logger
 }
 
 // NewPoller creates a new reconciliation poller.
@@ -134,16 +144,21 @@ func (p *Poller) log() *slog.Logger {
 
 // RunOnce performs a single reconciliation pass across master fills and follower orders.
 func (p *Poller) RunOnce(ctx context.Context) error {
-	// 1. List active master accounts
+	// 1. List active accounts
 	accounts, err := p.store.Accounts(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("recon: list accounts: %w", err)
 	}
 
 	var masters []domain.Account
+	var followers []domain.Account
 	for _, a := range accounts {
-		if a.Role == "master" && a.Active {
-			masters = append(masters, a)
+		if a.Active {
+			if a.Role == "master" {
+				masters = append(masters, a)
+			} else if a.Role == "follower" {
+				followers = append(followers, a)
+			}
 		}
 	}
 
@@ -152,6 +167,11 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 	// 2. Poll master orders & backfill any missed fills (WS gap fallback)
 	for _, m := range masters {
 		_ = p.ReconcileMaster(ctx, m.ID)
+	}
+
+	// 2b. Poll follower orders & backfill any missed callbacks
+	for _, f := range followers {
+		_ = p.ReconcileFollower(ctx, f.ID)
 	}
 
 	// 3. Inspect stuck follower orders older than threshold
@@ -170,6 +190,9 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 				"master_fill_id":    fo.MasterFillID,
 				"created_at":        fo.CreatedAt.In(domain.IST),
 			})
+			if time.Since(fo.CreatedAt) > 5*time.Minute {
+				_ = p.store.UpdateFollowerOrderFailed(ctx, fo.ID, "FAILED", "order unplaced without broker_order_id past 5m")
+			}
 			continue
 		}
 
@@ -181,6 +204,9 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 				"broker_order_id":   fo.BrokerOrderID,
 				"error":             err.Error(),
 			})
+			if time.Since(fo.CreatedAt) > 5*time.Minute {
+				_ = p.store.UpdateFollowerOrderFailed(ctx, fo.ID, "FAILED", fmt.Sprintf("order unresolvable at broker past 5m: %v", err))
+			}
 			continue
 		}
 
@@ -190,6 +216,9 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 				"follower_id":       fo.FollowerID,
 				"broker_order_id":   fo.BrokerOrderID,
 			})
+			if time.Since(fo.CreatedAt) > 5*time.Minute {
+				_ = p.store.UpdateFollowerOrderFailed(ctx, fo.ID, "FAILED", "order not found at broker past 5m")
+			}
 			continue
 		}
 
@@ -232,6 +261,9 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 				"broker_order_id":   fo.BrokerOrderID,
 				"status":            latest.Status,
 			})
+			if time.Since(fo.CreatedAt) > 5*time.Minute {
+				_ = p.store.UpdateFollowerOrderFailed(ctx, fo.ID, "FAILED", fmt.Sprintf("order remains non-terminal past 5m: %s", latest.Status))
+			}
 		}
 	}
 
@@ -271,10 +303,54 @@ func (p *Poller) ReconcileMaster(ctx context.Context, masterID uuid.UUID) error 
 		if !o.OrderTimestamp.Time.IsZero() && o.OrderTimestamp.Time.Before(windowStart) {
 			continue
 		}
+		exists, err := p.store.MasterFillExists(ctx, masterID, o.OrderID, int(o.FilledQuantity), o.Status)
+		if err == nil && exists {
+			continue
+		}
 		fill := callback.ToMasterFill(o, masterID)
 		if err := p.masterConsumer.Handle(ctx, fill); err != nil {
 			p.alerter.Alert(ctx, "failed to handle master fill from recon", map[string]any{
 				"master_id":       masterID,
+				"broker_order_id": o.OrderID,
+				"error":           err.Error(),
+			})
+		}
+	}
+	return nil
+}
+
+// ReconcileFollower checks and backfills recent orders for a single follower account.
+func (p *Poller) ReconcileFollower(ctx context.Context, followerID uuid.UUID) error {
+	if p.FollowerConsumer == nil {
+		return nil
+	}
+	now := time.Now()
+	windowStart := now.Add(-p.cfg.PollingWindow)
+
+	orders, err := p.followerReader.GetFollowerOrders(ctx, followerID)
+	if err != nil {
+		p.alerter.Alert(ctx, "failed to read follower orders", map[string]any{
+			"follower_id": followerID,
+			"error":       err.Error(),
+		})
+		return err
+	}
+
+	for _, o := range orders {
+		if !callback.IsTerminal(o.Status) {
+			continue
+		}
+		if !o.OrderTimestamp.Time.IsZero() && o.OrderTimestamp.Time.Before(windowStart) {
+			continue
+		}
+		exists, err := p.store.FollowerOrderTerminalExists(ctx, followerID, o.OrderID)
+		if err == nil && exists {
+			continue
+		}
+		upd := callback.ToOrderUpdate(o, followerID)
+		if err := p.FollowerConsumer.Handle(ctx, upd); err != nil {
+			p.alerter.Alert(ctx, "failed to handle follower order from recon", map[string]any{
+				"follower_id":     followerID,
 				"broker_order_id": o.OrderID,
 				"error":           err.Error(),
 			})

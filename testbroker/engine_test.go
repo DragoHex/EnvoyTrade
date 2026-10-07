@@ -387,3 +387,168 @@ func TestGetPositions(t *testing.T) {
 		t.Errorf("expected quantity 0 (closed), got %d", net[0].Quantity)
 	}
 }
+
+func TestGetPositions_MTMCalculation_DynamicValues(t *testing.T) {
+	eng := newTestEngine()
+	eng.config.ExecutionMode = "instant"
+
+	// 1. Initial State: Buy 150 NIFTY (2 lots) @ 25000
+	_, err := eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "BUY", Product: "NRML", OrderType: "MARKET", Quantity: 150,
+	})
+	if err != nil {
+		t.Fatalf("buy 150 NIFTY failed: %v", err)
+	}
+
+	net, _ := eng.GetPositions("AB1234")
+	if len(net) != 1 {
+		t.Fatalf("expected 1 position, got %d", len(net))
+	}
+	if net[0].M2M != 0.0 || net[0].Unrealised != 0.0 || net[0].Realised != 0.0 {
+		t.Errorf("expected 0 MTM initially, got M2M=%f Unrealised=%f Realised=%f", net[0].M2M, net[0].Unrealised, net[0].Realised)
+	}
+
+	// 2. Value Change: LTP increases to 25100 (+100 pts)
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25100.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+	net, _ = eng.GetPositions("AB1234")
+	expectedUnrealised := 150.0 * (25100.0 - 25000.0) // +15000
+	if net[0].Unrealised != expectedUnrealised || net[0].M2M != expectedUnrealised {
+		t.Errorf("LTP 25100: expected M2M/Unrealised=%f, got M2M=%f Unrealised=%f", expectedUnrealised, net[0].M2M, net[0].Unrealised)
+	}
+
+	// 3. Value Change: LTP drops to 24900 (-100 pts)
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 24900.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+	net, _ = eng.GetPositions("AB1234")
+	expectedUnrealised = 150.0 * (24900.0 - 25000.0) // -15000
+	if net[0].Unrealised != expectedUnrealised || net[0].M2M != expectedUnrealised {
+		t.Errorf("LTP 24900: expected M2M/Unrealised=%f, got M2M=%f Unrealised=%f", expectedUnrealised, net[0].M2M, net[0].Unrealised)
+	}
+
+	// 4. Multi-Position: Sell short 10 RELIANCE @ 2450 (Lot size = 1)
+	_, err = eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NSE", Tradingsymbol: "RELIANCE",
+		TransactionType: "SELL", Product: "MIS", OrderType: "MARKET", Quantity: 10,
+	})
+	if err != nil {
+		t.Fatalf("sell 10 RELIANCE failed: %v", err)
+	}
+	// Drop RELIANCE LTP to 2400 (favorable for short position: +50 pts per share)
+	if err := eng.UpdateLTP("NSE", "RELIANCE", 2400.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+
+	net, _ = eng.GetPositions("AB1234")
+	if len(net) != 2 {
+		t.Fatalf("expected 2 positions for AB1234, got %d", len(net))
+	}
+	var totalMtmAB float64
+	for _, p := range net {
+		totalMtmAB += p.M2M
+		if p.Tradingsymbol == "RELIANCE" {
+			expectedRelM2M := 10.0 * (2450.0 - 2400.0) // +500
+			if p.M2M != expectedRelM2M {
+				t.Errorf("RELIANCE short: expected M2M=%f, got %f", expectedRelM2M, p.M2M)
+			}
+		}
+	}
+	// Total MTM for AB1234 = NIFTY (-15000) + RELIANCE (+500) = -14500
+	if totalMtmAB != -14500.0 {
+		t.Errorf("Total MTM AB1234 expected -14500.0, got %f", totalMtmAB)
+	}
+
+	// 5. Partial Close: Move NIFTY LTP to 25200 and sell 75 lots (1 lot partial exit with realized profit)
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25200.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+	_, err = eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "SELL", Product: "NRML", OrderType: "MARKET", Quantity: 75,
+	})
+	if err != nil {
+		t.Fatalf("sell 75 NIFTY failed: %v", err)
+	}
+
+	// Move NIFTY LTP to 25300
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25300.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+	net, _ = eng.GetPositions("AB1234")
+	for _, p := range net {
+		if p.Tradingsymbol == "NIFTY26OCTFUT" {
+			expectedRealised := 75.0 * (25200.0 - 25000.0)  // +15000
+			expectedUnrealised = 75.0 * (25300.0 - 25000.0) // +22500
+			expectedM2M := expectedRealised + expectedUnrealised // +37500
+			if p.Realised != expectedRealised {
+				t.Errorf("NIFTY realised expected %f, got %f", expectedRealised, p.Realised)
+			}
+			if p.Unrealised != expectedUnrealised {
+				t.Errorf("NIFTY unrealised expected %f, got %f", expectedUnrealised, p.Unrealised)
+			}
+			if p.M2M != expectedM2M {
+				t.Errorf("NIFTY total M2M expected %f, got %f", expectedM2M, p.M2M)
+			}
+		}
+	}
+
+	// 6. Full Close: Sell remaining 75 NIFTY @ 25100
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25100.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+	_, err = eng.PlaceOrder("AB1234", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "SELL", Product: "NRML", OrderType: "MARKET", Quantity: 75,
+	})
+	if err != nil {
+		t.Fatalf("sell remaining 75 NIFTY failed: %v", err)
+	}
+	net, _ = eng.GetPositions("AB1234")
+	for _, p := range net {
+		if p.Tradingsymbol == "NIFTY26OCTFUT" {
+			// Buy: 150 @ 25000 (buyVal = 3750000)
+			// Sell: 75 @ 25200 + 75 @ 25100 (sellVal = 1890000 + 1882500 = 3772500)
+			// Realised = 3772500 - 3750000 = 22500
+			expectedRealised := 22500.0
+			expectedUnrealised = 0.0
+			expectedM2M := 22500.0
+			if p.Quantity != 0 {
+				t.Errorf("expected closed position (qty=0), got %d", p.Quantity)
+			}
+			if p.Realised != expectedRealised {
+				t.Errorf("NIFTY fully closed realised expected %f, got %f", expectedRealised, p.Realised)
+			}
+			if p.Unrealised != expectedUnrealised {
+				t.Errorf("NIFTY fully closed unrealised expected %f, got %f", expectedUnrealised, p.Unrealised)
+			}
+			if p.M2M != expectedM2M {
+				t.Errorf("NIFTY fully closed M2M expected %f, got %f", expectedM2M, p.M2M)
+			}
+		}
+	}
+
+	// 7. Account Isolation: CD5678 positions are completely separate
+	_, err = eng.PlaceOrder("CD5678", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "BUY", Product: "NRML", OrderType: "MARKET", Quantity: 150,
+	})
+	if err != nil {
+		t.Fatalf("buy 150 for CD5678 failed: %v", err)
+	}
+	// CD5678 bought @ 25100. Move LTP to 25400 (+300 pts)
+	if err := eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25400.0); err != nil {
+		t.Fatalf("UpdateLTP failed: %v", err)
+	}
+	netCD, _ := eng.GetPositions("CD5678")
+	if len(netCD) != 1 {
+		t.Fatalf("expected 1 position for CD5678, got %d", len(netCD))
+	}
+	expectedM2M_CD := 150.0 * (25400.0 - 25100.0) // +45000
+	if netCD[0].M2M != expectedM2M_CD {
+		t.Errorf("CD5678 M2M expected %f, got %f", expectedM2M_CD, netCD[0].M2M)
+	}
+}
+

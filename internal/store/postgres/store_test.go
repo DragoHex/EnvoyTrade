@@ -1011,3 +1011,104 @@ func TestDeleteFollowLink_NotFound(t *testing.T) {
 		t.Fatalf("DeleteFollowLink non-follower: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestInsertDirectFollowerOrder_InsertsAndFetchesDirectOrder(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	followerID := seedAccount(t, s, "follower")
+
+	upd := domain.OrderUpdate{
+		FollowerID:      followerID,
+		BrokerOrderID:   "DIRECT-001",
+		Tradingsymbol:   "RELIANCE",
+		Exchange:        "NSE",
+		Product:         "CNC",
+		TransactionType: "BUY",
+		OrderType:       "MARKET",
+		Quantity:        5,
+		FilledQuantity:  5,
+		AveragePrice:    decimal.NewFromFloat(2500.50),
+		Status:          domain.TerminalComplete,
+	}
+
+	orderID, err := s.InsertDirectFollowerOrder(ctx, upd)
+	if err != nil {
+		t.Fatalf("InsertDirectFollowerOrder: %v", err)
+	}
+	if orderID <= 0 {
+		t.Fatalf("got orderID %d, want > 0", orderID)
+	}
+
+	order, err := s.GetFollowerOrder(ctx, orderID)
+	if err != nil {
+		t.Fatalf("GetFollowerOrder: %v", err)
+	}
+	if order.MasterFillID != 0 {
+		t.Errorf("MasterFillID = %d, want 0", order.MasterFillID)
+	}
+	if order.BrokerOrderID != "DIRECT-001" {
+		t.Errorf("BrokerOrderID = %q, want DIRECT-001", order.BrokerOrderID)
+	}
+	if order.Tradingsymbol != "RELIANCE" || order.Exchange != "NSE" {
+		t.Errorf("Tradingsymbol/Exchange = %q/%q", order.Tradingsymbol, order.Exchange)
+	}
+	if order.Origin != "manual" {
+		t.Errorf("Origin = %q, want manual", order.Origin)
+	}
+	if order.TerminalStatus != domain.TerminalComplete {
+		t.Errorf("TerminalStatus = %q, want COMPLETE", order.TerminalStatus)
+	}
+	if order.FilledQty != 5 {
+		t.Errorf("FilledQty = %d, want 5", order.FilledQty)
+	}
+}
+
+func TestUpdateFollowerOrderByTag_ResolvesInFlightWorkerOrder(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	masterID := seedAccount(t, s, "master")
+	followerID := seedAccount(t, s, "follower")
+	masterFillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID: masterID, BrokerOrderID: "MF-TAG-1", Exchange: "NSE", Tradingsymbol: "INFY",
+		InstrumentToken: 1, TransactionType: "BUY", Product: "MIS", OrderType: "MARKET",
+		FilledQuantity: 100, AveragePrice: decimal.NewFromInt(100), Status: "COMPLETE",
+		OrderTimestamp: time.Now(), RawPayload: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+
+	tag := "test-tag-race-12345"
+	orderID, err := s.InsertFollowerOrder(ctx, domain.FollowerOrder{
+		MasterFillID:   masterFillID,
+		FollowerID:     followerID,
+		IdempotencyTag: tag,
+		IntendedQty:    10,
+		LotSize:        1,
+		SizingReason:   domain.ReasonOK,
+	})
+	if err != nil {
+		t.Fatalf("InsertFollowerOrder: %v", err)
+	}
+
+	// Postback arrives with tag before worker placement write
+	updatedID, err := s.UpdateFollowerOrderByTag(ctx, followerID, tag, "BROKER-ORD-123", domain.TerminalComplete, 10, decimal.NewFromFloat(100.5))
+	if err != nil {
+		t.Fatalf("UpdateFollowerOrderByTag: %v", err)
+	}
+	if updatedID != orderID {
+		t.Errorf("updatedID = %d, want %d", updatedID, orderID)
+	}
+
+	order, err := s.GetFollowerOrder(ctx, orderID)
+	if err != nil {
+		t.Fatalf("GetFollowerOrder: %v", err)
+	}
+	if order.BrokerOrderID != "BROKER-ORD-123" {
+		t.Errorf("BrokerOrderID = %q, want BROKER-ORD-123", order.BrokerOrderID)
+	}
+	if order.TerminalStatus != domain.TerminalComplete {
+		t.Errorf("TerminalStatus = %q, want COMPLETE", order.TerminalStatus)
+	}
+}
+

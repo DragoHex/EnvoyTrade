@@ -103,10 +103,20 @@ func TestToMasterFill_LimitOrder_FallsBackToAveragePriceWhenPriceIsZero(t *testi
 }
 
 func TestToOrderUpdate_MapsStatusFields(t *testing.T) {
-	got := callback.ToOrderUpdate(sampleOrder())
+	followerID := uuid.New()
+	got := callback.ToOrderUpdate(sampleOrder(), followerID)
 
+	if got.FollowerID != followerID {
+		t.Errorf("FollowerID = %v, want %v", got.FollowerID, followerID)
+	}
 	if got.BrokerOrderID != "231000000123456" {
 		t.Errorf("BrokerOrderID = %q", got.BrokerOrderID)
+	}
+	if got.Tradingsymbol != "INFY" || got.Exchange != "NSE" {
+		t.Errorf("Tradingsymbol/Exchange = %q/%q", got.Tradingsymbol, got.Exchange)
+	}
+	if got.Product != "MIS" || got.TransactionType != "BUY" || got.OrderType != "MARKET" {
+		t.Errorf("Product/TransactionType/OrderType = %q/%q/%q", got.Product, got.TransactionType, got.OrderType)
 	}
 	if got.Status != "COMPLETE" {
 		t.Errorf("Status = %q, want COMPLETE", got.Status)

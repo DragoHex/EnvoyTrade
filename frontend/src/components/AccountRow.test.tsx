@@ -1,10 +1,11 @@
 import { render, screen, fireEvent, within } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { AccountRow } from './AccountRow'
 import * as api from '../api'
 import type { GroupFollower } from '../api'
+import { POLL_INTERVAL_MS, resetSyncBusForTest } from '../utils/syncBus'
 
 const follower: GroupFollower = {
   accountId: 'f1',
@@ -16,7 +17,15 @@ const follower: GroupFollower = {
 
 describe('AccountRow', () => {
   beforeEach(() => {
+    resetSyncBusForTest()
     vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    resetSyncBusForTest()
+  })
+
+  beforeEach(() => {
     vi.spyOn(api, 'getAccountRebalanceDiff').mockResolvedValue({
       account_id: 'f1',
       account_name: 'Follower Account',
@@ -423,8 +432,8 @@ describe('AccountRow', () => {
       ))
 
       // 1. Folded by default: advancing timers should NOT trigger getAccountOrders
-      await vi.advanceTimersByTimeAsync(7000)
-      await vi.advanceTimersByTimeAsync(7000)
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
       expect(getOrdersSpy).not.toHaveBeenCalled()
 
       // 2. Expand the row
@@ -435,19 +444,20 @@ describe('AccountRow', () => {
       expect(getOrdersSpy).toHaveBeenCalled()
       const callsAfterExpand = getOrdersSpy.mock.calls.length
 
-      // Advance by 7000ms -> polling occurs while expanded
-      await vi.advanceTimersByTimeAsync(7000)
+      // Advance by POLL_INTERVAL_MS -> polling occurs while expanded
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
       expect(getOrdersSpy.mock.calls.length).toBeGreaterThan(callsAfterExpand)
 
       // 3. Fold/collapse the row again
       fireEvent.click(expandBtn)
       const callsAfterFold = getOrdersSpy.mock.calls.length
 
-      // Advance by 7000ms and 14000ms -> NO further calls while folded
-      await vi.advanceTimersByTimeAsync(7000)
-      await vi.advanceTimersByTimeAsync(7000)
+      // Advance by POLL_INTERVAL_MS -> NO further calls while folded
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
       expect(getOrdersSpy.mock.calls.length).toBe(callsAfterFold)
     } finally {
+      resetSyncBusForTest()
       vi.useRealTimers()
     }
   })

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	_ "embed"
 	"errors"
+	"strings"
 	"time"
 
 	"envoytrade/internal/domain"
@@ -305,6 +306,17 @@ func (s *Store) InsertMasterFill(ctx context.Context, f domain.MasterFill) (int6
 	return id, err
 }
 
+// MasterFillExists checks if a master fill already exists in the database.
+func (s *Store) MasterFillExists(ctx context.Context, masterID uuid.UUID, brokerOrderID string, filledQty int, status string) (bool, error) {
+	return s.queries.MasterFillExists(ctx, sqlcgen.MasterFillExistsParams{
+		MasterID:       masterID,
+		BrokerOrderID:  brokerOrderID,
+		FilledQuantity: int32(filledQty),
+		Status:         status,
+	})
+}
+
+
 // SetMasterFillDispatchState transitions a master fill through the
 // outbox states (PLAN.md §4.1).
 func (s *Store) SetMasterFillDispatchState(ctx context.Context, id int64, state domain.DispatchState) error {
@@ -318,18 +330,117 @@ func (s *Store) SetMasterFillDispatchState(ctx context.Context, id int64, state 
 // any broker call is attempted. A duplicate idempotency_tag or a
 // duplicate (master_fill_id, follower_id) pair returns domain.ErrDuplicate.
 func (s *Store) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error) {
+	var masterFillID *int64
+	if o.MasterFillID != 0 {
+		masterFillID = &o.MasterFillID
+	}
+	origin := o.Origin
+	if origin == "" {
+		origin = "copy_trade"
+	}
 	id, err := s.queries.InsertFollowerOrder(ctx, sqlcgen.InsertFollowerOrderParams{
-		MasterFillID:   o.MasterFillID,
-		FollowerID:     o.FollowerID,
-		IdempotencyTag: o.IdempotencyTag,
-		IntendedQty:    int32(o.IntendedQty),
-		LotSize:        int32(o.LotSize),
-		SizingReason:   int32(o.SizingReason),
+		MasterFillID:    masterFillID,
+		FollowerID:      o.FollowerID,
+		IdempotencyTag:  o.IdempotencyTag,
+		IntendedQty:     int32(o.IntendedQty),
+		LotSize:         int32(o.LotSize),
+		SizingReason:    int32(o.SizingReason),
+		Origin:          origin,
+		Tradingsymbol:   o.Tradingsymbol,
+		Exchange:        o.Exchange,
+		Product:         o.Product,
+		TransactionType: o.TransactionType,
+		OrderType:       o.OrderType,
 	})
 	if isUniqueViolation(err) {
 		return 0, domain.ErrDuplicate
 	}
 	return id, err
+}
+
+// InsertDirectFollowerOrder persists an external/manual or dashboard-initiated follower order,
+// using a deterministic tag or unique constraint on (follower_id, broker_order_id) to ensure idempotency.
+func (s *Store) InsertDirectFollowerOrder(ctx context.Context, upd domain.OrderUpdate) (int64, error) {
+	tag := upd.Tag
+	if tag == "" {
+		tag = "ext-" + upd.BrokerOrderID
+	}
+	origin := "manual"
+	if strings.HasPrefix(tag, "sqoff-") {
+		origin = "square_off"
+	} else if strings.HasPrefix(tag, "rebal-") {
+		origin = "rebalance"
+	}
+	var brokerOrderID *string
+	if upd.BrokerOrderID != "" {
+		brokerOrderID = &upd.BrokerOrderID
+	}
+	var terminalStatus *string
+	if upd.Status != "" {
+		terminalStatus = &upd.Status
+	}
+	qty := upd.Quantity
+	if qty <= 0 {
+		qty = upd.FilledQuantity
+	}
+	placedQty := int32(qty)
+
+	id, err := s.queries.InsertDirectFollowerOrder(ctx, sqlcgen.InsertDirectFollowerOrderParams{
+		FollowerID:      upd.FollowerID,
+		BrokerOrderID:   brokerOrderID,
+		IdempotencyTag:  tag,
+		IntendedQty:     int32(qty),
+		PlacedQty:       &placedQty,
+		FilledQty:       int32(upd.FilledQuantity),
+		LotSize:         1,
+		SizingReason:    int32(domain.ReasonOK),
+		TerminalStatus:  terminalStatus,
+		AveragePrice:    decimal.NullDecimal{Decimal: upd.AveragePrice, Valid: !upd.AveragePrice.IsZero()},
+		Origin:          origin,
+		Tradingsymbol:   upd.Tradingsymbol,
+		Exchange:        upd.Exchange,
+		Product:         upd.Product,
+		TransactionType: upd.TransactionType,
+		OrderType:       upd.OrderType,
+	})
+	if isUniqueViolation(err) {
+		return 0, domain.ErrDuplicate
+	}
+	return id, err
+}
+
+// UpdateFollowerOrderByTag resolves an in-flight worker order whose postback arrived before
+// the worker placement write.
+func (s *Store) UpdateFollowerOrderByTag(ctx context.Context, followerID uuid.UUID, tag, brokerOrderID, status string, filledQty int, avgPrice decimal.Decimal) (int64, error) {
+	var bID *string
+	if brokerOrderID != "" {
+		bID = &brokerOrderID
+	}
+	var termStatus *string
+	if status != "" {
+		termStatus = &status
+	}
+	id, err := s.queries.UpdateFollowerOrderByTag(ctx, sqlcgen.UpdateFollowerOrderByTagParams{
+		FollowerID:     followerID,
+		IdempotencyTag: tag,
+		BrokerOrderID:  bID,
+		TerminalStatus: termStatus,
+		FilledQty:      int32(filledQty),
+		AveragePrice:   decimal.NullDecimal{Decimal: avgPrice, Valid: !avgPrice.IsZero()},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, domain.ErrNotFound
+	}
+	return id, err
+}
+
+// FollowerOrderTerminalExists checks if a follower order already exists in terminal state.
+func (s *Store) FollowerOrderTerminalExists(ctx context.Context, followerID uuid.UUID, brokerOrderID string) (bool, error) {
+	bID := &brokerOrderID
+	return s.queries.FollowerOrderTerminalExists(ctx, sqlcgen.FollowerOrderTerminalExistsParams{
+		FollowerID:    followerID,
+		BrokerOrderID: bID,
+	})
 }
 
 // GetFollowerOrder fetches one follower_order by id.
@@ -338,18 +449,28 @@ func (s *Store) GetFollowerOrder(ctx context.Context, id int64) (domain.Follower
 	if err != nil {
 		return domain.FollowerOrder{}, err
 	}
+	var masterFillID int64
+	if row.MasterFillID != nil {
+		masterFillID = *row.MasterFillID
+	}
 	o := domain.FollowerOrder{
-		ID:             row.ID,
-		MasterFillID:   row.MasterFillID,
-		FollowerID:     row.FollowerID,
-		IdempotencyTag: row.IdempotencyTag,
-		IntendedQty:    int(row.IntendedQty),
-		LotSize:        int(row.LotSize),
-		SizingReason:   domain.SizingReason(row.SizingReason),
-		FilledQty:      int(row.FilledQty),
-		AttemptCount:   int(row.AttemptCount),
-		CreatedAt:      row.CreatedAt.Time.In(domain.IST),
-		UpdatedAt:      row.UpdatedAt.Time.In(domain.IST),
+		ID:              row.ID,
+		MasterFillID:    masterFillID,
+		FollowerID:      row.FollowerID,
+		IdempotencyTag:  row.IdempotencyTag,
+		IntendedQty:     int(row.IntendedQty),
+		LotSize:         int(row.LotSize),
+		SizingReason:    domain.SizingReason(row.SizingReason),
+		FilledQty:       int(row.FilledQty),
+		AttemptCount:    int(row.AttemptCount),
+		Origin:          row.Origin,
+		Tradingsymbol:   row.Tradingsymbol,
+		Exchange:        row.Exchange,
+		Product:         row.Product,
+		TransactionType: row.TransactionType,
+		OrderType:       row.OrderType,
+		CreatedAt:       row.CreatedAt.Time.In(domain.IST),
+		UpdatedAt:       row.UpdatedAt.Time.In(domain.IST),
 	}
 	if row.PlacedQty != nil {
 		placedQty := int(*row.PlacedQty)
@@ -373,7 +494,8 @@ func (s *Store) GetFollowerOrder(ctx context.Context, id int64) (domain.Follower
 // FollowerOrdersByMasterFill returns every follower_order fanned out from
 // one master fill — used to assert redelivery doesn't create duplicates.
 func (s *Store) FollowerOrdersByMasterFill(ctx context.Context, masterFillID int64) ([]domain.FollowerOrder, error) {
-	rows, err := s.queries.FollowerOrdersByMasterFill(ctx, masterFillID)
+	mfID := masterFillID
+	rows, err := s.queries.FollowerOrdersByMasterFill(ctx, &mfID)
 	if err != nil {
 		return nil, err
 	}
