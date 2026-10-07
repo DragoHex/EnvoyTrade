@@ -11,6 +11,7 @@ import {
   type AccountOrdersResponse,
 } from '../api'
 import { isOrdersDataEqual } from '../utils/ordersDiff'
+import { registerSyncSubscriber } from '../utils/syncBus'
 import { formatISTDateTime } from '../utils/time'
 import {
   ExitSquareIcon,
@@ -209,7 +210,7 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
   createEffect(() => {
     if (!isExpanded()) return
-    const timer = setInterval(async () => {
+    const unregister = registerSyncSubscriber(async () => {
       if (activeTab() === 'holdings') return
       try {
         setIsPolling(true)
@@ -226,8 +227,8 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
       } finally {
         setIsPolling(false)
       }
-    }, 7000)
-    onCleanup(() => clearInterval(timer))
+    })
+    onCleanup(unregister)
   })
 
   function switchTab(tab: OrderTabId) {
