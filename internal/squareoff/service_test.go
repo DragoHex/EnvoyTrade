@@ -16,6 +16,7 @@ import (
 type fakeSquareOffStore struct {
 	roles       map[uuid.UUID]string
 	groupDetail map[uuid.UUID]domain.GroupDetail
+	accounts    map[uuid.UUID]domain.Account
 }
 
 func (s *fakeSquareOffStore) AccountRole(ctx context.Context, id uuid.UUID) (string, error) {
@@ -35,6 +36,20 @@ func (s *fakeSquareOffStore) GroupDetail(ctx context.Context, groupID uuid.UUID)
 func (s *fakeSquareOffStore) AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error {
 	return nil
 }
+
+func (s *fakeSquareOffStore) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error) {
+	var res []domain.Account
+	for _, id := range ids {
+		if a, ok := s.accounts[id]; ok {
+			res = append(res, a)
+		} else if r, ok := s.roles[id]; ok {
+			res = append(res, domain.Account{ID: id, Role: r, Enabled: true})
+		}
+	}
+	return res, nil
+}
+
+
 
 type fakeResolver struct {
 	brokers map[uuid.UUID]*fake.Broker
@@ -210,9 +225,10 @@ func TestSquareOffGroup_MasterAndFollowersCascaded(t *testing.T) {
 				GroupID:  gID,
 				MasterID: masterID,
 				Followers: []domain.GroupFollower{
-					{AccountID: f1ID},
-					{AccountID: f2ID},
+					{AccountID: f1ID, Enabled: true},
+					{AccountID: f2ID, Enabled: true},
 				},
+
 			},
 		},
 	}
@@ -289,9 +305,10 @@ func TestSquareOffGroup_PartialFailureResilience(t *testing.T) {
 				GroupID:  gID,
 				MasterID: masterID,
 				Followers: []domain.GroupFollower{
-					{AccountID: f1ID},
-					{AccountID: f2ID},
+					{AccountID: f1ID, Enabled: true},
+					{AccountID: f2ID, Enabled: true},
 				},
+
 			},
 		},
 	}
@@ -346,3 +363,123 @@ func TestSquareOffGroup_PartialFailureResilience(t *testing.T) {
 		t.Errorf("expected F2 to succeed despite F1 failure")
 	}
 }
+
+func TestSquareOffGroup_SkipsDisabledFollowers(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	enabledFID := uuid.New()
+	disabledFID := uuid.New()
+
+	store := &fakeSquareOffStore{
+		roles: map[uuid.UUID]string{
+			masterID:    "master",
+			enabledFID:  "follower",
+			disabledFID: "follower",
+		},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: enabledFID, Enabled: true, Name: "Enabled Follower"},
+					{AccountID: disabledFID, Enabled: false, Name: "Disabled Follower"},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			masterID:    {ID: masterID, Role: "master", Active: true},
+			enabledFID:  {ID: enabledFID, Role: "follower", Enabled: true},
+			disabledFID: {ID: disabledFID, Role: "follower", Enabled: false},
+		},
+	}
+
+	bMaster := &fake.Broker{
+		OrderID: "M_EXIT",
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 10},
+		},
+	}
+	bEnabled := &fake.Broker{
+		OrderID: "F_EN_EXIT",
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 10},
+		},
+	}
+	bDisabled := &fake.Broker{
+		OrderID: "F_DIS_EXIT",
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 10},
+		},
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]*fake.Broker{
+			masterID:    bMaster,
+			enabledFID:  bEnabled,
+			disabledFID: bDisabled,
+		},
+	}
+
+	svc := squareoff.NewService(store, resolver, nil, nil)
+
+	res, err := svc.SquareOffGroup(context.Background(), gID, nil)
+	if err != nil {
+		t.Fatalf("SquareOffGroup failed: %v", err)
+	}
+
+	if res.Status != "completed" {
+		t.Errorf("status = %s, want completed", res.Status)
+	}
+	// FollowersAffected should only count enabled followers
+	if res.FollowersAffected != 1 {
+		t.Errorf("FollowersAffected = %d, want 1", res.FollowersAffected)
+	}
+	// Master and enabled follower squared off
+	if res.PositionsSquaredOff != 2 {
+		t.Errorf("positionsSquaredOff = %d, want 2", res.PositionsSquaredOff)
+	}
+	// Enabled follower had 1 order
+	if len(bEnabled.Calls) != 1 {
+		t.Errorf("expected 1 order on enabled follower, got %d", len(bEnabled.Calls))
+	}
+	// Disabled follower had ZERO orders
+	if len(bDisabled.Calls) != 0 {
+		t.Errorf("expected 0 orders on disabled follower, got %d", len(bDisabled.Calls))
+	}
+}
+
+func TestSquareOffAccount_DisabledFollowerRejected(t *testing.T) {
+	disabledFID := uuid.New()
+
+	store := &fakeSquareOffStore{
+		roles: map[uuid.UUID]string{
+			disabledFID: "follower",
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			disabledFID: {ID: disabledFID, Role: "follower", Enabled: false},
+		},
+	}
+
+	b := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 10},
+		},
+	}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]*fake.Broker{disabledFID: b},
+	}
+
+	svc := squareoff.NewService(store, resolver, nil, nil)
+
+	_, err := svc.SquareOffAccount(context.Background(), disabledFID, nil)
+	if err == nil {
+		t.Fatal("expected error for disabled follower square off, got nil")
+	}
+	if !errors.Is(err, domain.ErrAccountDisabled) {
+		t.Errorf("expected ErrAccountDisabled, got: %v", err)
+	}
+	if len(b.Calls) != 0 {
+		t.Errorf("expected 0 orders placed, got %d", len(b.Calls))
+	}
+}
+
