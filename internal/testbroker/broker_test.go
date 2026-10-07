@@ -98,3 +98,59 @@ func TestBroker_DefaultURL(t *testing.T) {
 		}
 	})
 }
+
+func TestBroker_GetPositions_MTMCalculation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/portfolio/positions" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"status": "success",
+			"data": {
+				"net": [
+					{
+						"tradingsymbol": "NIFTY26OCTFUT",
+						"exchange": "NFO",
+						"product": "NRML",
+						"quantity": 150,
+						"average_price": 25000.0,
+						"last_price": 25150.0,
+						"pnl": 22500.0,
+						"m2m": 22500.0
+					},
+					{
+						"tradingsymbol": "RELIANCE",
+						"exchange": "NSE",
+						"product": "MIS",
+						"quantity": -10,
+						"average_price": 2450.0,
+						"last_price": 2420.0,
+						"pnl": 300.0,
+						"m2m": 300.0
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	b := NewLiveBroker("key1", "tok1", server.URL, nil)
+	positions, err := b.GetPositions(context.Background())
+	if err != nil {
+		t.Fatalf("GetPositions failed: %v", err)
+	}
+	if len(positions) != 2 {
+		t.Fatalf("expected 2 positions, got %d", len(positions))
+	}
+	var totalMtm float64
+	for _, p := range positions {
+		totalMtm += p.M2M
+	}
+	expectedTotal := 22800.0
+	if totalMtm != expectedTotal {
+		t.Errorf("totalMtm = %f, want %f", totalMtm, expectedTotal)
+	}
+}
+
