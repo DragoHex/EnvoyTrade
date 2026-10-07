@@ -2,6 +2,7 @@ package rebalance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,6 +23,9 @@ type Store interface {
 	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	InstrumentLotSize(ctx context.Context, exchange, symbol string) (int, error)
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
+	InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error)
+	UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error
+	UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error
 }
 
 // BrokerResolver resolves the broker.Broker instance for a given account.
@@ -415,6 +419,21 @@ func (s *Service) RebalanceAccount(ctx context.Context, followerID uuid.UUID) (d
 			tag = tag[:20]
 		}
 
+		followerOrderID, insErr := s.store.InsertFollowerOrder(ctx, domain.FollowerOrder{
+			FollowerID:      followerID,
+			IdempotencyTag:  tag,
+			IntendedQty:     orderQty,
+			Origin:          "rebalance",
+			Tradingsymbol:   symDrift.Tradingsymbol,
+			Exchange:        symDrift.Exchange,
+			Product:         symDrift.Product,
+			TransactionType: symDrift.Action,
+			OrderType:       "MARKET",
+		})
+		if insErr != nil && !errors.Is(insErr, domain.ErrDuplicate) {
+			s.log().Warn("rebalance: failed to pre-insert follower order", "follower_id", followerID, "error", insErr)
+		}
+
 		orderResp, err := bFollower.PlaceOrder(ctx, "regular", broker.OrderParams{
 			Exchange:        symDrift.Exchange,
 			Tradingsymbol:   symDrift.Tradingsymbol,
@@ -425,11 +444,18 @@ func (s *Service) RebalanceAccount(ctx context.Context, followerID uuid.UUID) (d
 			Tag:             tag,
 		})
 		if err != nil {
+			if followerOrderID > 0 {
+				_ = s.store.UpdateFollowerOrderFailed(ctx, followerOrderID, "REJECTED", err.Error())
+			}
 			errStr := fmt.Sprintf("follower %s rebalance %s %s: %v", followerID, symDrift.Action, symDrift.Tradingsymbol, err)
 			s.log().Error("rebalance: place order failed", "follower_id", followerID, "symbol", symDrift.Tradingsymbol, "error", err)
 			result.Errors = append(result.Errors, errStr)
 			result.Status = "partial"
 			continue
+		}
+
+		if followerOrderID > 0 {
+			_ = s.store.UpdateFollowerOrderPlaced(ctx, followerOrderID, orderResp.OrderID, orderQty)
 		}
 
 		result.OrdersPlaced++

@@ -166,14 +166,15 @@ func run(logger *slog.Logger) error {
 	brokerRegistry.Register("zerodha", kiteBrokerFactory)
 	brokerRegistry.Register("testbroker", testbroker.NewBrokerFactory())
 
-	syncer := &kite.PortfolioSyncer{
+	rawSyncer := &kite.PortfolioSyncer{
 		Store: store,
 	}
+	syncer := kite.NewDebouncedSyncer(rawSyncer, 500*time.Millisecond)
 
 	brokerResolver := &serverBrokerResolver{
 		store:    store,
 		registry: brokerRegistry,
-		syncer:   syncer,
+		syncer:   rawSyncer,
 	}
 
 	workerPool := worker.NewPool()
@@ -247,6 +248,7 @@ func run(logger *slog.Logger) error {
 		recon.DefaultConfig(),
 		logger.With("component", "reconciler"),
 	)
+	poller.FollowerConsumer = followerStatusConsumer
 	go func() {
 		logger.Info("reconciliation poller started")
 		if err := poller.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -268,7 +270,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Auto-restart master ticker or refresh follower worker on headless token refresh
-	syncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+	rawSyncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
 		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
 	}
 
@@ -534,15 +536,7 @@ func handleTokenRefreshed(
 	return nil
 }
 
-type serverMasterReader struct {
-	store *postgres.Store
-}
-
-func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error) {
-	authInfo, err := r.store.AccountAuthInfo(ctx, masterID)
-	if err != nil {
-		return nil, err
-	}
+func kiteClientForAccount(ctx context.Context, store *postgres.Store, authInfo domain.AccountAuthInfo) (*kiteconnect.Client, error) {
 	if authInfo.ApiKey == "" || authInfo.AccessToken == "" {
 		return nil, nil
 	}
@@ -554,6 +548,38 @@ func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.
 			tbURL = "http://localhost:8089"
 		}
 		kc.SetBaseURI(tbURL)
+		return kc, nil
+	}
+	if authInfo.IPAddress != "" {
+		pIP, err := store.ProxyIPByAddress(ctx, authInfo.IPAddress)
+		if err == nil {
+			proxyCfg := kite.ProxyConfig{
+				Scheme:       "https",
+				Host:         pIP.Host,
+				Port:         pIP.Port,
+				ClientID:     pIP.Username,
+				ClientSecret: pIP.Password,
+			}
+			if httpClient, err := kite.RESTClientFor(proxyCfg); err == nil {
+				kc.SetHTTPClient(httpClient)
+			}
+		}
+	}
+	return kc, nil
+}
+
+type serverMasterReader struct {
+	store *postgres.Store
+}
+
+func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error) {
+	authInfo, err := r.store.AccountAuthInfo(ctx, masterID)
+	if err != nil {
+		return nil, err
+	}
+	kc, err := kiteClientForAccount(ctx, r.store, authInfo)
+	if err != nil || kc == nil {
+		return nil, err
 	}
 	return kc.GetOrders()
 }
@@ -567,19 +593,23 @@ func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, foll
 	if err != nil {
 		return nil, err
 	}
-	if authInfo.ApiKey == "" || authInfo.AccessToken == "" {
-		return nil, nil
-	}
-	kc := kiteconnect.New(authInfo.ApiKey)
-	kc.SetAccessToken(authInfo.AccessToken)
-	if strings.EqualFold(authInfo.Broker, "testbroker") {
-		tbURL := os.Getenv("TESTBROKER_URL")
-		if tbURL == "" {
-			tbURL = "http://localhost:8089"
-		}
-		kc.SetBaseURI(tbURL)
+	kc, err := kiteClientForAccount(ctx, r.store, authInfo)
+	if err != nil || kc == nil {
+		return nil, err
 	}
 	return kc.GetOrderHistory(brokerOrderID)
+}
+
+func (r *serverFollowerReader) GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]kiteconnect.Order, error) {
+	authInfo, err := r.store.AccountAuthInfo(ctx, followerID)
+	if err != nil {
+		return nil, err
+	}
+	kc, err := kiteClientForAccount(ctx, r.store, authInfo)
+	if err != nil || kc == nil {
+		return nil, err
+	}
+	return kc.GetOrders()
 }
 
 

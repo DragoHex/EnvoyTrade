@@ -2,6 +2,7 @@ package squareoff
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -20,6 +21,9 @@ type Store interface {
 	GroupDetail(ctx context.Context, groupID uuid.UUID) (domain.GroupDetail, error)
 	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
+	InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error)
+	UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error
+	UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error
 }
 
 
@@ -182,6 +186,25 @@ func (s *Service) SquareOffAccount(ctx context.Context, accountID uuid.UUID, sym
 			tag = tag[:20]
 		}
 
+		var followerOrderID int64
+		if role == "follower" {
+			var insErr error
+			followerOrderID, insErr = s.store.InsertFollowerOrder(ctx, domain.FollowerOrder{
+				FollowerID:      accountID,
+				IdempotencyTag:  tag,
+				IntendedQty:     qty,
+				Origin:          "square_off",
+				Tradingsymbol:   p.Tradingsymbol,
+				Exchange:        p.Exchange,
+				Product:         p.Product,
+				TransactionType: side,
+				OrderType:       "MARKET",
+			})
+			if insErr != nil && !errors.Is(insErr, domain.ErrDuplicate) {
+				s.log().Warn("squareoff: failed to pre-insert follower order", "follower_id", accountID, "error", insErr)
+			}
+		}
+
 		orderResp, err := b.PlaceOrder(ctx, "regular", broker.OrderParams{
 			Exchange:        p.Exchange,
 			Tradingsymbol:   p.Tradingsymbol,
@@ -192,11 +215,18 @@ func (s *Service) SquareOffAccount(ctx context.Context, accountID uuid.UUID, sym
 			Tag:             tag,
 		})
 		if err != nil {
+			if followerOrderID > 0 {
+				_ = s.store.UpdateFollowerOrderFailed(ctx, followerOrderID, "REJECTED", err.Error())
+			}
 			errStr := fmt.Sprintf("account %s square off %s: %v", accountID, p.Tradingsymbol, err)
 			s.log().Error("squareoff: place order failed", "account_id", accountID, "symbol", p.Tradingsymbol, "error", err)
 			result.Errors = append(result.Errors, errStr)
 			result.Status = "partial"
 			continue
+		}
+
+		if followerOrderID > 0 {
+			_ = s.store.UpdateFollowerOrderPlaced(ctx, followerOrderID, orderResp.OrderID, qty)
 		}
 
 		result.PositionsSquaredOff++
