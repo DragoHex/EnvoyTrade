@@ -313,4 +313,75 @@ func TestE2E_Rebalance(t *testing.T) {
 		// Cleanup
 		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
 	})
+
+	t.Run("Rebalance_SkipsDisabledFollower", func(t *testing.T) {
+		mCli1 := h.MasterClient("master01")
+		fCliB := h.FollowerClient("follow01b") // disabled follower
+
+		// Ensure follow01b is disabled
+		_, _, _ = h.EnvoyAPI(http.MethodPatch, "/api/v1/accounts/"+Follow01BID, map[string]any{"enabled": false})
+
+		// Master opens position creating drift: BUY 100 INFY
+		_, err := mCli1.PlaceOrder("regular", sdk.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "INFY",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Quantity:        100,
+			Product:         "CNC",
+		})
+		if err != nil {
+			t.Fatalf("place master buy order: %v", err)
+		}
+
+		// 1. Single account rebalance call on disabled follower must return 400 Bad Request
+		sResp, _, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/accounts/%s/positions/rebalance", Follow01BID), nil)
+		if err != nil {
+			t.Fatalf("post account rebalance failed: %v", err)
+		}
+		if sResp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request for disabled follower rebalance, got %d", sResp.StatusCode)
+		}
+
+		// 2. Group diff must list follow01b with enabled = false
+		dResp, dBody, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance/diff", Group01ID), nil)
+		if err != nil || dResp.StatusCode != http.StatusOK {
+			t.Fatalf("group diff failed: status=%d, body=%s, err=%v", dResp.StatusCode, string(dBody), err)
+		}
+		var diffRes struct {
+			Drifts []domain.FollowerDrift `json:"drifts"`
+		}
+		_ = json.Unmarshal(dBody, &diffRes)
+		var fFound bool
+		for _, d := range diffRes.Drifts {
+			if d.AccountID.String() == Follow01BID {
+				fFound = true
+				if d.Enabled {
+					t.Errorf("expected follow01b in diff to have enabled=false")
+				}
+				break
+			}
+		}
+		if !fFound {
+			t.Errorf("expected follow01b to be listed in diff with drift")
+		}
+
+		// 3. Group rebalance explicitly requesting follow01b must NOT place any orders on follow01b
+		ordersBefore, _ := fCliB.GetOrders()
+		gResp, gBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance", Group01ID), map[string]any{
+			"follower_ids": []string{Follow01BID},
+		})
+		if err != nil || gResp.StatusCode != http.StatusOK {
+			t.Fatalf("group rebalance failed: status=%d, body=%s, err=%v", gResp.StatusCode, string(gBody), err)
+		}
+
+		ordersAfter, _ := fCliB.GetOrders()
+		if len(ordersAfter) != len(ordersBefore) {
+			t.Errorf("expected 0 new orders on disabled follower, got %d", len(ordersAfter)-len(ordersBefore))
+		}
+
+		// Cleanup master position
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/accounts/%s/positions/square-off", Master01ID), map[string]any{})
+	})
 }
+
