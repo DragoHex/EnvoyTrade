@@ -151,3 +151,24 @@ func TestPostAccountSquareOff_InvalidUUID(t *testing.T) {
 		t.Fatalf("expected 400 Bad Request, got %d", rec.Code)
 	}
 }
+
+func TestPostAccountSquareOff_DisabledAccount(t *testing.T) {
+	accID := uuid.New()
+	sqSvc := &fakeSquareOffService{
+		accountErr: domain.ErrAccountDisabled,
+	}
+
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	router := httpapi.NewRouter(store, engine, httpapi.WithSquareOffService(sqSvc))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/positions/square-off", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d", rec.Code)
+	}
+}
+

@@ -76,9 +76,14 @@ func (h *handlers) postAccountSquareOff(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, "account not found")
 			return
 		}
+		if errors.Is(err, domain.ErrAccountDisabled) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 
 	writeJSON(w, http.StatusOK, result)
 }
