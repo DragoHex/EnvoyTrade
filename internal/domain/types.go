@@ -111,6 +111,12 @@ var ErrNotFound = errors.New("domain: not found")
 // story; Postgres's own FK constraints are the source of truth here).
 var ErrConflict = errors.New("domain: conflict")
 
+// ErrBrokerUnreachable is returned when an upstream broker API or network call fails.
+var ErrBrokerUnreachable = errors.New("domain: broker is not reachable")
+
+// ErrAuthExpired is returned when a broker session token or API credentials have expired.
+var ErrAuthExpired = errors.New("domain: broker account login has expired")
+
 // ErrMasterHasOpenPositions is returned when a master account swap is attempted
 // while the current master account still has open positions.
 var ErrMasterHasOpenPositions = errors.New("domain: master has open positions")

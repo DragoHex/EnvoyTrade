@@ -1780,6 +1780,116 @@ nav a.user-badge-link.active:hover,
   font-size: 1.2rem;
   font-weight: bold;
 }
+.rebalance-error-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+.rebalance-error-card .rebalance-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+.rebalance-error-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  background: var(--color-surface);
+  text-align: center;
+  gap: 0.5rem;
+}
+.rebalance-error-body .error-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(229, 72, 77, 0.15);
+  color: #d32f2f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-theme='dark'] .rebalance-error-body .error-icon-badge {
+  color: #ff6b6b;
+}
+.rebalance-error-body .error-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.rebalance-error-body .error-message {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.825rem;
+  max-width: 460px;
+  line-height: 1.45;
+}
+.rebalance-error-body .error-details-box {
+  margin-top: 0.25rem;
+  padding: 0.35rem 0.65rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.72rem;
+  color: #d32f2f;
+  max-width: 480px;
+  word-break: break-word;
+}
+[data-theme='dark'] .rebalance-error-body .error-details-box {
+  color: #ff6b6b;
+}
+.rebalance-error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  border: 1px dashed rgba(229, 72, 77, 0.35);
+  border-radius: 8px;
+  background: var(--color-surface);
+  text-align: center;
+  gap: 0.4rem;
+}
+.rebalance-error-state .error-icon-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(229, 72, 77, 0.15);
+  color: #d32f2f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-theme='dark'] .rebalance-error-state {
+  border-color: rgba(229, 72, 77, 0.4);
+}
+[data-theme='dark'] .rebalance-error-state .error-icon-badge {
+  color: #ff6b6b;
+}
+.rebalance-error-state p {
+  margin: 0;
+  color: var(--color-text);
+}
+.rebalance-error-state small {
+  color: var(--color-text-secondary);
+  max-width: 440px;
+  line-height: 1.4;
+}
 .rebalance-followers-section {
   display: flex;
   flex-direction: column;

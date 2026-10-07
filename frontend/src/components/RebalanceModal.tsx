@@ -8,7 +8,8 @@ import {
   type FollowerDrift,
   type SymbolDrift,
 } from '../api'
-import { ThanosBalanceIcon, ChevronDownIcon, InfoIcon } from './icons'
+import { ThanosBalanceIcon, ChevronDownIcon, InfoIcon, AlertTriangleIcon } from './icons'
+import { StatusDot } from './StatusDot'
 
 export interface RebalanceModalTarget {
   type: 'group' | 'account'
@@ -23,6 +24,44 @@ export interface RebalanceModalProps {
   onConfirm?: (followerIds?: string[]) => Promise<void> | void
   onCancel: () => void
   onSuccess?: () => void
+}
+
+export function humanizeError(err: unknown): string {
+  if (!err) return 'An unexpected error occurred while communicating with the broker.'
+  const msg = typeof err === 'string' ? err : (err as any)?.message || String(err)
+  const trimmed = msg.trim()
+  if (!trimmed || trimmed.toLowerCase() === 'error') {
+    return 'Unable to communicate with the broker. Please check the broker status or network connection.'
+  }
+  const lower = trimmed.toLowerCase()
+  if (
+    lower.includes('tokenexception') ||
+    lower.includes('api_key') ||
+    lower.includes('access_token') ||
+    lower.includes('invalid token') ||
+    lower.includes('login has expired') ||
+    lower.includes('unauthorized') ||
+    lower.includes('401')
+  ) {
+    return 'Broker account login has expired. Please re-authenticate the account.'
+  }
+  if (
+    lower.includes('connection refused') ||
+    lower.includes('no such host') ||
+    lower.includes('timeout') ||
+    lower.includes('broker is not reachable') ||
+    lower.includes('broker not reachable') ||
+    lower.includes('502') ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('failed to fetch')
+  ) {
+    return 'Broker is not reachable. Please check your network connection or broker status.'
+  }
+  if (lower.includes('not found') || lower.includes('404')) {
+    return 'Account or portfolio group could not be found.'
+  }
+  return trimmed
 }
 
 function isFollowerDriftEqual(a: FollowerDrift, b: FollowerDrift): boolean {
@@ -91,13 +130,34 @@ export function RebalanceModal(props: RebalanceModalProps) {
     (accountId) => getAccountRebalanceDiff(accountId)
   )
 
+  const fetchError = () => {
+    if (props.target?.type === 'group' && groupDiff.error) {
+      return humanizeError(groupDiff.error)
+    }
+    if (props.target?.type === 'account' && accountDiff.error) {
+      return humanizeError(accountDiff.error)
+    }
+    return null
+  }
+
+  const safeGroupDiff = () => {
+    if (groupDiff.error) return undefined
+    return groupDiff()
+  }
+
+  const safeAccountDiff = () => {
+    if (accountDiff.error) return undefined
+    return accountDiff()
+  }
+
   const isLoading = () =>
     (props.target?.type === 'group' && groupDiff.loading) ||
     (props.target?.type === 'account' && accountDiff.loading)
 
   const hasData = () => {
-    if (props.target?.type === 'group') return groupDiff() !== undefined
-    if (props.target?.type === 'account') return accountDiff() !== undefined
+    if (fetchError()) return false
+    if (props.target?.type === 'group') return safeGroupDiff() !== undefined
+    if (props.target?.type === 'account') return safeAccountDiff() !== undefined
     return false
   }
 
@@ -105,7 +165,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
   let prevFollowersMap = new Map<string, FollowerDrift>()
   const driftingFollowers = createMemo(() => {
     if (props.target?.type !== 'group') return []
-    const diff = groupDiff()
+    const diff = safeGroupDiff()
     if (!diff?.drifts) return []
     const newDrifters = diff.drifts.filter((d) => d.symbols && d.symbols.length > 0)
 
@@ -131,7 +191,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
   let prevAccountSymbolsMap = new Map<string, SymbolDrift>()
   const accountSymbols = createMemo(() => {
     if (props.target?.type !== 'account') return []
-    const acc = accountDiff()
+    const acc = safeAccountDiff()
     if (!acc?.symbols) return []
 
     const nextMap = new Map<string, SymbolDrift>()
@@ -164,7 +224,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
     }
   })
 
-  // Only reset state on initial modal open or target change, preserving state on subsequent refetches
+  // Reset state on modal open or target change
   let lastOpenedTargetKey: string | null = null
   createEffect(() => {
     const isOpen = props.open
@@ -182,19 +242,11 @@ export function RebalanceModal(props: RebalanceModalProps) {
     }
   })
 
-  // Synchronize selected followers when drifting followers load without collapsing expanded dropdowns
+  // By default, select all drifting followers like in SquareOffModal
   createEffect(() => {
     if (!props.open || props.target?.type !== 'group') return
     const drifters = driftingFollowers()
-    if (drifters.length === 0) return
-
-    setSelectedFollowers((prev) => {
-      const currentDrifterIds = drifters.map((d) => d.account_id)
-      if (prev.length === 0) {
-        return currentDrifterIds
-      }
-      return prev.filter((id) => currentDrifterIds.includes(id))
-    })
+    setSelectedFollowers(drifters.map((d) => d.account_id))
   })
 
   const toggleSelectAll = () => {
@@ -244,7 +296,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
         props.onSuccess?.()
       }
     } catch (err: any) {
-      setError(err.message || 'Rebalance execution failed')
+      setError(humanizeError(err))
     } finally {
       setSubmitting(false)
     }
@@ -256,11 +308,47 @@ export function RebalanceModal(props: RebalanceModalProps) {
   }
 
   const hasAnyDrift = () => {
+    if (fetchError()) return false
     if (props.target?.type === 'group') {
       return driftingFollowers().length > 0
     }
-    const acc = accountDiff()
+    const acc = safeAccountDiff()
     return (acc?.symbols?.length ?? 0) > 0
+  }
+
+  const errorTitle = () => {
+    const err = fetchError()
+    if (!err) return 'Broker Connection Error'
+    const lower = err.toLowerCase()
+    if (lower.includes('login has expired') || lower.includes('authenticate') || lower.includes('unauthorized') || lower.includes('token')) {
+      return 'Authentication Required'
+    }
+    if (
+      lower.includes('not reachable') ||
+      lower.includes('connection refused') ||
+      lower.includes('timeout') ||
+      lower.includes('502') ||
+      lower.includes('503') ||
+      lower.includes('504') ||
+      lower.includes('broker') ||
+      lower.includes('communicate')
+    ) {
+      return 'Broker Connection Error'
+    }
+    if (lower.includes('not found') || lower.includes('404')) {
+      return 'Portfolio Not Found'
+    }
+    return 'Unable to Load Portfolio Diff'
+  }
+
+  const rawErrorDetails = () => {
+    const err = props.target?.type === 'group' ? groupDiff.error : accountDiff.error
+    if (!err) return null
+    const raw = typeof err === 'string' ? err : (err as any)?.message || String(err)
+    if (!raw || raw.trim().toLowerCase() === 'error') return null
+    const humanized = fetchError()
+    if (raw === humanized) return null
+    return raw
   }
 
   return (
@@ -297,8 +385,12 @@ export function RebalanceModal(props: RebalanceModalProps) {
             </div>
           </div>
 
+          {/* Order execution error banner */}
           <Show when={error()}>
-            <div class="rebalance-error-banner">{error()}</div>
+            <div class="rebalance-error-banner" role="alert">
+              <AlertTriangleIcon size={16} />
+              <span>{error()}</span>
+            </div>
           </Show>
 
           {/* Receipt View on Successful Execution */}
@@ -367,7 +459,39 @@ export function RebalanceModal(props: RebalanceModalProps) {
                 </div>
               </Show>
 
-              <Show when={hasData()}>
+              {/* Fetch Error Card - mirrors table section layout and theming */}
+              <Show when={fetchError()}>
+                <div class="rebalance-error-card" data-testid="rebalance-error-state">
+                  <div class="rebalance-section-header">
+                    <span>DRIFTING FOLLOWERS</span>
+                    <span
+                      class="error-status-badge"
+                      style={{
+                        display: 'inline-flex',
+                        'align-items': 'center',
+                        gap: '0.35rem',
+                        'font-size': '0.75rem',
+                        color: '#e5484d',
+                        'font-weight': '500',
+                      }}
+                    >
+                      <StatusDot status="error" /> Connection Failed
+                    </span>
+                  </div>
+                  <div class="rebalance-error-body">
+                    <div class="error-icon-badge">
+                      <AlertTriangleIcon size={20} />
+                    </div>
+                    <h4 class="error-title">{errorTitle()}</h4>
+                    <p class="error-message">{fetchError()}</p>
+                    <Show when={rawErrorDetails()}>
+                      <div class="error-details-box">{rawErrorDetails()}</div>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+
+              <Show when={hasData() && !fetchError()}>
                 {/* Clean Equilibrium State */}
                 <Show when={!hasAnyDrift()}>
                   <div class="rebalance-equilibrium-state" data-testid="rebalance-equilibrium">
@@ -571,6 +695,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
                 disabled={
                   submitting() ||
                   isLoading() ||
+                  !!fetchError() ||
                   !hasAnyDrift() ||
                   (props.target!.type === 'group' && selectedFollowers().length === 0)
                 }
@@ -579,6 +704,8 @@ export function RebalanceModal(props: RebalanceModalProps) {
                 <span>
                   {submitting()
                     ? 'Rebalancing...'
+                    : fetchError()
+                    ? 'Rebalance'
                     : !hasAnyDrift()
                     ? 'In Equilibrium'
                     : props.target!.type === 'group'

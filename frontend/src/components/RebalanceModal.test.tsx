@@ -449,5 +449,135 @@ describe('RebalanceModal', () => {
     // Non-diff row DOM node is preserved
     expect(f1RowAfter).toBe(f1RowBefore)
   })
+
+  it('shows broker unreachable error card and keeps Cancel button functional when diff fetch fails', async () => {
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockRejectedValue(
+      new Error('fetch master positions: domain: broker is not reachable (dial tcp: connection refused)')
+    )
+    const onCancel = vi.fn()
+
+    const { container } = render(() => (
+      <RebalanceModal open={true} target={groupTarget} onCancel={onCancel} />
+    ))
+
+    expect(await screen.findByTestId('rebalance-error-state')).toBeInTheDocument()
+    expect(container.querySelector('.rebalance-error-card')).toBeInTheDocument()
+    expect(screen.getByText('DRIFTING FOLLOWERS')).toBeInTheDocument()
+    expect(screen.getByText(/Connection Failed/i)).toBeInTheDocument()
+    expect(screen.getByText('Broker Connection Error')).toBeInTheDocument()
+    expect(container.querySelector('.error-message')).toHaveTextContent(/Broker is not reachable/i)
+    expect(container.querySelector('.error-details-box')).toBeInTheDocument()
+
+    // Skeleton is not stuck
+    expect(screen.queryByTestId('rebalance-skeleton')).not.toBeInTheDocument()
+
+    // Cancel button is active and functional
+    const cancelBtn = screen.getByRole('button', { name: /Cancel/i })
+    expect(cancelBtn).not.toBeDisabled()
+    await userEvent.click(cancelBtn)
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    // Rebalance button is disabled and says Rebalance (not In Equilibrium)
+    const rebalanceBtn = screen.getByRole('button', { name: /^Rebalance$/i })
+    expect(rebalanceBtn).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /In Equilibrium/i })).not.toBeInTheDocument()
+  })
+
+  it('humanizes bare ERROR string and renders structured card section', async () => {
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockRejectedValue(new Error('ERROR'))
+    const { container } = render(() => (
+      <RebalanceModal open={true} target={groupTarget} onCancel={() => {}} />
+    ))
+
+    expect(await screen.findByTestId('rebalance-error-state')).toBeInTheDocument()
+    expect(container.querySelector('.rebalance-error-card')).toBeInTheDocument()
+    expect(screen.getByText('DRIFTING FOLLOWERS')).toBeInTheDocument()
+    expect(screen.getByText('Broker Connection Error')).toBeInTheDocument()
+    // Never displays plain bare "ERROR"
+    expect(screen.getByText(/Unable to communicate with the broker/i)).toBeInTheDocument()
+  })
+
+  it('shows account login expired error card when broker token is invalid', async () => {
+    vi.spyOn(api, 'getAccountRebalanceDiff').mockRejectedValue(new Error('TokenException: Token is invalid'))
+    const onCancel = vi.fn()
+
+    const { container } = render(() => (
+      <RebalanceModal open={true} target={accountTarget} onCancel={onCancel} />
+    ))
+
+    expect(await screen.findByTestId('rebalance-error-state')).toBeInTheDocument()
+    expect(container.querySelector('.rebalance-error-card')).toBeInTheDocument()
+    expect(screen.getByText('DRIFTING FOLLOWERS')).toBeInTheDocument()
+    expect(screen.getByText('Authentication Required')).toBeInTheDocument()
+    expect(screen.getByText(/Broker account login has expired/i)).toBeInTheDocument()
+
+    // Cancel button works
+    const cancelBtn = screen.getByRole('button', { name: /Cancel/i })
+    expect(cancelBtn).not.toBeDisabled()
+    await userEvent.click(cancelBtn)
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Cancel button functional and displays error banner when broker fails during execution', async () => {
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 1,
+      followers_with_drift: 1,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Follower 1',
+          broker_account_id: 'FOLLOW01A',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'INFY',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 5,
+              target_qty: 5,
+              follower_qty: 0,
+              drift_qty: 5,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    })
+
+    const onConfirm = vi.fn().mockRejectedValue(new Error('broker is not reachable'))
+    const onCancel = vi.fn()
+
+    const { container } = render(() => (
+      <RebalanceModal
+        open={true}
+        target={groupTarget}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    ))
+
+    expect(await screen.findByText('Follower 1')).toBeInTheDocument()
+    // By default all accounts are selected
+    expect(screen.getByText('1 of 1 selected')).toBeInTheDocument()
+    const rebalanceBtn = screen.getByRole('button', { name: /Rebalance \(1\)/i })
+    expect(rebalanceBtn).not.toBeDisabled()
+
+    // Click Rebalance
+    await userEvent.click(rebalanceBtn)
+
+    // Execution fails: error banner shown in standard .rebalance-error-banner
+    expect(await screen.findByText(/Broker is not reachable/i)).toBeInTheDocument()
+    expect(container.querySelector('.rebalance-error-banner')).toBeInTheDocument()
+
+    // Cancel button is active and functional
+    const cancelBtn = screen.getByRole('button', { name: /Cancel/i })
+    expect(cancelBtn).not.toBeDisabled()
+    await userEvent.click(cancelBtn)
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
 })
 
