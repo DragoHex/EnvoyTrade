@@ -295,3 +295,24 @@ func TestPostGroupRebalance_BrokerUnreachable(t *testing.T) {
 		t.Fatalf("expected 502 Bad Gateway, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestPostAccountRebalance_DisabledAccount(t *testing.T) {
+	accID := uuid.New()
+	rebSvc := &fakeRebalanceService{
+		rebalanceAccErr: domain.ErrAccountDisabled,
+	}
+
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	router := httpapi.NewRouter(store, engine, httpapi.WithRebalanceService(rebSvc))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/positions/rebalance", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+

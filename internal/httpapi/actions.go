@@ -72,9 +72,14 @@ func (h *handlers) postAction(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusNotFound, "account not found")
 				return
 			}
+			if errors.Is(err, domain.ErrAccountDisabled) {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
 		writeJSON(w, http.StatusOK, result)
 	case actionExitOpenOrders:
 		writeError(w, http.StatusNotImplemented, "exit_open_orders is not implemented yet")

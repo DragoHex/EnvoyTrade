@@ -255,4 +255,75 @@ func TestE2E_SquareOff(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("Group_SquareOff_SkipsDisabledFollower", func(t *testing.T) {
+		mCli1 := h.MasterClient("master01")
+		fCliB := h.FollowerClient("follow01b") // disabled follower
+
+		// Ensure follow01b is disabled
+		_, _, _ = h.EnvoyAPI(http.MethodPatch, "/api/v1/accounts/"+Follow01BID, map[string]any{"enabled": false})
+
+		// 1. Follower 01B opens a direct position: BUY 50 RELIANCE
+		_, err := fCliB.PlaceOrder("regular", sdk.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Quantity:        50,
+			Product:         "CNC",
+		})
+		if err != nil {
+			t.Fatalf("place follower buy order: %v", err)
+		}
+
+		// Master opens a position
+		_, err = mCli1.PlaceOrder("regular", sdk.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Quantity:        50,
+			Product:         "CNC",
+		})
+		if err != nil {
+			t.Fatalf("place master buy order: %v", err)
+		}
+
+		// 2. Direct account square-off on disabled follower must return HTTP 400
+		resp, _, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/accounts/%s/positions/square-off", Follow01BID), map[string]any{})
+		if err != nil {
+			t.Fatalf("direct square-off call failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request for disabled follower square-off, got %d", resp.StatusCode)
+		}
+
+		// 3. Group square-off must NOT square off Follower 01B
+		gResp, gBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
+		if err != nil || gResp.StatusCode != http.StatusOK {
+			t.Fatalf("group square-off failed: status=%d, body=%s, err=%v", gResp.StatusCode, string(gBody), err)
+		}
+
+		// Follower 01B must still have open position
+		bPos, err := fCliB.GetPositions()
+		if err != nil {
+			t.Fatalf("get follower positions: %v", err)
+		}
+		var fBStillOpen bool
+		for _, p := range bPos.Net {
+			if p.Tradingsymbol == "RELIANCE" && p.Quantity == 50 {
+				fBStillOpen = true
+				break
+			}
+		}
+		if !fBStillOpen {
+			t.Errorf("expected disabled follower 01B to retain open position, got %+v", bPos.Net)
+		}
+
+		// Cleanup: temporarily re-enable follow01b and square off
+		_, _, _ = h.EnvoyAPI(http.MethodPatch, "/api/v1/accounts/"+Follow01BID, map[string]any{"enabled": true})
+		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/accounts/%s/positions/square-off", Follow01BID), map[string]any{})
+		_, _, _ = h.EnvoyAPI(http.MethodPatch, "/api/v1/accounts/"+Follow01BID, map[string]any{"enabled": false})
+	})
 }
+

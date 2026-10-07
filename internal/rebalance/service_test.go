@@ -808,4 +808,233 @@ func TestRebalanceGroup_DisallowsRebalanceWhenBrokerUnreachable(t *testing.T) {
 	}
 }
 
+func TestComputeGroupDiff_IncludesDisabledFollower(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{
+			masterID: "master",
+			f1ID:     "follower",
+		},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "Disabled Follower", BrokerAccountID: "FOL_DIS", Enabled: false},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {
+				ID:              f1ID,
+				Name:            "Disabled Follower",
+				BrokerAccountID: "FOL_DIS",
+				Role:            "follower",
+				MasterID:        &masterID,
+				Enabled:         false,
+				CloneFactor:     &cloneFactor,
+			},
+		},
+		lotSizes: map[string]int{
+			"NSE:INFY": 1,
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "INFY", Product: "CNC", Quantity: 100},
+		},
+	}
+	bFollower := &fake.Broker{
+		Positions: []broker.Position{}, // 0 quantity -> drift = +100
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID:  bMaster,
+			f1ID:      bFollower,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+	diff, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff unexpected err: %v", err)
+	}
+
+	if diff.FollowersWithDrift != 1 {
+		t.Fatalf("expected 1 follower with drift, got %d", diff.FollowersWithDrift)
+	}
+	if len(diff.Drifts) != 1 {
+		t.Fatalf("expected 1 drift row, got %d", len(diff.Drifts))
+	}
+	if diff.Drifts[0].Enabled != false {
+		t.Errorf("expected drift row to preserve Enabled = false, got %v", diff.Drifts[0].Enabled)
+	}
+}
+
+func TestRebalanceGroup_SkipsDisabledFollowers(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	fEnabledID := uuid.New()
+	fDisabledID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{
+			masterID:    "master",
+			fEnabledID:  "follower",
+			fDisabledID: "follower",
+		},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: fEnabledID, Name: "Enabled Follower", BrokerAccountID: "FOL_EN", Enabled: true},
+					{AccountID: fDisabledID, Name: "Disabled Follower", BrokerAccountID: "FOL_DIS", Enabled: false},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			fEnabledID: {
+				ID:              fEnabledID,
+				Name:            "Enabled Follower",
+				BrokerAccountID: "FOL_EN",
+				Role:            "follower",
+				MasterID:        &masterID,
+				Enabled:         true,
+				CloneFactor:     &cloneFactor,
+			},
+			fDisabledID: {
+				ID:              fDisabledID,
+				Name:            "Disabled Follower",
+				BrokerAccountID: "FOL_DIS",
+				Role:            "follower",
+				MasterID:        &masterID,
+				Enabled:         false,
+				CloneFactor:     &cloneFactor,
+			},
+		},
+		lotSizes: map[string]int{
+			"NSE:RELIANCE": 1,
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 50},
+		},
+	}
+	bEnabled := &fake.Broker{
+		Positions: []broker.Position{}, // drift = +50
+	}
+	bDisabled := &fake.Broker{
+		Positions: []broker.Position{}, // drift = +50
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID:    bMaster,
+			fEnabledID:  bEnabled,
+			fDisabledID: bDisabled,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	// Case 1: Rebalance all (follower_ids is nil)
+	res, err := svc.RebalanceGroup(context.Background(), gID, nil)
+	if err != nil {
+		t.Fatalf("RebalanceGroup unexpected err: %v", err)
+	}
+
+	if res.FollowersAffected != 1 {
+		t.Errorf("FollowersAffected = %d, want 1", res.FollowersAffected)
+	}
+	if len(bEnabled.Calls) != 1 {
+		t.Errorf("expected 1 order on enabled follower, got %d", len(bEnabled.Calls))
+	}
+	if len(bDisabled.Calls) != 0 {
+		t.Errorf("expected 0 orders on disabled follower, got %d", len(bDisabled.Calls))
+	}
+
+	// Reset calls
+	bEnabled.Calls = nil
+	bDisabled.Calls = nil
+
+	// Case 2: Explicitly requested disabled follower ID
+	res2, err := svc.RebalanceGroup(context.Background(), gID, []uuid.UUID{fDisabledID})
+	if err != nil {
+		t.Fatalf("RebalanceGroup with disabled follower unexpected err: %v", err)
+	}
+	if res2.FollowersAffected != 0 {
+		t.Errorf("FollowersAffected = %d, want 0 when only disabled follower was requested", res2.FollowersAffected)
+	}
+	if len(bDisabled.Calls) != 0 {
+		t.Errorf("expected 0 orders on disabled follower even when explicitly requested, got %d", len(bDisabled.Calls))
+	}
+}
+
+func TestRebalanceAccount_DisabledFollowerRejected(t *testing.T) {
+	masterID := uuid.New()
+	fDisabledID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{
+			masterID:    "master",
+			fDisabledID: "follower",
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			fDisabledID: {
+				ID:              fDisabledID,
+				Name:            "Disabled Follower",
+				BrokerAccountID: "FOL_DIS",
+				Role:            "follower",
+				MasterID:        &masterID,
+				Enabled:         false,
+				CloneFactor:     &cloneFactor,
+			},
+		},
+		lotSizes: map[string]int{
+			"NSE:RELIANCE": 1,
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 50},
+		},
+	}
+	bDisabled := &fake.Broker{
+		Positions: []broker.Position{},
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{
+			masterID:    bMaster,
+			fDisabledID: bDisabled,
+		},
+	}
+
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	_, err := svc.RebalanceAccount(context.Background(), fDisabledID)
+	if err == nil {
+		t.Fatal("expected error for disabled follower rebalance, got nil")
+	}
+	if !errors.Is(err, domain.ErrAccountDisabled) {
+		t.Errorf("expected ErrAccountDisabled, got: %v", err)
+	}
+	if len(bDisabled.Calls) != 0 {
+		t.Errorf("expected 0 orders on disabled follower, got %d", len(bDisabled.Calls))
+	}
+}
+
+
 

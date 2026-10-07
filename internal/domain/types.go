@@ -128,6 +128,11 @@ var ErrUnproxiedNotAllowed = errors.New("domain: unproxied order routing is not 
 // ErrIPRequired is returned when an account operation requires a dedicated IP address.
 var ErrIPRequired = errors.New("domain: IP address is required for follower accounts")
 
+// ErrAccountDisabled is returned when an operation cannot be performed
+// because the follower account is disabled.
+var ErrAccountDisabled = errors.New("domain: follower account is disabled")
+
+
 // Account is the flat, ungrouped view of a single account (master or
 // follower) the Accounts page manages — unlike GroupSummary/GroupDetail,
 // which model the master+followers rollup, this is one row per account

@@ -24,6 +24,10 @@ func writeRebalanceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if errors.Is(err, domain.ErrAccountDisabled) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if errors.Is(err, domain.ErrAuthExpired) {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -34,6 +38,7 @@ func writeRebalanceError(w http.ResponseWriter, err error) {
 	}
 	writeError(w, http.StatusInternalServerError, err.Error())
 }
+
 
 func (h *handlers) getGroupRebalanceDiff(w http.ResponseWriter, r *http.Request) {
 	if h.rebalanceSvc == nil {

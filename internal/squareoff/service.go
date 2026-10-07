@@ -18,8 +18,10 @@ import (
 type Store interface {
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 	GroupDetail(ctx context.Context, groupID uuid.UUID) (domain.GroupDetail, error)
+	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error
 }
+
 
 // BrokerResolver resolves the broker.Broker instance for a given account.
 type BrokerResolver interface {
@@ -98,7 +100,21 @@ func (s *Service) SquareOffAccount(ctx context.Context, accountID uuid.UUID, sym
 		return domain.SquareOffResult{}, fmt.Errorf("check account role: %w", err)
 	}
 
+	if role == "follower" {
+		accs, err := s.store.Accounts(ctx, []uuid.UUID{accountID})
+		if err != nil {
+			return domain.SquareOffResult{}, fmt.Errorf("load account: %w", err)
+		}
+		if len(accs) == 0 {
+			return domain.SquareOffResult{}, domain.ErrNotFound
+		}
+		if !accs[0].Enabled {
+			return domain.SquareOffResult{}, fmt.Errorf("follower %s: %w", accountID, domain.ErrAccountDisabled)
+		}
+	}
+
 	b, err := s.resolver.ResolveBroker(ctx, accountID)
+
 	if err != nil {
 		return domain.SquareOffResult{}, fmt.Errorf("resolve broker: %w", err)
 	}
@@ -219,13 +235,21 @@ func (s *Service) SquareOffGroup(ctx context.Context, groupID uuid.UUID, symbols
 	}
 
 	masterID := groupDetail.MasterID
+
+	enabledFollowersCount := 0
+	for _, f := range groupDetail.Followers {
+		if f.Enabled {
+			enabledFollowersCount++
+		}
+	}
+
 	result := domain.SquareOffResult{
 		Action:            "square_off",
 		Status:            "completed",
 		GroupID:           &groupID,
 		AccountID:         &masterID,
 		Role:              "master",
-		FollowersAffected: len(groupDetail.Followers),
+		FollowersAffected: enabledFollowersCount,
 		Orders:            make([]domain.SquareOffOrder, 0),
 		Errors:            make([]string, 0),
 	}
@@ -248,13 +272,18 @@ func (s *Service) SquareOffGroup(ctx context.Context, groupID uuid.UUID, symbols
 		}
 	}
 
-	// Step 2: Concurrently square off all followers in this group
+	// Step 2: Concurrently square off all enabled followers in this group
 	if len(groupDetail.Followers) > 0 {
 		var wg sync.WaitGroup
 		for _, f := range groupDetail.Followers {
+			if !f.Enabled {
+				s.log().Info("squareoff: skipping disabled follower", "follower_id", f.AccountID)
+				continue
+			}
 			followerID := f.AccountID
 			wg.Add(1)
 			go func(fID uuid.UUID) {
+
 				defer wg.Done()
 				fResult, fErr := s.SquareOffAccount(ctx, fID, symbols)
 				mu.Lock()

@@ -354,6 +354,10 @@ func (s *Service) RebalanceAccount(ctx context.Context, followerID uuid.UUID) (d
 	if err != nil {
 		return domain.RebalanceResult{}, err
 	}
+	if !drift.Enabled {
+		return domain.RebalanceResult{}, fmt.Errorf("follower %s: %w", followerID, domain.ErrAccountDisabled)
+	}
+
 
 	result := domain.RebalanceResult{
 		Action:            "rebalance",
@@ -465,10 +469,15 @@ func (s *Service) RebalanceGroup(ctx context.Context, groupID uuid.UUID, followe
 
 	var targetDrifts []domain.FollowerDrift
 	for _, d := range diff.Drifts {
+		if !d.Enabled {
+			s.log().Info("rebalance: skipping disabled follower in group rebalance", "follower_id", d.AccountID)
+			continue
+		}
 		if len(filterMap) == 0 || filterMap[d.AccountID] {
 			targetDrifts = append(targetDrifts, d)
 		}
 	}
+
 
 	result := domain.RebalanceResult{
 		Action:            "rebalance",

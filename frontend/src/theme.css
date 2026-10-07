@@ -1951,6 +1951,77 @@ nav a.user-badge-link.active:hover,
 [data-theme='dark'] .follower-accordion-item.selected-accordion {
   background: rgba(6, 216, 150, 0.05);
 }
+.follower-accordion-item.disabled-follower-item {
+  background: #ebecef;
+  color: #8c8f9f;
+  filter: grayscale(1);
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item {
+  background: #151720;
+}
+.follower-accordion-item.disabled-follower-item .follower-accordion-header {
+  cursor: not-allowed;
+}
+.follower-accordion-item.disabled-follower-item .follower-accordion-header:hover {
+  background: #e4e5e9;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-accordion-header:hover {
+  background: #1a1c26;
+}
+.follower-accordion-item.disabled-follower-item .follower-name {
+  color: #8c8f9f !important;
+  font-weight: 500 !important;
+}
+.follower-accordion-item.disabled-follower-item .follower-broker-id {
+  color: #a0a4b5 !important;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-name {
+  color: #6c7280 !important;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-broker-id {
+  color: #555966 !important;
+}
+.follower-accordion-item.disabled-follower-item .col-check,
+.follower-accordion-item.disabled-follower-item .col-check input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.follower-accordion-item.disabled-follower-item .accordion-expand-btn {
+  color: #8c8f9f !important;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .accordion-expand-btn {
+  color: #6c7280 !important;
+}
+.follower-accordion-item.disabled-follower-item .follower-symbols-table th,
+.follower-accordion-item.disabled-follower-item .follower-symbols-table td {
+  color: #8c8f9f !important;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-symbols-table th,
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-symbols-table td {
+  color: #6c7280 !important;
+}
+.follower-accordion-item.disabled-follower-item .product-badge,
+.follower-accordion-item.disabled-follower-item .action-badge {
+  background: #dcdfe5 !important;
+  color: #636779 !important;
+  border-color: #c2c6d2 !important;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .product-badge,
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .action-badge {
+  background: #252836 !important;
+  color: #8a8fa3 !important;
+  border-color: #373b4e !important;
+}
+.disabled-count-note {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  font-weight: normal;
+}
+
+
+
 .follower-info {
   display: flex;
   flex-direction: column;
@@ -1975,6 +2046,20 @@ nav a.user-badge-link.active:hover,
 [data-theme='dark'] .follower-drift-badge span {
   background: rgba(245, 166, 35, 0.15);
   color: #f5a623;
+}
+.follower-accordion-item.disabled-follower-item .follower-drift-badge span,
+.follower-drift-badge.disabled-drift-badge span,
+.follower-drift-badge span.pill-disabled {
+  background: #dcdfe5 !important;
+  color: #636779 !important;
+  border: 1px solid #c2c6d2 !important;
+}
+[data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-drift-badge span,
+[data-theme='dark'] .follower-drift-badge.disabled-drift-badge span,
+[data-theme='dark'] .follower-drift-badge span.pill-disabled {
+  background: #252836 !important;
+  color: #8a8fa3 !important;
+  border: 1px solid #373b4e !important;
 }
 .accordion-expand-btn {
   background: none;

@@ -213,12 +213,16 @@ export function RebalanceModal(props: RebalanceModalProps) {
     return result
   })
 
+  const enabledDriftingFollowers = createMemo(() =>
+    driftingFollowers().filter((d) => d.enabled)
+  )
+
   let headerCheckboxRef: HTMLInputElement | undefined
 
   // Indeterminate state for master checkbox
   createEffect(() => {
     if (headerCheckboxRef) {
-      const total = driftingFollowers().length
+      const total = enabledDriftingFollowers().length
       const selected = selectedFollowers().length
       headerCheckboxRef.indeterminate = selected > 0 && selected < total
     }
@@ -242,23 +246,27 @@ export function RebalanceModal(props: RebalanceModalProps) {
     }
   })
 
-  // By default, select all drifting followers like in SquareOffModal
+  // By default, select all enabled drifting followers
   createEffect(() => {
     if (!props.open || props.target?.type !== 'group') return
-    const drifters = driftingFollowers()
-    setSelectedFollowers(drifters.map((d) => d.account_id))
+    const enabledDrifters = enabledDriftingFollowers()
+    setSelectedFollowers(enabledDrifters.map((d) => d.account_id))
   })
 
   const toggleSelectAll = () => {
-    const allIds = driftingFollowers().map((d) => d.account_id)
-    if (selectedFollowers().length === allIds.length) {
+    const enabledIds = enabledDriftingFollowers().map((d) => d.account_id)
+    if (selectedFollowers().length === enabledIds.length) {
       setSelectedFollowers([])
     } else {
-      setSelectedFollowers(allIds)
+      setSelectedFollowers(enabledIds)
     }
   }
 
   const toggleFollower = (accId: string) => {
+    const follower = driftingFollowers().find((d) => d.account_id === accId)
+    if (follower && !follower.enabled) {
+      return
+    }
     const current = selectedFollowers()
     if (current.includes(accId)) {
       setSelectedFollowers(current.filter((id) => id !== accId))
@@ -266,6 +274,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
       setSelectedFollowers([...current, accId])
     }
   }
+
 
   const toggleExpand = (accId: string) => {
     const current = expandedFollowers()
@@ -507,7 +516,10 @@ export function RebalanceModal(props: RebalanceModalProps) {
                     <div class="rebalance-section-header">
                       <span class="section-title">Drifting Followers</span>
                       <span class="selection-count">
-                        {selectedFollowers().length} of {driftingFollowers().length} selected
+                        {selectedFollowers().length} of {enabledDriftingFollowers().length} selected
+                        <Show when={driftingFollowers().length > enabledDriftingFollowers().length}>
+                          <span class="disabled-count-note"> ({driftingFollowers().length - enabledDriftingFollowers().length} disabled)</span>
+                        </Show>
                       </span>
                     </div>
 
@@ -518,11 +530,11 @@ export function RebalanceModal(props: RebalanceModalProps) {
                           type="checkbox"
                           aria-label="Select All Followers"
                           checked={
-                            driftingFollowers().length > 0 &&
-                            selectedFollowers().length === driftingFollowers().length
+                            enabledDriftingFollowers().length > 0 &&
+                            selectedFollowers().length === enabledDriftingFollowers().length
                           }
                           onChange={toggleSelectAll}
-                          disabled={submitting()}
+                          disabled={submitting() || enabledDriftingFollowers().length === 0}
                         />
                       </div>
                       <span class="col-follower-header">Follower Account</span>
@@ -535,25 +547,36 @@ export function RebalanceModal(props: RebalanceModalProps) {
                         {(f) => {
                           const isSelected = () => selectedFollowers().includes(f.account_id)
                           const isExpanded = () => expandedFollowers().includes(f.account_id)
-
                           return (
                             <div
                               class={`follower-accordion-item ${
                                 isSelected() ? 'selected-accordion' : ''
-                              }`}
+                              } ${!f.enabled ? 'disabled-follower-item' : ''}`}
                               data-testid={`follower-row-${f.account_id}`}
                             >
+
                               <div
                                 class="follower-accordion-header"
-                                onClick={() => !submitting() && toggleFollower(f.account_id)}
+                                data-tooltip={!f.enabled ? 'Disabled' : undefined}
+                                onClick={() => {
+                                  if (submitting()) return
+                                  if (f.enabled) {
+                                    toggleFollower(f.account_id)
+                                  } else {
+                                    toggleExpand(f.account_id)
+                                  }
+                                }}
                               >
-                                <div class="col-check" onClick={(e) => e.stopPropagation()}>
+                                <div
+                                  class="col-check"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
                                   <input
                                     type="checkbox"
                                     aria-label={`Select ${f.account_name || f.broker_account_id}`}
-                                    checked={isSelected()}
-                                    onChange={() => toggleFollower(f.account_id)}
-                                    disabled={submitting()}
+                                    checked={f.enabled && isSelected()}
+                                    onChange={() => f.enabled && toggleFollower(f.account_id)}
+                                    disabled={submitting() || !f.enabled}
                                   />
                                 </div>
                                 <div class="follower-info">
@@ -562,14 +585,14 @@ export function RebalanceModal(props: RebalanceModalProps) {
                                   </span>
                                   <span class="follower-broker-id">{f.broker_account_id}</span>
                                 </div>
-                                <div class="follower-drift-badge">
-                                  <span>{f.symbols.length} drifting</span>
+
+                                <div class={`follower-drift-badge ${!f.enabled ? 'disabled-drift-badge' : ''}`}>
+                                  <span class={!f.enabled ? 'pill-disabled' : ''}>{f.symbols.length} drifting</span>
                                 </div>
                                 <button
                                   type="button"
                                   class="accordion-expand-btn"
                                   aria-label={isExpanded() ? 'Collapse symbols' : 'Expand symbols'}
-                                  data-tooltip={isExpanded() ? 'Hide symbols' : 'View symbols'}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     toggleExpand(f.account_id)
@@ -580,6 +603,7 @@ export function RebalanceModal(props: RebalanceModalProps) {
                                   />
                                 </button>
                               </div>
+
 
                               <Show when={isExpanded()}>
                                 <div class="follower-symbols-table-wrapper">
