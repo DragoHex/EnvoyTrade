@@ -21,6 +21,17 @@ func TestE2E_DynamicFollowerAddition_And_FanOut(t *testing.T) {
 		t.Fatalf("set execution mode: %v", err)
 	}
 
+	// Clean up any stale NEWFOLLOW01 account from previous runs
+	_, _ = h.DB.Exec(context.Background(), `
+		DELETE FROM order_events WHERE account_id IN (SELECT id FROM accounts WHERE broker_user_id = 'NEWFOLLOW01');
+		DELETE FROM follower_orders WHERE follower_id IN (SELECT id FROM accounts WHERE broker_user_id = 'NEWFOLLOW01');
+		DELETE FROM account_positions WHERE account_id IN (SELECT id FROM accounts WHERE broker_user_id = 'NEWFOLLOW01');
+		DELETE FROM account_holdings WHERE account_id IN (SELECT id FROM accounts WHERE broker_user_id = 'NEWFOLLOW01');
+		DELETE FROM account_margins WHERE account_id IN (SELECT id FROM accounts WHERE broker_user_id = 'NEWFOLLOW01');
+		DELETE FROM follow_links WHERE follower_id IN (SELECT id FROM accounts WHERE broker_user_id = 'NEWFOLLOW01');
+		DELETE FROM accounts WHERE broker_user_id = 'NEWFOLLOW01';
+	`)
+
 	// -----------------------------------------------------------------
 	// 1. Dynamically add a new follower account via EnvoyTrade API
 	// -----------------------------------------------------------------
