@@ -222,21 +222,12 @@ func (s *Store) CreateFollowLink(ctx context.Context, link domain.FollowLink) er
 	if groupID == uuid.Nil {
 		if link.MasterID != uuid.Nil {
 			g, err := s.queries.GroupByMasterID(ctx, link.MasterID)
-			if err == nil {
-				groupID = g.ID
-			} else {
-				groupID = link.MasterID
-				var userID *uuid.UUID
-				if u, ok := domain.UserFromContext(ctx); ok {
-					userID = &u.ID
-				}
-				_ = s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
-					ID:       groupID,
-					Name:     link.MasterID.String(),
-					MasterID: link.MasterID,
-					UserID:   userID,
-				})
+			if err != nil {
+				return domain.ErrNotFound
 			}
+			groupID = g.ID
+		} else {
+			return domain.ErrNotFound
 		}
 	}
 	err := s.queries.CreateFollowLink(ctx, sqlcgen.CreateFollowLinkParams{
