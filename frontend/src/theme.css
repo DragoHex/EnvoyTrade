@@ -2242,5 +2242,91 @@ nav a.user-badge-link.active:hover,
   color: var(--color-text-secondary);
 }
 
+/* MTM Breakdown Popover */
+.mtm-popover-anchor {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.col-mtm-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.metric-label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mtm-breakdown-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 3px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.mtm-breakdown-trigger-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.mtm-breakdown-trigger-btn[data-active='true'] {
+  color: var(--color-accent);
+  background: var(--color-surface);
+  border-color: var(--color-accent);
+}
+
+.mtm-breakdown-popover {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  padding: 8px 12px;
+  min-width: 170px;
+  font-size: 0.8125rem;
+  color: var(--color-text);
+  box-sizing: border-box;
+}
+
+.mtm-popover-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.mtm-popover-label {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.mtm-popover-value {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mtm-popover-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 6px 0;
+}
+
+.mtm-popover-total .mtm-popover-label {
+  color: var(--color-text);
+}
+
+
 
 

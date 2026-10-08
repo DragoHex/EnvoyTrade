@@ -68,6 +68,7 @@ export interface GroupFollower {
   totalMtm?: number | string
   availableCash?: number | string
   availableMargin?: number | string
+  mtmBreakdown?: Record<string, number | string>
 }
 
 export interface GroupDetail {
@@ -84,6 +85,7 @@ export interface GroupDetail {
   masterTotalMtm?: number | string
   masterAvailableCash?: number | string
   masterAvailableMargin?: number | string
+  masterMtmBreakdown?: Record<string, number | string>
   followers: GroupFollower[]
 }
 
@@ -458,6 +460,7 @@ export interface AccountSummaryMetrics {
   availableCash?: number | string
   availableMargin?: number | string
   status: string
+  mtmBreakdown?: Record<string, number | string>
 }
 
 export interface TabCounts {

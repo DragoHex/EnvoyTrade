@@ -34,6 +34,7 @@ export function GroupCard(props: {
           totalMtm: props.detail.masterTotalMtm,
           availableCash: props.detail.masterAvailableCash,
           availableMargin: props.detail.masterAvailableMargin,
+          mtmBreakdown: props.detail.masterMtmBreakdown,
         }}
         followers={props.detail.followers}
         onToggleCopy={props.onToggleCopy}

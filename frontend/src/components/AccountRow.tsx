@@ -7,6 +7,7 @@ import { ResultToast, type ToastResult } from './ResultToast'
 import { StatusDot } from './StatusDot'
 import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, ChevronDownIcon, ThanosBalanceIcon } from './icons'
 import { AccountOrderDetails } from './AccountOrderDetails'
+import { MtmBreakdownPopover } from './MtmBreakdownPopover'
 import { getAccountOrders, type GroupFollower, type AccountSummaryMetrics } from '../api'
 
 type DestructiveAction = 'square_off' | 'exit_open_orders' | 'rebalance' | null
@@ -58,6 +59,14 @@ export function AccountRow(props: {
     return liveSummary() ?? ordersData()?.summary
   }
 
+  const currentBreakdown = () => {
+    const b = summary()?.mtmBreakdown
+    if (b && Object.keys(b).length > 0) {
+      return b
+    }
+    return props.follower.mtmBreakdown
+  }
+
   const showToast = (result: ToastResult) => {
     setToast(result)
     clearTimeout(dismissTimer)
@@ -101,7 +110,19 @@ export function AccountRow(props: {
             : (props.follower.openPositionsCount != null ? `${props.follower.openPositionsCount}/${props.follower.closedPositionsCount ?? 0}` : '—')}
         </td>
         <td class="col-open-orders">{summary() ? (summary()!.pendingOrdersCount ?? 0) : (props.follower.openOrdersCount ?? '—')}</td>
-        <td class="col-mtm">{summary() ? formatCurrency(summary()!.totalMtm) : (props.follower.totalMtm != null ? formatCurrency(props.follower.totalMtm) : '—')}</td>
+        <td class="col-mtm">
+          <div class="col-mtm-wrap">
+            <span>
+              {summary()
+                ? formatCurrency(summary()!.totalMtm)
+                : (props.follower.totalMtm != null ? formatCurrency(props.follower.totalMtm) : '—')}
+            </span>
+            <MtmBreakdownPopover
+              totalMtm={summary() ? summary()!.totalMtm : props.follower.totalMtm}
+              breakdown={currentBreakdown()}
+            />
+          </div>
+        </td>
         <td class="col-cash">{summary() && summary()!.availableCash != null ? formatCurrency(summary()!.availableCash) : (props.follower.availableCash != null ? formatCurrency(props.follower.availableCash) : '—')}</td>
         <td class="col-margin">{summary() && summary()!.availableMargin != null ? formatCurrency(summary()!.availableMargin) : (props.follower.availableMargin != null ? formatCurrency(props.follower.availableMargin) : '—')}</td>
         <td class="col-status">
