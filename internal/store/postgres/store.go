@@ -226,10 +226,15 @@ func (s *Store) CreateFollowLink(ctx context.Context, link domain.FollowLink) er
 				groupID = g.ID
 			} else {
 				groupID = link.MasterID
+				var userID *uuid.UUID
+				if u, ok := domain.UserFromContext(ctx); ok {
+					userID = &u.ID
+				}
 				_ = s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
 					ID:       groupID,
 					Name:     link.MasterID.String(),
 					MasterID: link.MasterID,
+					UserID:   userID,
 				})
 			}
 		}

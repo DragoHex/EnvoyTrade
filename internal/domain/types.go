@@ -215,6 +215,7 @@ type MarginSyncParam struct {
 	AvailableCash   *decimal.Decimal
 	AvailableMargin *decimal.Decimal
 	Status          string
+	ProductMtm      map[string]decimal.Decimal
 }
 
 // Group models a trading group with a designated master account.
@@ -309,6 +310,7 @@ type GroupFollower struct {
 	TotalMtm             decimal.Decimal
 	AvailableCash        *decimal.Decimal
 	AvailableMargin      *decimal.Decimal
+	MtmBreakdown         map[string]decimal.Decimal
 }
 
 // GroupDetail is the full Dashboard GroupCard payload for one group.
@@ -326,6 +328,7 @@ type GroupDetail struct {
 	MasterTotalMtm             decimal.Decimal
 	MasterAvailableCash        *decimal.Decimal
 	MasterAvailableMargin      *decimal.Decimal
+	MasterMtmBreakdown         map[string]decimal.Decimal
 	Followers                  []GroupFollower
 }
 
@@ -344,16 +347,17 @@ type OrderEvent struct {
 
 // AccountSummaryMetrics represents the persistent top summary header for an account.
 type AccountSummaryMetrics struct {
-	NetQty               int              `json:"netQty"`
-	OpenPositionsCount   int              `json:"openPositionsCount"`
-	ClosedPositionsCount int              `json:"closedPositionsCount"`
-	PendingOrdersCount   int              `json:"pendingOrdersCount"`
-	TotalMtm             decimal.Decimal  `json:"totalMtm"`
-	RealizedPnl          decimal.Decimal  `json:"realizedPnl"`
-	AccountValue         decimal.Decimal  `json:"accountValue"`
-	AvailableCash        *decimal.Decimal `json:"availableCash,omitempty"`
-	AvailableMargin      *decimal.Decimal `json:"availableMargin,omitempty"`
-	Status               string           `json:"status"`
+	NetQty               int                        `json:"netQty"`
+	OpenPositionsCount   int                        `json:"openPositionsCount"`
+	ClosedPositionsCount int                        `json:"closedPositionsCount"`
+	PendingOrdersCount   int                        `json:"pendingOrdersCount"`
+	TotalMtm             decimal.Decimal            `json:"totalMtm"`
+	RealizedPnl          decimal.Decimal            `json:"realizedPnl"`
+	AccountValue         decimal.Decimal            `json:"accountValue"`
+	AvailableCash        *decimal.Decimal           `json:"availableCash,omitempty"`
+	AvailableMargin      *decimal.Decimal           `json:"availableMargin,omitempty"`
+	Status               string                     `json:"status"`
+	MtmBreakdown         map[string]decimal.Decimal `json:"mtmBreakdown,omitempty"`
 }
 
 // PositionItem represents an open or closed position row.

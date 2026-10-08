@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"envoytrade/internal/domain"
@@ -101,6 +102,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 		openPositionsCount   int
 		closedPositionsCount int
 		openOrdersCount      int
+		mtmBreakdown         map[string]decimal.Decimal
 	}
 
 	metricsMap := make(map[uuid.UUID]accountMetricsRow, len(accountIDs))
@@ -111,8 +113,23 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 			COALESCE(m.total_mtm, 0),
 			m.available_cash,
 			m.available_margin,
-			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity != 0),
-			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity = 0),
+			CASE 
+				WHEN m.product_mtm IS NOT NULL AND m.product_mtm <> '{}'::jsonb THEN m.product_mtm
+				ELSE COALESCE(
+					(
+						SELECT jsonb_object_agg(sub.product, sub.sum_mtm)
+						FROM (
+							SELECT product, COALESCE(SUM(mtm), 0) AS sum_mtm
+							FROM account_positions
+							WHERE account_id = a.id AND product != 'CNC'
+							GROUP BY product
+						) sub
+					),
+					'{}'::jsonb
+				)
+			END,
+			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity != 0 AND ap.product != 'CNC'),
+			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity = 0 AND ap.product != 'CNC'),
 			CASE 
 				WHEN a.role = 'master' THEN 
 					(SELECT COUNT(*) FROM master_fills mf WHERE mf.master_id = a.id AND mf.status NOT IN ('COMPLETE', 'REJECTED', 'CANCELLED'))
@@ -134,6 +151,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 		var netQty int32
 		var totalMtm decimal.Decimal
 		var availCash, availMargin *decimal.Decimal
+		var rawProductMtm []byte
 		var openPos, closedPos, openOrders int64
 		if err := mRows.Scan(
 			&accID,
@@ -141,6 +159,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 			&totalMtm,
 			&availCash,
 			&availMargin,
+			&rawProductMtm,
 			&openPos,
 			&closedPos,
 			&openOrders,
@@ -154,6 +173,12 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 		m.openPositionsCount = int(openPos)
 		m.closedPositionsCount = int(closedPos)
 		m.openOrdersCount = int(openOrders)
+		if len(rawProductMtm) > 0 {
+			var breakdown map[string]decimal.Decimal
+			if err := json.Unmarshal(rawProductMtm, &breakdown); err == nil {
+				m.mtmBreakdown = breakdown
+			}
+		}
 		metricsMap[accID] = m
 	}
 	if err := mRows.Err(); err != nil {
@@ -168,6 +193,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 	detail.MasterTotalMtm = masterM.totalMtm
 	detail.MasterAvailableCash = masterM.availableCash
 	detail.MasterAvailableMargin = masterM.availableMargin
+	detail.MasterMtmBreakdown = masterM.mtmBreakdown
 
 	for _, r := range rows {
 		fMetrics := metricsMap[r.ID]
@@ -184,6 +210,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 			TotalMtm:             fMetrics.totalMtm,
 			AvailableCash:        fMetrics.availableCash,
 			AvailableMargin:      fMetrics.availableMargin,
+			MtmBreakdown:         fMetrics.mtmBreakdown,
 		})
 	}
 	return detail, nil

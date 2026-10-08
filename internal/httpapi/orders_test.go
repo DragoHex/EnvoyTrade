@@ -136,3 +136,49 @@ func TestGetAccountOrders_InvalidUUID(t *testing.T) {
 		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestGetAccountOrders_WithMtmBreakdown(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{
+		ordersDetail: domain.AccountOrdersDetail{
+			AccountID:       accID,
+			Role:            "master",
+			BrokerAccountID: "MASTER01",
+			Summary: domain.AccountSummaryMetrics{
+				NetQty:               100,
+				TotalMtm:             decimal.NewFromFloat(1500.0),
+				MtmBreakdown: map[string]decimal.Decimal{
+					"MIS":  decimal.NewFromFloat(500.0),
+					"NRML": decimal.NewFromFloat(1000.0),
+				},
+			},
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts/"+accID.String()+"/orders", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	summary, ok := got["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("summary missing in response: %v", got)
+	}
+	breakdown, ok := summary["mtmBreakdown"].(map[string]any)
+	if !ok {
+		t.Fatalf("mtmBreakdown missing in summary: %v", summary)
+	}
+	if breakdown["MIS"] != "500" || breakdown["NRML"] != "1000" {
+		t.Errorf("breakdown = %v, want MIS=500, NRML=1000", breakdown)
+	}
+}
+
