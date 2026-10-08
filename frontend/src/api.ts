@@ -251,11 +251,12 @@ export function patchAccount(
     | { name: string }
     | { enabled: boolean }
     | { active: boolean }
-    | { cloneFactor?: string; maxQtyPerOrder?: number }
+    | { cloneFactor?: string; maxQtyPerOrder?: number | null; groupId?: string | null }
     | { status: string }
     | { ip?: string }
     | { apiKey?: string; apiSecret?: string }
-    | { password?: string; totpSecret?: string },
+    | { password?: string; totpSecret?: string }
+    | Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return apiFetch(`${BASE}/accounts/${id}`, {
     method: 'PATCH',

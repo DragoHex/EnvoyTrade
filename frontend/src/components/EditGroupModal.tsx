@@ -1,4 +1,4 @@
-import { createEffect, createSignal, Show } from 'solid-js'
+import { createEffect, createSignal, For, Show } from 'solid-js'
 import type { Account } from '../api'
 
 export function EditGroupModal(props: {
@@ -82,12 +82,14 @@ export function EditGroupModal(props: {
                 <option value="" disabled>
                   {props.masters.length === 0 ? 'no master accounts available' : 'select master account'}
                 </option>
-                {props.masters.map((m) => (
-                  <option value={m.id}>
-                    {m.name ? `${m.name} (${m.brokerAccountId})` : m.brokerAccountId}
-                    {m.groupName ? ` [Group: ${m.groupName}]` : ' [Unassigned]'}
-                  </option>
-                ))}
+                <For each={props.masters}>
+                  {(m) => (
+                    <option value={m.id}>
+                      {m.name ? `${m.name} (${m.brokerAccountId})` : m.brokerAccountId}
+                      {m.groupName ? ` [Group: ${m.groupName}]` : ' [Unassigned]'}
+                    </option>
+                  )}
+                </For>
               </select>
             </label>
             <Show when={error()}>{(msg) => <p role="alert" style={{ color: "#e53e3e", margin: "0.5rem 0" }}>{msg()}</p>}</Show>

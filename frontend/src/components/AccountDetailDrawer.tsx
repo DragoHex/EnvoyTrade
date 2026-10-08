@@ -1,9 +1,10 @@
-import { createEffect, createSignal, Show } from 'solid-js'
+import { createEffect, createSignal, For, on, Show, untrack } from 'solid-js'
 import {
   fetchAvailableProxyIPs,
   type Account,
   type AvailableProxyIPsResponse,
   type CreateAccountRequest,
+  type GroupSummary,
 } from '../api'
 import { BrokerLogo, SUPPORTED_BROKERS } from './BrokerLogo'
 import { isValidIP } from '../utils/ip'
@@ -11,11 +12,11 @@ import { isValidIP } from '../utils/ip'
 // AccountDetailDrawer is the Accounts page's create/edit form
 // (docs/plans/UI-PLAN.md's field table). account=null means create mode;
 // otherwise it edits that account. Role is fixed at create time and
-// locked thereafter (follow_links.master_id can't be reassigned here).
+// locked thereafter.
 export function AccountDetailDrawer(props: {
   open: boolean
   account: Account | null
-  masters: Account[]
+  groups: GroupSummary[]
   onClose: () => void
   onCreate: (body: CreateAccountRequest) => Promise<void>
   onSave: (id: string, patch: Record<string, unknown>) => Promise<void>
@@ -33,55 +34,60 @@ export function AccountDetailDrawer(props: {
   const [ip, setIp] = createSignal('')
   const [cloneFactor, setCloneFactor] = createSignal('1')
   const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
-  const [masterId, setMasterId] = createSignal('')
+  const [groupId, setGroupId] = createSignal('')
   const [status, setStatus] = createSignal('ok')
   const [error, setError] = createSignal<string | null>(null)
   const [saving, setSaving] = createSignal(false)
 
-  createEffect(() => {
-    if (!props.open) return
-    const a = props.account
-    setName(a?.name ?? '')
-    const currentRole = a?.role ?? 'follower'
-    setRole(currentRole)
-    setBroker(a?.broker ?? 'kite')
-    setBrokerAccountId(a?.brokerAccountId ?? '')
-    setApiKey(a?.apiKey ?? '')
-    setApiSecret(a?.apiSecret ?? '')
-    setPassword('')
-    setTotpSecret('')
-    setCloneFactor(a?.cloneFactor ?? '1')
-    setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
-    setMasterId(a?.masterId ?? '')
-    setStatus(a?.status ?? 'ok')
-    setError(null)
+  createEffect(
+    on(
+      () => [props.open, props.account?.id] as const,
+      ([isOpen]) => {
+        if (!isOpen) return
+        const a = props.account
+        setName(a?.name ?? '')
+        const currentRole = a?.role ?? 'follower'
+        setRole(currentRole)
+        setBroker(a?.broker ?? 'kite')
+        setBrokerAccountId(a?.brokerAccountId ?? '')
+        setApiKey(a?.apiKey ?? '')
+        setApiSecret(a?.apiSecret ?? '')
+        setPassword('')
+        setTotpSecret('')
+        setCloneFactor(a?.cloneFactor ?? '1')
+        setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
+        setGroupId(a?.groupId ?? '')
+        setStatus(a?.status ?? 'ok')
+        setError(null)
 
-    // Synchronous initial IP state
-    if (a?.ip) {
-      setIp(a.ip)
-      setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
-    } else {
-      setIp('')
-      setIpType(currentRole === 'master' ? 'na' : 'ipv4')
-    }
-
-    // Load available proxy IPs
-    fetchAvailableProxyIPs(a?.id)
-      .then((ips) => {
-        setAvailableIPs(ips)
-        // In create mode for follower, auto-assign first available IP if still empty
-        if (!a && currentRole === 'follower' && !ip()) {
-          if (ips.ipv4 && ips.ipv4.length > 0) {
-            setIpType('ipv4')
-            setIp(ips.ipv4[0].ipAddress)
-          } else if (ips.ipv6 && ips.ipv6.length > 0) {
-            setIpType('ipv6')
-            setIp(ips.ipv6[0].ipAddress)
-          }
+        // Synchronous initial IP state
+        if (a?.ip) {
+          setIp(a.ip)
+          setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
+        } else {
+          setIp('')
+          setIpType(currentRole === 'master' ? 'na' : 'ipv4')
         }
-      })
-      .catch(() => {})
-  })
+
+        // Load available proxy IPs
+        fetchAvailableProxyIPs(a?.id)
+          .then((ips) => {
+            setAvailableIPs(ips)
+            // In create mode for follower, auto-assign first available IP if still empty
+            if (!a && currentRole === 'follower' && !untrack(ip)) {
+              if (ips.ipv4 && ips.ipv4.length > 0) {
+                setIpType('ipv4')
+                setIp(ips.ipv4[0].ipAddress)
+              } else if (ips.ipv6 && ips.ipv6.length > 0) {
+                setIpType('ipv6')
+                setIp(ips.ipv6[0].ipAddress)
+              }
+            }
+          })
+          .catch(() => {})
+      }
+    )
+  )
 
   const isFollower = () => role() === 'follower'
   const isEdit = () => props.account != null
@@ -157,9 +163,15 @@ export function AccountDetailDrawer(props: {
           patch.ip = trimmedIP
         }
         if (isFollower()) {
-          if (cloneFactor() !== (a.cloneFactor ?? '1')) patch.cloneFactor = cloneFactor()
-          const maxQty = maxQtyPerOrder() === '' ? null : Number(maxQtyPerOrder())
-          if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
+          const currentGroupId = a.groupId ?? ''
+          if (groupId() !== currentGroupId) {
+            patch.groupId = groupId() // empty string "" signals detachment on backend
+          }
+          if (groupId()) {
+            if (cloneFactor() !== (a.cloneFactor ?? '1')) patch.cloneFactor = cloneFactor()
+            const maxQty = maxQtyPerOrder() === '' ? null : Number(maxQtyPerOrder())
+            if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
+          }
         }
         if (status() !== a.status) patch.status = status()
         if (Object.keys(patch).length > 0) await props.onSave(a.id, patch)
@@ -180,17 +192,17 @@ export function AccountDetailDrawer(props: {
           body.ip = trimmedIP
         }
         if (isFollower()) {
-          if (!masterId()) {
-            setError('A master account must be selected.')
-            return
-          }
           if (!trimmedIP) {
             setError('IP Address is required for follower accounts.')
             return
           }
-          body.cloneFactor = cloneFactor() || '1'
-          body.maxQtyPerOrder = Number(maxQtyPerOrder())
-          body.masterId = masterId()
+          if (groupId()) {
+            body.groupId = groupId()
+            body.cloneFactor = cloneFactor() || '1'
+            if (maxQtyPerOrder().trim()) {
+              body.maxQtyPerOrder = Number(maxQtyPerOrder())
+            }
+          }
         }
         await props.onCreate(body)
       }
@@ -247,9 +259,9 @@ export function AccountDetailDrawer(props: {
                   onChange={(e) => setBroker(e.currentTarget.value)}
                   style={{ flex: '1' }}
                 >
-                  {SUPPORTED_BROKERS.map((b) => (
-                    <option value={b.id}>{b.name}</option>
-                  ))}
+                  <For each={SUPPORTED_BROKERS}>
+                    {(b) => <option value={b.id}>{b.name}</option>}
+                  </For>
                 </select>
               </div>
             </label>
@@ -352,26 +364,30 @@ export function AccountDetailDrawer(props: {
             </label>
             <Show when={isFollower()}>
               <label>
-                Clone Factor
-                <input value={cloneFactor()} onInput={(e) => setCloneFactor(e.currentTarget.value)} />
-              </label>
-              <label>
-                Max Qty/Order
-                <input value={maxQtyPerOrder()} onInput={(e) => setMaxQtyPerOrder(e.currentTarget.value)} />
-              </label>
-              <Show when={!isEdit()}>
-                <label>
-                  Master
-                  <select value={masterId()} onChange={(e) => setMasterId(e.currentTarget.value)}>
-                    <option value="" disabled>
-                      Select a Master
-                    </option>
-                    {props.masters.map((m) => (
-                      <option value={m.id}>
-                        {m.name ? `${m.name} (${m.brokerAccountId})` : m.brokerAccountId}
+                Group (Optional)
+                <select value={groupId()} onChange={(e) => setGroupId(e.currentTarget.value)}>
+                  <option value="">None (Unassigned)</option>
+                  <For each={props.groups || []}>
+                    {(g) => (
+                      <option value={g.id}>
+                        {g.name} ({g.masterName || g.masterAccountId})
                       </option>
-                    ))}
-                  </select>
+                    )}
+                  </For>
+                </select>
+              </label>
+              <Show when={groupId()}>
+                <label>
+                  Clone Factor
+                  <input value={cloneFactor()} onInput={(e) => setCloneFactor(e.currentTarget.value)} />
+                </label>
+                <label>
+                  Max Qty/Order (Optional)
+                  <input
+                    value={maxQtyPerOrder()}
+                    onInput={(e) => setMaxQtyPerOrder(e.currentTarget.value)}
+                    placeholder="Leave blank for unlimited"
+                  />
                 </label>
               </Show>
             </Show>

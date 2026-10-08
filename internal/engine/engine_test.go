@@ -89,6 +89,11 @@ func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
 	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", "test-secret", ip); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
+	if role == "master" {
+		if err := s.CreateGroup(context.Background(), id, "Group "+id.String()[:8], id); err != nil {
+			t.Fatalf("CreateGroup: %v", err)
+		}
+	}
 	return id
 }
 
