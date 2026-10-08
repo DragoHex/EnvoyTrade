@@ -38,35 +38,37 @@ type groupSummaryResponse struct {
 }
 
 type groupFollowerResponse struct {
-	AccountID            string           `json:"accountId"`
-	Name                 string           `json:"name"`
-	BrokerAccountID      string           `json:"brokerAccountId"`
-	Enabled              bool             `json:"enabled"`
-	Status               string           `json:"status"`
-	NetQty               int              `json:"netQty"`
-	OpenPositionsCount   int              `json:"openPositionsCount"`
-	ClosedPositionsCount int              `json:"closedPositionsCount"`
-	OpenOrdersCount      int              `json:"openOrdersCount"`
-	TotalMtm             decimal.Decimal  `json:"totalMtm"`
-	AvailableCash        *decimal.Decimal `json:"availableCash,omitempty"`
-	AvailableMargin      *decimal.Decimal `json:"availableMargin,omitempty"`
+	AccountID            string                     `json:"accountId"`
+	Name                 string                     `json:"name"`
+	BrokerAccountID      string                     `json:"brokerAccountId"`
+	Enabled              bool                       `json:"enabled"`
+	Status               string                     `json:"status"`
+	NetQty               int                        `json:"netQty"`
+	OpenPositionsCount   int                        `json:"openPositionsCount"`
+	ClosedPositionsCount int                        `json:"closedPositionsCount"`
+	OpenOrdersCount      int                        `json:"openOrdersCount"`
+	TotalMtm             decimal.Decimal            `json:"totalMtm"`
+	AvailableCash        *decimal.Decimal           `json:"availableCash,omitempty"`
+	AvailableMargin      *decimal.Decimal           `json:"availableMargin,omitempty"`
+	MtmBreakdown         map[string]decimal.Decimal `json:"mtmBreakdown,omitempty"`
 }
 
 type groupDetailResponse struct {
-	ID                         string                  `json:"id"`
-	Name                       string                  `json:"name"`
-	MasterID                   string                  `json:"masterId"`
-	MasterAccountID            string                  `json:"masterAccountId"`
-	MasterName                 string                  `json:"masterName"`
-	MasterActive               bool                    `json:"masterActive"`
-	MasterNetQty               int                     `json:"masterNetQty"`
-	MasterOpenPositionsCount   int                     `json:"masterOpenPositionsCount"`
-	MasterClosedPositionsCount int                     `json:"masterClosedPositionsCount"`
-	MasterOpenOrdersCount      int                     `json:"masterOpenOrdersCount"`
-	MasterTotalMtm             decimal.Decimal         `json:"masterTotalMtm"`
-	MasterAvailableCash        *decimal.Decimal        `json:"masterAvailableCash,omitempty"`
-	MasterAvailableMargin      *decimal.Decimal        `json:"masterAvailableMargin,omitempty"`
-	Followers                  []groupFollowerResponse `json:"followers"`
+	ID                         string                     `json:"id"`
+	Name                       string                     `json:"name"`
+	MasterID                   string                     `json:"masterId"`
+	MasterAccountID            string                     `json:"masterAccountId"`
+	MasterName                 string                     `json:"masterName"`
+	MasterActive               bool                       `json:"masterActive"`
+	MasterNetQty               int                        `json:"masterNetQty"`
+	MasterOpenPositionsCount   int                        `json:"masterOpenPositionsCount"`
+	MasterClosedPositionsCount int                        `json:"masterClosedPositionsCount"`
+	MasterOpenOrdersCount      int                        `json:"masterOpenOrdersCount"`
+	MasterTotalMtm             decimal.Decimal            `json:"masterTotalMtm"`
+	MasterAvailableCash        *decimal.Decimal           `json:"masterAvailableCash,omitempty"`
+	MasterAvailableMargin      *decimal.Decimal           `json:"masterAvailableMargin,omitempty"`
+	MasterMtmBreakdown         map[string]decimal.Decimal `json:"masterMtmBreakdown,omitempty"`
+	Followers                  []groupFollowerResponse    `json:"followers"`
 }
 
 func (h *handlers) getGroups(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +178,7 @@ func (h *handlers) getGroupDetail(w http.ResponseWriter, r *http.Request) {
 			TotalMtm:             f.TotalMtm,
 			AvailableCash:        f.AvailableCash,
 			AvailableMargin:      f.AvailableMargin,
+			MtmBreakdown:         f.MtmBreakdown,
 		}
 	}
 	writeJSON(w, http.StatusOK, groupDetailResponse{
@@ -192,6 +195,7 @@ func (h *handlers) getGroupDetail(w http.ResponseWriter, r *http.Request) {
 		MasterTotalMtm:             detail.MasterTotalMtm,
 		MasterAvailableCash:        detail.MasterAvailableCash,
 		MasterAvailableMargin:      detail.MasterAvailableMargin,
+		MasterMtmBreakdown:         detail.MasterMtmBreakdown,
 		Followers:                  followers,
 	})
 }

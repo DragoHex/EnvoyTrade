@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"testbroker/sdk"
 )
 
@@ -168,6 +169,14 @@ func (h *Harness) FollowerClient(user string) *sdk.Client {
 	c.SetAccessToken("token_" + user)
 	c.SetBaseURI(h.TestBrokerURL)
 	return c
+}
+
+// KiteConnectClient returns an official *kiteconnect.Client configured for the specified user and pointing to TestBroker.
+func (h *Harness) KiteConnectClient(user string) *kiteconnect.Client {
+	kc := kiteconnect.New("key_" + user)
+	kc.SetAccessToken("token_" + user)
+	kc.SetBaseURI(h.TestBrokerURL)
+	return kc
 }
 
 // ensureServicesRunning probes services and launches them if not reachable.

@@ -1,4 +1,5 @@
-import { render, screen, fireEvent } from '@solidjs/testing-library'
+import { render, screen, fireEvent, within } from '@solidjs/testing-library'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { AccountOrderDetails } from './AccountOrderDetails'
 import * as api from '../api'
@@ -53,7 +54,7 @@ describe('AccountOrderDetails component', () => {
       ],
       closedPositions: [
         {
-          product: 'CNC',
+          product: 'MIS',
           instrument: 'CRUDEOIL17SEP26P8200',
           qty: 0,
           avgPrice: '23.00/40.20',
@@ -138,7 +139,7 @@ describe('AccountOrderDetails component', () => {
     fireEvent.click(screen.getByText('Closed Position (1)'))
     expect(await screen.findByText('CRUDEOIL17SEP26P8200')).toBeInTheDocument()
     expect(screen.getByText('29.70')).toBeInTheDocument()
-    expect(screen.getByText('₹1,720.00')).toBeInTheDocument()
+    expect(screen.getAllByText('₹1,720.00')).toHaveLength(2)
 
     // Switch to Holding tab
     fireEvent.click(screen.getByText('Holding (1)'))
@@ -1210,6 +1211,48 @@ it('locks column header widths with fixed table layout so headers do not shift a
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('renders MTM breakdown popover button in summary header and shows breakdown on click', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: {
+        netQty: 50,
+        openPositionsCount: 1,
+        closedPositionsCount: 0,
+        pendingOrdersCount: 0,
+        totalMtm: '1800.00',
+        realizedPnl: '0.00',
+        accountValue: '100000.00',
+        status: 'online',
+        mtmBreakdown: {
+          MIS: 300,
+          NRML: 1500,
+        },
+      },
+      counts: { openPositions: 0, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 0, totalPages: 0 },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => <AccountOrderDetails accountId="acc-mtm-breakdown-test" />)
+
+    const breakdownBtn = await screen.findByLabelText('View MTM breakdown')
+    expect(breakdownBtn).toBeInTheDocument()
+    await userEvent.click(breakdownBtn)
+
+    const dialog = screen.getByRole('dialog', { name: 'MTM breakdown' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText('MIS')).toBeInTheDocument()
+    expect(within(dialog).getByText('₹300.00')).toBeInTheDocument()
+    expect(within(dialog).getByText('NRML')).toBeInTheDocument()
+    expect(within(dialog).getByText('₹1,500.00')).toBeInTheDocument()
+    expect(within(dialog).getByText('Total')).toBeInTheDocument()
+    expect(within(dialog).getByText('₹1,800.00')).toBeInTheDocument()
   })
 });
 

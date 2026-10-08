@@ -112,6 +112,97 @@ func TestCalculatePositionMetrics(t *testing.T) {
 	}
 }
 
+func TestCalculatePositionMetrics_BrokerMarginPrecedenceAndBreakdown(t *testing.T) {
+	positions := []kiteconnect.Position{
+		{
+			Exchange:      "NFO",
+			Tradingsymbol: "NIFTY26OCTFUT",
+			Product:       "NRML",
+			Quantity:      75,
+			M2M:           1500.0,
+			Realised:      0.0,
+		},
+		{
+			Exchange:      "NSE",
+			Tradingsymbol: "RELIANCE",
+			Product:       "MIS",
+			Quantity:      -10,
+			M2M:           350.0,
+			Realised:      0.0,
+		},
+		{
+			Exchange:      "NSE",
+			Tradingsymbol: "TCS",
+			Product:       "CNC",
+			Quantity:      5,
+			M2M:           -50.0,
+			Realised:      0.0,
+		},
+	}
+
+	// Broker margins returns account-level MTM in utilised fields
+	margins := kiteconnect.AllMargins{
+		Equity: kiteconnect.Margins{
+			Used: kiteconnect.UsedMargins{
+				M2MRealised:   100.0,
+				M2MUnrealised: 1700.0, // Total equity M2M = 1800.0
+			},
+		},
+		Commodity: kiteconnect.Margins{
+			Used: kiteconnect.UsedMargins{
+				M2MRealised:   0.0,
+				M2MUnrealised: 0.0,
+			},
+		},
+	}
+
+	summary := kite.CalculatePositionMetrics(positions, margins)
+
+	// Total MTM must be sourced directly from F&O positions: 1500 + 350 = 1850 (CNC is excluded)
+	expectedTotalMtm := decimal.NewFromFloat(1850.0)
+	if !summary.TotalMtm.Equal(expectedTotalMtm) {
+		t.Errorf("TotalMtm = %s, want %s (F&O positions source)", summary.TotalMtm, expectedTotalMtm)
+	}
+
+	// Product breakdown must be grouped and summed for F&O only
+	expectedNrml := decimal.NewFromFloat(1500.0)
+	if !summary.ProductMtm["NRML"].Equal(expectedNrml) {
+		t.Errorf("ProductMtm[NRML] = %s, want %s", summary.ProductMtm["NRML"], expectedNrml)
+	}
+
+	expectedMis := decimal.NewFromFloat(350.0)
+	if !summary.ProductMtm["MIS"].Equal(expectedMis) {
+		t.Errorf("ProductMtm[MIS] = %s, want %s", summary.ProductMtm["MIS"], expectedMis)
+	}
+
+	// CNC must be excluded from product MTM
+	if _, ok := summary.ProductMtm["CNC"]; ok {
+		t.Errorf("ProductMtm should not contain CNC, got %s", summary.ProductMtm["CNC"])
+	}
+
+	// When no F&O positions exist (e.g. only CNC), fallback to broker margins
+	onlyCncPositions := []kiteconnect.Position{
+		{
+			Exchange:      "NSE",
+			Tradingsymbol: "TCS",
+			Product:       "CNC",
+			Quantity:      5,
+			M2M:           -50.0,
+			Realised:      0.0,
+		},
+	}
+	summaryFallback := kite.CalculatePositionMetrics(onlyCncPositions, margins)
+	expectedBrokerMtm := decimal.NewFromFloat(1800.0) // 100 + 1700
+	if !summaryFallback.TotalMtm.Equal(expectedBrokerMtm) {
+		t.Errorf("Fallback TotalMtm = %s, want %s (broker margin source)", summaryFallback.TotalMtm, expectedBrokerMtm)
+	}
+	expectedBrokerRealized := decimal.NewFromFloat(100.0)
+	if !summaryFallback.RealizedPnl.Equal(expectedBrokerRealized) {
+		t.Errorf("Fallback RealizedPnl = %s, want %s (broker margin source)", summaryFallback.RealizedPnl, expectedBrokerRealized)
+	}
+}
+
+
 func TestHoldingConversion(t *testing.T) {
 	accID := uuid.New()
 	h := kiteconnect.Holding{

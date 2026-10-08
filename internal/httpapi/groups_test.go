@@ -64,6 +64,10 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 			MasterTotalMtm:             decimal.NewFromFloat(1500.50),
 			MasterAvailableCash:        &cash,
 			MasterAvailableMargin:      &margin,
+			MasterMtmBreakdown: map[string]decimal.Decimal{
+				"NRML": decimal.NewFromFloat(1000.0),
+				"MIS":  decimal.NewFromFloat(500.50),
+			},
 			Followers: []domain.GroupFollower{
 				{
 					AccountID:            follower,
@@ -77,6 +81,9 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 					TotalMtm:             decimal.NewFromFloat(750.25),
 					AvailableCash:        &cash,
 					AvailableMargin:      &margin,
+					MtmBreakdown: map[string]decimal.Decimal{
+						"MIS": decimal.NewFromFloat(750.25),
+					},
 				},
 			},
 		},
@@ -100,6 +107,10 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	if got["masterOpenPositionsCount"] != float64(2) {
 		t.Errorf("masterOpenPositionsCount = %v, want 2", got["masterOpenPositionsCount"])
 	}
+	masterBreakdown, ok := got["masterMtmBreakdown"].(map[string]any)
+	if !ok || masterBreakdown["NRML"] != "1000" {
+		t.Errorf("masterMtmBreakdown = %v, want NRML=1000", got["masterMtmBreakdown"])
+	}
 	followers, ok := got["followers"].([]any)
 	if !ok || len(followers) != 1 {
 		t.Fatalf("followers = %v, want 1 entry", got["followers"])
@@ -116,6 +127,10 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	}
 	if f0["openPositionsCount"] != float64(1) {
 		t.Errorf("openPositionsCount = %v, want 1", f0["openPositionsCount"])
+	}
+	fBreakdown, ok := f0["mtmBreakdown"].(map[string]any)
+	if !ok || fBreakdown["MIS"] != "750.25" {
+		t.Errorf("follower mtmBreakdown = %v, want MIS=750.25", f0["mtmBreakdown"])
 	}
 }
 

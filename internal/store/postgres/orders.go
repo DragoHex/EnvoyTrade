@@ -259,11 +259,44 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 	var netQty int32
 	var totalMtm, realizedPnl, accountValue, availableCash, availableMargin decimal.Decimal
 	var marginStatus string
+	var rawProductMtm []byte
 	err = s.pool.QueryRow(ctx, `
-		SELECT net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status
+		SELECT 
+			net_qty, 
+			total_mtm, 
+			CASE
+				WHEN realized_pnl <> 0 THEN realized_pnl
+				ELSE COALESCE(
+					(SELECT SUM(pnl) FROM account_positions WHERE account_id = $1 AND quantity = 0 AND product != 'CNC'),
+					0
+				)
+			END AS realized_pnl, 
+			account_value, 
+			available_cash, 
+			available_margin, 
+			status, 
+			CASE
+				WHEN product_mtm IS NOT NULL AND product_mtm <> '{}'::jsonb THEN product_mtm
+				ELSE COALESCE(
+					(
+						SELECT jsonb_object_agg(sub.product, sub.sum_mtm)
+						FROM (
+							SELECT product, COALESCE(SUM(mtm), 0) AS sum_mtm
+							FROM account_positions
+							WHERE account_id = $1 AND product != 'CNC'
+							GROUP BY product
+						) sub
+					),
+					'{}'::jsonb
+				)
+			END
 		FROM account_margins
 		WHERE account_id = $1
-	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus)
+	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus, &rawProductMtm)
+	var breakdown map[string]decimal.Decimal
+	if len(rawProductMtm) > 0 {
+		_ = json.Unmarshal(rawProductMtm, &breakdown)
+	}
 	if err == nil {
 		detail.Summary = domain.AccountSummaryMetrics{
 			NetQty:               int(netQty),
@@ -276,17 +309,43 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 			AvailableCash:        &availableCash,
 			AvailableMargin:      &availableMargin,
 			Status:               marginStatus,
+			MtmBreakdown:         breakdown,
 		}
 	} else {
+		var fallbackProductMtm []byte
+		var fallbackRealizedPnl decimal.Decimal
+		_ = s.pool.QueryRow(ctx, `
+			SELECT 
+				COALESCE(
+					(
+						SELECT jsonb_object_agg(sub.product, sub.sum_mtm)
+						FROM (
+							SELECT product, COALESCE(SUM(mtm), 0) AS sum_mtm
+							FROM account_positions
+							WHERE account_id = $1 AND product != 'CNC'
+							GROUP BY product
+						) sub
+					),
+					'{}'::jsonb
+				),
+				COALESCE(
+					(SELECT SUM(pnl) FROM account_positions WHERE account_id = $1 AND quantity = 0 AND product != 'CNC'),
+					0
+				)
+		`, accountID).Scan(&fallbackProductMtm, &fallbackRealizedPnl)
+		if len(fallbackProductMtm) > 0 {
+			_ = json.Unmarshal(fallbackProductMtm, &breakdown)
+		}
 		detail.Summary = domain.AccountSummaryMetrics{
 			NetQty:               0,
 			OpenPositionsCount:   int(openPosCount),
 			ClosedPositionsCount: int(closedPosCount),
 			PendingOrdersCount:   int(openOrdersCount),
 			TotalMtm:             decimal.Zero,
-			RealizedPnl:          decimal.Zero,
+			RealizedPnl:          fallbackRealizedPnl,
 			AccountValue:         decimal.Zero,
 			Status:               "offline",
+			MtmBreakdown:         breakdown,
 		}
 	}
 

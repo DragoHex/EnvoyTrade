@@ -19,6 +19,7 @@ import {
   DoorExitIcon,
 } from './icons'
 import { EmptyState } from './EmptyState'
+import { MtmBreakdownPopover } from './MtmBreakdownPopover'
 
 export type OrderTabId =
   | 'open_positions'
@@ -242,16 +243,44 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
 
   const summary = () => {
     const s = store.summary
+    let realized = toNumber(s.realizedPnl)
+    if (realized === 0 && store.closedPositions && store.closedPositions.length > 0) {
+      realized = store.closedPositions
+        .filter((p) => p.product?.toUpperCase() !== 'CNC')
+        .reduce((sum, p) => sum + (toNumber(p.pnl) || toNumber(p.mtm) || 0), 0)
+    }
     return {
       netQty: toNumber(s.netQty),
       openCount: s.openPositionsCount ?? s.openCount ?? 0,
       closedCount: s.closedPositionsCount ?? s.closedCount ?? 0,
       pendingMetric: s.pendingOrdersCount ?? s.pendingMetric ?? 0,
       totalMtm: toNumber(s.totalMtm),
-      realizedPnl: toNumber(s.realizedPnl),
+      realizedPnl: realized,
       accountValue: toNumber(s.accountValue),
       status: s.status ?? 'offline',
     }
+  }
+
+  const effectiveBreakdown = () => {
+    const s = store.summary?.mtmBreakdown
+    if (s && Object.keys(s).length > 0) {
+      const filtered: Record<string, number> = {}
+      for (const [k, v] of Object.entries(s)) {
+        if (k.toUpperCase() !== 'CNC') {
+          filtered[k.toUpperCase()] = toNumber(v)
+        }
+      }
+      return filtered
+    }
+    const b: Record<string, number> = {}
+    const allPositions = [...(store.openPositions || []), ...(store.closedPositions || [])]
+    for (const p of allPositions) {
+      const prod = (p.product || 'NRML').toUpperCase()
+      if (prod === 'CNC') continue
+      const mtm = typeof p.mtm === 'number' ? p.mtm : Number(p.mtm) || 0
+      b[prod] = (b[prod] || 0) + mtm
+    }
+    return b
   }
 
   const openPositions = () => store.openPositions
@@ -358,7 +387,13 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
           <div class="summary-metric-divider" />
 
           <div class="summary-metric-item">
-            <span class="metric-label">Total MTM</span>
+            <div class="metric-label-wrap">
+              <span class="metric-label">Total MTM</span>
+              <MtmBreakdownPopover
+                totalMtm={summary().totalMtm}
+                breakdown={effectiveBreakdown()}
+              />
+            </div>
             <span
               class={`metric-value font-mono font-semibold ${
                 summary().totalMtm > 0

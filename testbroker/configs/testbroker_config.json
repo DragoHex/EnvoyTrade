@@ -101,6 +101,14 @@
       "ltp": 2450.0
     },
     {
+      "exchange": "NSE",
+      "tradingsymbol": "INFY",
+      "instrument_token": 408066,
+      "lot_size": 1,
+      "tick_size": 0.05,
+      "ltp": 1500.0
+    },
+    {
       "exchange": "MCX",
       "tradingsymbol": "CRUDEOIL17SEP26C10600",
       "instrument_token": 1001,
@@ -190,17 +198,17 @@
     "allowed_order_types": ["MARKET", "LIMIT", "SL", "SL-M"]
   },
   "orders": [
-    {"order_id": "ORD-M1-001", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26C10600", "instrument_token": 1001, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 111.1, "price": 111.1, "status": "COMPLETE", "order_timestamp": "2026-09-11 14:24:05"},
-    {"order_id": "ORD-M1-002", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26C10700", "instrument_token": 1002, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 137.2, "price": 137.2, "status": "COMPLETE", "order_timestamp": "2026-09-11 11:18:42"},
-    {"order_id": "ORD-M1-003", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL21SEP26", "instrument_token": 1010, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 9891.0, "price": 9891.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:22:37"},
-    {"order_id": "ORD-M1-004", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOILM21SEP26", "instrument_token": 1008, "order_type": "LIMIT", "transaction_type": "BUY", "product": "CNC", "quantity": 10, "filled_quantity": 10, "average_price": 9896.0, "price": 9896.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:22:34"},
-    {"order_id": "ORD-M1-005", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL21SEP26", "instrument_token": 1010, "order_type": "LIMIT", "transaction_type": "BUY", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 9885.0, "price": 9885.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:19:01"},
-    {"order_id": "ORD-M1-006A", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8200", "instrument_token": 1009, "order_type": "LIMIT", "transaction_type": "BUY", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 23.0, "price": 23.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:17:37"},
-    {"order_id": "ORD-M1-006B", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8200", "instrument_token": 1009, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 40.2, "price": 40.2, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:17:38"},
-    {"order_id": "ORD-M1-007", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8700", "instrument_token": 1007, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 53.9, "price": 53.9, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:17:28"},
-    {"order_id": "ORD-M1-008", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26C11000", "instrument_token": 1003, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 200, "filled_quantity": 200, "average_price": 67.1, "price": 67.1, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:15:00"},
-    {"order_id": "ORD-M1-009", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8400", "instrument_token": 1004, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 200, "filled_quantity": 200, "average_price": 45.65, "price": 45.65, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:14:00"},
-    {"order_id": "ORD-M1-010", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8500", "instrument_token": 1005, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 53.2, "price": 53.2, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:13:00"},
-    {"order_id": "ORD-M1-011", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8600", "instrument_token": 1006, "order_type": "LIMIT", "transaction_type": "SELL", "product": "CNC", "quantity": 100, "filled_quantity": 100, "average_price": 59.7, "price": 59.7, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:12:00"}
+    {"order_id": "ORD-M1-001", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26C10600", "instrument_token": 1001, "order_type": "LIMIT", "transaction_type": "SELL", "product": "NRML", "quantity": 100, "filled_quantity": 100, "average_price": 111.1, "price": 111.1, "status": "COMPLETE", "order_timestamp": "2026-09-11 14:24:05"},
+    {"order_id": "ORD-M1-002", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26C10700", "instrument_token": 1002, "order_type": "LIMIT", "transaction_type": "SELL", "product": "NRML", "quantity": 100, "filled_quantity": 100, "average_price": 137.2, "price": 137.2, "status": "COMPLETE", "order_timestamp": "2026-09-11 11:18:42"},
+    {"order_id": "ORD-M1-003", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL21SEP26", "instrument_token": 1010, "order_type": "LIMIT", "transaction_type": "SELL", "product": "MIS", "quantity": 100, "filled_quantity": 100, "average_price": 9891.0, "price": 9891.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:22:37"},
+    {"order_id": "ORD-M1-004", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOILM21SEP26", "instrument_token": 1008, "order_type": "LIMIT", "transaction_type": "BUY", "product": "MIS", "quantity": 10, "filled_quantity": 10, "average_price": 9896.0, "price": 9896.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:22:34"},
+    {"order_id": "ORD-M1-005", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL21SEP26", "instrument_token": 1010, "order_type": "LIMIT", "transaction_type": "BUY", "product": "MIS", "quantity": 100, "filled_quantity": 100, "average_price": 9885.0, "price": 9885.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:19:01"},
+    {"order_id": "ORD-M1-006A", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8200", "instrument_token": 1009, "order_type": "LIMIT", "transaction_type": "BUY", "product": "MIS", "quantity": 100, "filled_quantity": 100, "average_price": 23.0, "price": 23.0, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:17:37"},
+    {"order_id": "ORD-M1-006B", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8200", "instrument_token": 1009, "order_type": "LIMIT", "transaction_type": "SELL", "product": "MIS", "quantity": 100, "filled_quantity": 100, "average_price": 40.2, "price": 40.2, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:17:38"},
+    {"order_id": "ORD-M1-007", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8700", "instrument_token": 1007, "order_type": "LIMIT", "transaction_type": "SELL", "product": "MIS", "quantity": 100, "filled_quantity": 100, "average_price": 53.9, "price": 53.9, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:17:28"},
+    {"order_id": "ORD-M1-008", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26C11000", "instrument_token": 1003, "order_type": "LIMIT", "transaction_type": "SELL", "product": "NRML", "quantity": 200, "filled_quantity": 200, "average_price": 67.1, "price": 67.1, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:15:00"},
+    {"order_id": "ORD-M1-009", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8400", "instrument_token": 1004, "order_type": "LIMIT", "transaction_type": "SELL", "product": "NRML", "quantity": 200, "filled_quantity": 200, "average_price": 45.65, "price": 45.65, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:14:00"},
+    {"order_id": "ORD-M1-010", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8500", "instrument_token": 1005, "order_type": "LIMIT", "transaction_type": "SELL", "product": "NRML", "quantity": 100, "filled_quantity": 100, "average_price": 53.2, "price": 53.2, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:13:00"},
+    {"order_id": "ORD-M1-011", "user_id": "MASTER01", "exchange": "MCX", "tradingsymbol": "CRUDEOIL17SEP26P8600", "instrument_token": 1006, "order_type": "LIMIT", "transaction_type": "SELL", "product": "MIS", "quantity": 100, "filled_quantity": 100, "average_price": 59.7, "price": 59.7, "status": "COMPLETE", "order_timestamp": "2026-09-11 09:12:00"}
   ]
 }

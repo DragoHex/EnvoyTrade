@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 
 	"envoytrade/internal/domain"
 	"envoytrade/internal/store/postgres/sqlcgen"
@@ -108,10 +109,17 @@ func (s *Store) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, m M
 	if m.AvailableMargin != nil {
 		margin = *m.AvailableMargin
 	}
+	productMtmJSON := []byte("{}")
+	if len(m.ProductMtm) > 0 {
+		if b, err := json.Marshal(m.ProductMtm); err == nil {
+			productMtmJSON = b
+		}
+	}
+
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO account_margins
-		  (account_id, net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		  (account_id, net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status, product_mtm, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 		ON CONFLICT (account_id)
 		DO UPDATE SET
 		  net_qty = EXCLUDED.net_qty,
@@ -121,7 +129,8 @@ func (s *Store) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, m M
 		  available_cash = EXCLUDED.available_cash,
 		  available_margin = EXCLUDED.available_margin,
 		  status = EXCLUDED.status,
+		  product_mtm = EXCLUDED.product_mtm,
 		  updated_at = now();
-	`, accountID, m.NetQty, m.TotalMtm, m.RealizedPnl, m.AccountValue, cash, margin, status)
+	`, accountID, m.NetQty, m.TotalMtm, m.RealizedPnl, m.AccountValue, cash, margin, status, productMtmJSON)
 	return err
 }

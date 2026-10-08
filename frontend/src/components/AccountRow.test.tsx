@@ -561,6 +561,36 @@ describe('AccountRow', () => {
     expect(sqOffBtn).toBeDisabled()
     expect(sqOffBtn).toHaveAttribute('data-tooltip', 'Account is disabled')
   })
+
+  it('renders MTM breakdown popover button and displays breakdown on click', async () => {
+    const followerWithMtm: GroupFollower = {
+      ...follower,
+      totalMtm: 1500,
+      mtmBreakdown: {
+        MIS: 500,
+        NRML: 1000,
+      },
+    }
+    render(() => (
+      <AccountRow
+        follower={followerWithMtm}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const breakdownBtn = screen.getByLabelText('View MTM breakdown')
+    expect(breakdownBtn).toBeInTheDocument()
+    await userEvent.click(breakdownBtn)
+
+    expect(screen.getByRole('dialog', { name: 'MTM breakdown' })).toBeInTheDocument()
+    expect(screen.getByText('MIS')).toBeInTheDocument()
+    expect(screen.getByText('₹500.00')).toBeInTheDocument()
+    expect(screen.getByText('NRML')).toBeInTheDocument()
+    expect(screen.getByText('₹1,000.00')).toBeInTheDocument()
+  })
 })
 
 

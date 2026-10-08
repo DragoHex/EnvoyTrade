@@ -122,6 +122,21 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 
 	// Margins
 	mux.HandleFunc("GET /user/margins", func(w http.ResponseWriter, r *http.Request) {
+		userID := UserIDFromContext(r.Context())
+		var eqRealised, eqUnrealised, commRealised, commUnrealised float64
+		if userID != "" {
+			netPositions, _ := eng.GetPositions(userID)
+			for _, p := range netPositions {
+				if p.Exchange == "MCX" {
+					commRealised += p.Realised
+					commUnrealised += p.Unrealised
+				} else {
+					eqRealised += p.Realised
+					eqUnrealised += p.Unrealised
+				}
+			}
+		}
+
 		writeKiteSuccess(w, map[string]any{
 			"equity": map[string]any{
 				"enabled": true,
@@ -130,7 +145,10 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 					"cash":         10000000.0,
 					"live_balance": 10000000.0,
 				},
-				"utilised": map[string]any{},
+				"utilised": map[string]any{
+					"m2m_realised":   eqRealised,
+					"m2m_unrealised": eqUnrealised,
+				},
 			},
 			"commodity": map[string]any{
 				"enabled": true,
@@ -139,7 +157,42 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 					"cash":         10000000.0,
 					"live_balance": 10000000.0,
 				},
-				"utilised": map[string]any{},
+				"utilised": map[string]any{
+					"m2m_realised":   commRealised,
+					"m2m_unrealised": commUnrealised,
+				},
+			},
+		})
+	})
+
+	// Segment margins (equity or commodity)
+	mux.HandleFunc("GET /user/margins/{segment}", func(w http.ResponseWriter, r *http.Request) {
+		segment := r.PathValue("segment")
+		userID := UserIDFromContext(r.Context())
+		var realised, unrealised float64
+		if userID != "" {
+			netPositions, _ := eng.GetPositions(userID)
+			for _, p := range netPositions {
+				if segment == "commodity" && p.Exchange == "MCX" {
+					realised += p.Realised
+					unrealised += p.Unrealised
+				} else if segment == "equity" && p.Exchange != "MCX" {
+					realised += p.Realised
+					unrealised += p.Unrealised
+				}
+			}
+		}
+
+		writeKiteSuccess(w, map[string]any{
+			"enabled": true,
+			"net":     10000000.0,
+			"available": map[string]any{
+				"cash":         10000000.0,
+				"live_balance": 10000000.0,
+			},
+			"utilised": map[string]any{
+				"m2m_realised":   realised,
+				"m2m_unrealised": unrealised,
 			},
 		})
 	})

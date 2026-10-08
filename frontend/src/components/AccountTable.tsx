@@ -18,6 +18,7 @@ export function AccountTable(props: {
     availableMargin?: number | string
     groupId?: string
     groupName?: string
+    mtmBreakdown?: Record<string, number | string>
   }
   followers: GroupFollower[]
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
@@ -82,6 +83,7 @@ export function AccountTable(props: {
             totalMtm: props.master.totalMtm,
             availableCash: props.master.availableCash,
             availableMargin: props.master.availableMargin,
+            mtmBreakdown: props.master.mtmBreakdown,
           }}
           isMaster
           targetGroupId={props.master.groupId || props.master.masterId}
