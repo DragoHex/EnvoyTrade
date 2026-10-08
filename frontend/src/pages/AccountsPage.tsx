@@ -1,4 +1,4 @@
-import { createResource, createSignal, Index, onCleanup, Show } from 'solid-js'
+import { createMemo, createResource, createSignal, Index, onCleanup, Show } from 'solid-js'
 import { useNavigate, useSearchParams } from '@solidjs/router'
 import {
   getGroups,
@@ -176,26 +176,28 @@ export function AccountsPage() {
     }
   }
 
-  const assignedMasterIds = () => new Set((groups() ?? []).map((g) => g.masterId))
-  const allMasters = () => accounts()?.filter((a) => a.role === 'master') ?? []
-  const availableMastersForCreate = () =>
+  const assignedMasterIds = createMemo(() => new Set((groups() ?? []).map((g) => g.masterId)))
+  const allMasters = createMemo(() => accounts()?.filter((a) => a.role === 'master') ?? [])
+  const availableMastersForCreate = createMemo(() =>
     allMasters()
       .filter((a) => !assignedMasterIds().has(a.id))
       .sort((a, b) =>
         (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
       )
-  const availableMastersForEdit = () =>
+  )
+  const availableMastersForEdit = createMemo(() =>
     [...allMasters()].sort((a, b) =>
       (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
     )
+  )
 
-  const sortedGroups = () => {
+  const sortedGroups = createMemo(() => {
     const list = groups()
     if (!list) return undefined
     return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
-  }
+  })
 
-  const sortedAccounts = () => {
+  const sortedAccounts = createMemo(() => {
     const list = accounts()
     if (!list) return undefined
     return [...list].sort((a, b) => {
@@ -203,10 +205,10 @@ export function AccountsPage() {
       const nameB = b.name || b.brokerAccountId || ''
       return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
     })
-  }
+  })
 
-  const masterAccounts = () => sortedAccounts()?.filter((a) => a.role === 'master') ?? []
-  const followerAccounts = () => sortedAccounts()?.filter((a) => a.role === 'follower') ?? []
+  const masterAccounts = createMemo(() => sortedAccounts()?.filter((a) => a.role === 'master') ?? [])
+  const followerAccounts = createMemo(() => sortedAccounts()?.filter((a) => a.role === 'follower') ?? [])
 
   return (
     <div class="page">

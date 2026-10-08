@@ -1,4 +1,4 @@
-import { createEffect, createSignal, Show } from 'solid-js'
+import { createEffect, createSignal, For, on, Show, untrack } from 'solid-js'
 import {
   fetchAvailableProxyIPs,
   type Account,
@@ -39,50 +39,55 @@ export function AccountDetailDrawer(props: {
   const [error, setError] = createSignal<string | null>(null)
   const [saving, setSaving] = createSignal(false)
 
-  createEffect(() => {
-    if (!props.open) return
-    const a = props.account
-    setName(a?.name ?? '')
-    const currentRole = a?.role ?? 'follower'
-    setRole(currentRole)
-    setBroker(a?.broker ?? 'kite')
-    setBrokerAccountId(a?.brokerAccountId ?? '')
-    setApiKey(a?.apiKey ?? '')
-    setApiSecret(a?.apiSecret ?? '')
-    setPassword('')
-    setTotpSecret('')
-    setCloneFactor(a?.cloneFactor ?? '1')
-    setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
-    setGroupId(a?.groupId ?? '')
-    setStatus(a?.status ?? 'ok')
-    setError(null)
+  createEffect(
+    on(
+      () => [props.open, props.account?.id] as const,
+      ([isOpen]) => {
+        if (!isOpen) return
+        const a = props.account
+        setName(a?.name ?? '')
+        const currentRole = a?.role ?? 'follower'
+        setRole(currentRole)
+        setBroker(a?.broker ?? 'kite')
+        setBrokerAccountId(a?.brokerAccountId ?? '')
+        setApiKey(a?.apiKey ?? '')
+        setApiSecret(a?.apiSecret ?? '')
+        setPassword('')
+        setTotpSecret('')
+        setCloneFactor(a?.cloneFactor ?? '1')
+        setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
+        setGroupId(a?.groupId ?? '')
+        setStatus(a?.status ?? 'ok')
+        setError(null)
 
-    // Synchronous initial IP state
-    if (a?.ip) {
-      setIp(a.ip)
-      setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
-    } else {
-      setIp('')
-      setIpType(currentRole === 'master' ? 'na' : 'ipv4')
-    }
-
-    // Load available proxy IPs
-    fetchAvailableProxyIPs(a?.id)
-      .then((ips) => {
-        setAvailableIPs(ips)
-        // In create mode for follower, auto-assign first available IP if still empty
-        if (!a && currentRole === 'follower' && !ip()) {
-          if (ips.ipv4 && ips.ipv4.length > 0) {
-            setIpType('ipv4')
-            setIp(ips.ipv4[0].ipAddress)
-          } else if (ips.ipv6 && ips.ipv6.length > 0) {
-            setIpType('ipv6')
-            setIp(ips.ipv6[0].ipAddress)
-          }
+        // Synchronous initial IP state
+        if (a?.ip) {
+          setIp(a.ip)
+          setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
+        } else {
+          setIp('')
+          setIpType(currentRole === 'master' ? 'na' : 'ipv4')
         }
-      })
-      .catch(() => {})
-  })
+
+        // Load available proxy IPs
+        fetchAvailableProxyIPs(a?.id)
+          .then((ips) => {
+            setAvailableIPs(ips)
+            // In create mode for follower, auto-assign first available IP if still empty
+            if (!a && currentRole === 'follower' && !untrack(ip)) {
+              if (ips.ipv4 && ips.ipv4.length > 0) {
+                setIpType('ipv4')
+                setIp(ips.ipv4[0].ipAddress)
+              } else if (ips.ipv6 && ips.ipv6.length > 0) {
+                setIpType('ipv6')
+                setIp(ips.ipv6[0].ipAddress)
+              }
+            }
+          })
+          .catch(() => {})
+      }
+    )
+  )
 
   const isFollower = () => role() === 'follower'
   const isEdit = () => props.account != null
@@ -254,9 +259,9 @@ export function AccountDetailDrawer(props: {
                   onChange={(e) => setBroker(e.currentTarget.value)}
                   style={{ flex: '1' }}
                 >
-                  {SUPPORTED_BROKERS.map((b) => (
-                    <option value={b.id}>{b.name}</option>
-                  ))}
+                  <For each={SUPPORTED_BROKERS}>
+                    {(b) => <option value={b.id}>{b.name}</option>}
+                  </For>
                 </select>
               </div>
             </label>
@@ -362,11 +367,13 @@ export function AccountDetailDrawer(props: {
                 Group (Optional)
                 <select value={groupId()} onChange={(e) => setGroupId(e.currentTarget.value)}>
                   <option value="">None (Unassigned)</option>
-                  {(props.groups || []).map((g) => (
-                    <option value={g.id}>
-                      {g.name} ({g.masterName || g.masterAccountId})
-                    </option>
-                  ))}
+                  <For each={props.groups || []}>
+                    {(g) => (
+                      <option value={g.id}>
+                        {g.name} ({g.masterName || g.masterAccountId})
+                      </option>
+                    )}
+                  </For>
                 </select>
               </label>
               <Show when={groupId()}>
