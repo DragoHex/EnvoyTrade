@@ -196,9 +196,12 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		return fmt.Errorf("sync holdings: %w", err)
 	}
 
-	// Convert and persist positions
-	posParams := make([]domain.PositionSyncParam, 0, len(positions.Net))
-	for _, p := range positions.Net {
+	// Filter out non-F&O positions (equity delivery/CNC holdings)
+	foPositions := FilterFOPositions(positions.Net)
+
+	// Convert and persist positions (F&O segments only)
+	posParams := make([]domain.PositionSyncParam, 0, len(foPositions))
+	for _, p := range foPositions {
 		conv := ConvertPosition(accountID, p)
 		posParams = append(posParams, domain.PositionSyncParam{
 			Product:      conv.Product,
@@ -218,8 +221,8 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		return fmt.Errorf("sync positions: %w", err)
 	}
 
-	// Calculate and persist margin metrics
-	summary := CalculatePositionMetrics(positions.Net, margins)
+	// Calculate and persist margin metrics (F&O segments only)
+	summary := CalculatePositionMetrics(foPositions, margins)
 	accValue := summary.AvailableMargin
 	if accValue.IsZero() && !summary.AvailableCash.IsZero() {
 		accValue = summary.AvailableCash
@@ -232,6 +235,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		AvailableCash:   &summary.AvailableCash,
 		AvailableMargin: &summary.AvailableMargin,
 		Status:          "online",
+		ProductMtm:      summary.ProductMtm,
 	}
 	if err := s.Store.SyncAccountMargins(ctx, accountID, marginParam); err != nil {
 		return fmt.Errorf("sync margins: %w", err)
