@@ -34,16 +34,27 @@ const follower: Account = {
   ip: '192.168.1.20',
 }
 
+const mockGroup: api.GroupSummary = {
+  id: 'g1',
+  name: 'Alpha Group',
+  masterId: 'm1',
+  masterAccountId: 'ZX1234',
+  masterName: 'Master Account',
+  broker: 'kite',
+  followerCount: 0,
+  status: 'ok',
+}
+
 describe('AccountDetailDrawer', () => {
-  it('create mode, role=master: does not show cloneFactor/maxQtyPerOrder/master fields, submits createAccount', async () => {
+  it('create mode, role=master: does not show group/cloneFactor/maxQtyPerOrder fields, submits createAccount', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
     expect(screen.queryByLabelText('Clone Factor')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Master')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Group/)).not.toBeInTheDocument()
 
     await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZX9999')
     await userEvent.type(screen.getByLabelText('API Key'), 'key')
@@ -55,52 +66,66 @@ describe('AccountDetailDrawer', () => {
     )
   })
 
-  it('create mode, role=follower: shows master dropdown defaulting to Select a Master, submits createAccount with masterId and default cloneFactor 1', async () => {
+  it('create mode, role=follower: defaults to None (Unassigned) group, allows creation without group', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     expect(screen.getByLabelText('Role')).toHaveValue('follower')
-    expect(screen.getByLabelText('Master')).toBeInTheDocument()
-    expect(screen.getByLabelText('Master')).toHaveValue('')
+    const groupSelect = screen.getByLabelText(/Group/)
+    expect(groupSelect).toBeInTheDocument()
+    expect(groupSelect).toHaveValue('') // None (Unassigned)
+
+    // When unassigned, cloneFactor and maxQty are hidden
+    expect(screen.queryByLabelText('Clone Factor')).not.toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
+    await userEvent.type(screen.getByLabelText('API Key'), 'key')
+    await userEvent.type(screen.getByLabelText('API Secret'), 'secret')
+    await userEvent.type(screen.getByLabelText(/IP Address/), '192.168.1.50')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'follower', brokerAccountId: 'ZY9999', ip: '192.168.1.50',
+      }),
+    )
+  })
+
+  it('create mode, role=follower with group: shows GroupName (MasterName) format and submits groupId and optional maxQty', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+    ))
+
+    const groupSelect = screen.getByLabelText(/Group/)
+    expect(screen.getByText('Alpha Group (Master Account)')).toBeInTheDocument()
+
+    await userEvent.selectOptions(groupSelect, 'g1')
     expect(screen.getByLabelText('Clone Factor')).toHaveValue('1')
 
     await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
     await userEvent.type(screen.getByLabelText('API Key'), 'key')
     await userEvent.type(screen.getByLabelText('API Secret'), 'secret')
-    await userEvent.selectOptions(screen.getByLabelText('Master'), 'm1')
+    await userEvent.type(screen.getByLabelText(/IP Address/), '192.168.1.50')
     await userEvent.clear(screen.getByLabelText('Clone Factor'))
     await userEvent.type(screen.getByLabelText('Clone Factor'), '0.5')
-    await userEvent.type(screen.getByLabelText(/IP Address/), '192.168.1.50')
-    await userEvent.clear(screen.getByLabelText('Max Qty/Order'))
-    await userEvent.type(screen.getByLabelText('Max Qty/Order'), '100')
+    await userEvent.type(screen.getByLabelText(/Max Qty\/Order/), '100')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(onCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        role: 'follower', brokerAccountId: 'ZY9999', masterId: 'm1', cloneFactor: '0.5', maxQtyPerOrder: 100, ip: '192.168.1.50',
+        role: 'follower', brokerAccountId: 'ZY9999', groupId: 'g1', cloneFactor: '0.5', maxQtyPerOrder: 100, ip: '192.168.1.50',
       }),
     )
   })
 
-  it('create mode, role=follower without master selection: shows validation error', async () => {
-    const onCreate = vi.fn().mockResolvedValue(undefined)
-    render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
-    ))
-
-    await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('A master account must be selected.')
-    expect(onCreate).not.toHaveBeenCalled()
-  })
-
   it('edit mode: role is locked, submits only changed fields via onSave', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
+    const followerWithGroup: Account = { ...follower, groupId: 'g1' }
     render(() => (
-      <AccountDetailDrawer open account={follower} masters={[master]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
+      <AccountDetailDrawer open account={followerWithGroup} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
     ))
 
     expect(screen.getByLabelText('Role')).toBeDisabled()
@@ -111,14 +136,27 @@ describe('AccountDetailDrawer', () => {
 
     expect(onSave).toHaveBeenCalledWith('f1', { cloneFactor: '0.75' })
   })
+
+  it('edit mode: allows changing or detaching group', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const followerWithGroup: Account = { ...follower, groupId: 'g1' }
+    render(() => (
+      <AccountDetailDrawer open account={followerWithGroup} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
+    ))
+
+    const groupSelect = screen.getByLabelText(/Group/)
+    await userEvent.selectOptions(groupSelect, '') // detach
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(onSave).toHaveBeenCalledWith('f1', { groupId: '' })
+  })
   it('create mode, role=follower without IP: shows validation error', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
-    await userEvent.selectOptions(screen.getByLabelText('Master'), 'm1')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('IP Address is required for follower accounts.')
@@ -128,11 +166,10 @@ describe('AccountDetailDrawer', () => {
   it('create mode, role=follower with invalid IP: shows validation error', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
-    await userEvent.selectOptions(screen.getByLabelText('Master'), 'm1')
     await userEvent.type(screen.getByLabelText(/IP Address/), 'not-an-ip')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -143,7 +180,7 @@ describe('AccountDetailDrawer', () => {
   it('create mode, role=master with optional valid IP: submits with ip', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
@@ -159,7 +196,7 @@ describe('AccountDetailDrawer', () => {
   it('create mode, role=master with invalid IP: shows validation error', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
@@ -174,7 +211,7 @@ describe('AccountDetailDrawer', () => {
   it('edit mode: role is locked, submits changed IP and cloneFactor via onSave', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={follower} masters={[master]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
+      <AccountDetailDrawer open account={follower} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
     ))
 
     await userEvent.clear(screen.getByLabelText(/IP Address/))
@@ -192,7 +229,7 @@ describe('AccountDetailDrawer', () => {
     }
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={accountWithCreds} masters={[master]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
+      <AccountDetailDrawer open account={accountWithCreds} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={onSave} />
     ))
 
     const apiKeyInput = screen.getByLabelText('API Key')
@@ -218,7 +255,7 @@ describe('AccountDetailDrawer', () => {
   it('create mode: submits password and totpSecret', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
     ))
 
     await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
@@ -244,7 +281,7 @@ describe('AccountDetailDrawer', () => {
       authError: 'Invalid 2FA TOTP code',
     }
     render(() => (
-      <AccountDetailDrawer open account={authErrorAccount} masters={[]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={authErrorAccount} groups={[]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
     ))
 
     expect(screen.getByRole('alert')).toHaveTextContent('Authentication required: Invalid 2FA TOTP code')
@@ -277,7 +314,7 @@ describe('AccountDetailDrawer', () => {
     })
 
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[master]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
     ))
 
     // Wait for async fetch to populate IP
@@ -297,7 +334,7 @@ describe('AccountDetailDrawer', () => {
     })
 
     render(() => (
-      <AccountDetailDrawer open account={null} masters={[]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+      <AccountDetailDrawer open account={null} groups={[]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
     ))
 
     await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')

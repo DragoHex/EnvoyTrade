@@ -77,6 +77,7 @@ export function AccountsPage() {
       const created = await createAccount(body)
       showToast({ kind: 'success', message: 'Account created successfully.' })
       mutateAccounts((prev) => (prev ? [...prev, created] : [created]))
+      refetchGroups()
     } catch (e) {
       showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Create failed.' })
       throw e
@@ -115,6 +116,7 @@ export function AccountsPage() {
       await patchAccount(id, patch as any)
       const updated = await getAccount(id)
       mutateAccounts((prev) => prev?.map((a) => (a.id === id ? updated : a)))
+      refetchGroups()
       showToast({ kind: 'success', message: 'Account saved successfully.' })
     } catch (e) {
       showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Save failed.' })
@@ -377,7 +379,7 @@ export function AccountsPage() {
       <AccountDetailDrawer
         open={drawerOpen()}
         account={editing()}
-        masters={allMasters()}
+        groups={groups() ?? []}
         onClose={() => setDrawerOpen(false)}
         onCreate={handleCreate}
         onSave={handleSave}
