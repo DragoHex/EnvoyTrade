@@ -165,4 +165,59 @@ describe('SquareOffModal', () => {
     await userEvent.click(screen.getByText('Cancel'))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('closes when Escape key is pressed', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+    const onCancel = vi.fn()
+
+    render(() => (
+      <SquareOffModal open={true} target={accountTarget} onCancel={onCancel} />
+    ))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not close on Escape key when submission is in flight', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 10, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      openPositions: [{ product: 'MIS', instrument: 'INFY', qty: 10, avgPrice: '1500', ltp: '1510', mtm: '100' }],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+    let resolveSubmit!: () => void
+    const pendingSubmit = new Promise<void>((res) => {
+      resolveSubmit = res
+    })
+    const onConfirm = vi.fn().mockReturnValue(pendingSubmit)
+    const onCancel = vi.fn()
+
+    render(() => (
+      <SquareOffModal open={true} target={accountTarget} onConfirm={onConfirm} onCancel={onCancel} />
+    ))
+
+    const confirmBtn = await screen.findByRole('button', { name: /Sq-off/i })
+    await userEvent.click(confirmBtn)
+    expect(onConfirm).toHaveBeenCalled()
+
+    // While submitting, Escape key should be ignored
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).not.toHaveBeenCalled()
+
+    resolveSubmit()
+  })
 })
+

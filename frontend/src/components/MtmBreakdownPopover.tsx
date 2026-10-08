@@ -122,8 +122,8 @@ export function MtmBreakdownPopover(props: MtmBreakdownPopoverProps) {
         type="button"
         class="mtm-breakdown-trigger-btn"
         aria-label="View MTM breakdown"
-        title="View MTM breakdown"
-        data-tooltip="View MTM breakdown"
+        title={isOpen() ? undefined : 'View MTM breakdown'}
+        data-tooltip={isOpen() ? undefined : 'View MTM breakdown'}
         data-active={isOpen() ? 'true' : 'false'}
         onClick={toggleOpen}
       >

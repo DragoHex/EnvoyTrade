@@ -708,6 +708,79 @@ describe('RebalanceModal', () => {
     await userEvent.click(rebalanceBtn)
     expect(onConfirm).toHaveBeenCalledWith(['f1'])
   })
+
+  it('closes when Escape key is pressed', async () => {
+    const onCancel = vi.fn()
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 1,
+      followers_with_drift: 0,
+      drifts: [],
+    })
+
+    render(() => (
+      <RebalanceModal open={true} target={groupTarget} onCancel={onCancel} />
+    ))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not close on Escape key when submission is in flight', async () => {
+    const onCancel = vi.fn()
+    let resolveSubmit!: () => void
+    const pendingSubmit = new Promise<void>((res) => {
+      resolveSubmit = res
+    })
+    const onConfirm = vi.fn().mockReturnValue(pendingSubmit)
+
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 1,
+      followers_with_drift: 1,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Follower 1',
+          broker_account_id: 'FOLLOW01A',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NFO',
+              tradingsymbol: 'NIFTY26OCTFUT',
+              product: 'NRML',
+              lot_size: 50,
+              master_qty: 50,
+              target_qty: 50,
+              follower_qty: 0,
+              drift_qty: 50,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    })
+
+    render(() => (
+      <RebalanceModal open={true} target={groupTarget} onConfirm={onConfirm} onCancel={onCancel} />
+    ))
+
+    const rebalanceBtn = await screen.findByRole('button', { name: /Rebalance/i })
+    await userEvent.click(rebalanceBtn)
+    expect(onConfirm).toHaveBeenCalled()
+
+    // While submitting, Escape key should be ignored
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).not.toHaveBeenCalled()
+
+    resolveSubmit()
+  })
 })
+
 
 

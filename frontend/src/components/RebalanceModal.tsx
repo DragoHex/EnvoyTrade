@@ -10,6 +10,7 @@ import {
 } from '../api'
 import { ThanosBalanceIcon, ChevronDownIcon, InfoIcon, AlertTriangleIcon } from './icons'
 import { StatusDot } from './StatusDot'
+import { useEscapeKey } from '../utils/useEscapeKey'
 
 export interface RebalanceModalTarget {
   type: 'group' | 'account'
@@ -251,6 +252,12 @@ export function RebalanceModal(props: RebalanceModalProps) {
     if (!props.open || props.target?.type !== 'group') return
     const enabledDrifters = enabledDriftingFollowers()
     setSelectedFollowers(enabledDrifters.map((d) => d.account_id))
+  })
+
+  useEscapeKey({
+    enabled: () => Boolean(props.open && props.target),
+    canDismiss: () => !submitting(),
+    onEscape: () => props.onCancel(),
   })
 
   const toggleSelectAll = () => {

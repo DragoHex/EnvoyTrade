@@ -25,6 +25,7 @@ function formatCurrency(val: unknown): string {
 export function AccountRow(props: {
   follower: GroupFollower
   isMaster?: boolean
+  hasImbalance?: boolean
   targetGroupId?: string
   targetGroupName?: string
   actionsDisabled?: boolean
@@ -139,6 +140,9 @@ export function AccountRow(props: {
               onClick={() => setPending('rebalance')}
             >
               <ThanosBalanceIcon />
+              <Show when={props.hasImbalance}>
+                <span class="rebalance-notification-dot" data-testid="rebalance-notification-dot" />
+              </Show>
             </button>
             <button
               type="button"

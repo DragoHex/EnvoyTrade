@@ -5,6 +5,8 @@ import { StatusDot } from './StatusDot'
 export function GroupCard(props: {
   detail: GroupDetail
   status: 'ok' | 'error'
+  hasImbalance?: boolean
+  imbalancedFollowerIds?: Set<string>
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
   onToggleMasterActive: (next: boolean) => Promise<void> | void
   onAction: (accountId: string, type: ActionType) => Promise<void>
@@ -13,10 +15,16 @@ export function GroupCard(props: {
   onRebalanceGroup?: (groupId: string, followerIds?: string[]) => Promise<void>
   onRebalanceAccount?: (accountId: string) => Promise<void>
 }) {
+  const groupStatus = () => {
+    if (props.status === 'error') return 'error'
+    if (props.hasImbalance) return 'warning'
+    return props.status
+  }
+
   return (
     <section data-testid="group-card">
       <h2>
-        {props.detail.name || props.detail.masterAccountId} <StatusDot status={props.status} />
+        {props.detail.name || props.detail.masterAccountId} <StatusDot status={groupStatus()} />
       </h2>
       <AccountTable
         master={{
@@ -37,6 +45,8 @@ export function GroupCard(props: {
           mtmBreakdown: props.detail.masterMtmBreakdown,
         }}
         followers={props.detail.followers}
+        hasImbalance={props.hasImbalance}
+        imbalancedFollowerIds={props.imbalancedFollowerIds}
         onToggleCopy={props.onToggleCopy}
         onToggleMasterActive={props.onToggleMasterActive}
         onAction={props.onAction}
