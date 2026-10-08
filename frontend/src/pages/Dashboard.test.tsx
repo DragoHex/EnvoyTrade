@@ -327,4 +327,98 @@ describe('Dashboard', () => {
     expect(detailsDrawers[1].textContent).toContain('INFY-F2')
     expect(detailsDrawers[1].textContent).not.toContain('TCS-F1')
   })
+
+  it('displays yellow group status dot and rebalance notification dots when active follower drift exists', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Alpha Group',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+    })
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 1,
+      followers_with_drift: 1,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Follower 1',
+          broker_account_id: 'ZY5678',
+          enabled: true,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NFO',
+              tradingsymbol: 'NIFTY26OCTFUT',
+              product: 'NRML',
+              lot_size: 50,
+              master_qty: 50,
+              target_qty: 50,
+              follower_qty: 0,
+              drift_qty: 50,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    })
+
+    render(() => <Dashboard />)
+
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    // Status dot next to group name should be yellow ("warning")
+    await waitFor(() => {
+      const heading = screen.getByRole('heading', { level: 2 })
+      const statusDot = within(heading).getByTestId('status-dot')
+      expect(statusDot).toHaveAttribute('data-status', 'warning')
+    })
+
+    // Rebalance buttons for master and follower f1 should have notification dots
+    const rebalanceButtons = screen.getAllByRole('button', { name: 'Rebalance' })
+    expect(within(rebalanceButtons[0]).getByTestId('rebalance-notification-dot')).toBeInTheDocument()
+    expect(within(rebalanceButtons[1]).getByTestId('rebalance-notification-dot')).toBeInTheDocument()
+  })
+
+  it('keeps green group status dot and no notification dots when group is in equilibrium', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Alpha Group',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+    })
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 1,
+      followers_with_drift: 0,
+      drifts: [],
+    })
+
+    render(() => <Dashboard />)
+
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    const heading = screen.getByRole('heading', { level: 2 })
+    const statusDot = within(heading).getByTestId('status-dot')
+    expect(statusDot).toHaveAttribute('data-status', 'ok')
+
+    const rebalanceButtons = screen.getAllByRole('button', { name: 'Rebalance' })
+    expect(within(rebalanceButtons[0]).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
+    expect(within(rebalanceButtons[1]).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
+  })
 })
+

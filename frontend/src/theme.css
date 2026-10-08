@@ -204,6 +204,7 @@ tr[data-disabled='true'] {
 }
 
 .icon-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -217,6 +218,17 @@ tr[data-disabled='true'] {
   background: transparent;
   color: var(--color-text);
   transition: background-color 0.15s;
+}
+.rebalance-notification-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59f00;
+  box-shadow: 0 0 0 1.5px var(--color-background, #fff);
+  pointer-events: none;
 }
 .icon-button svg {
   width: 18px;
@@ -2285,6 +2297,10 @@ nav a.user-badge-link.active:hover,
   color: var(--color-accent);
   background: var(--color-surface);
   border-color: var(--color-accent);
+}
+.mtm-breakdown-trigger-btn[data-active='true']::after,
+.mtm-breakdown-trigger-btn[data-active='true']::before {
+  display: none !important;
 }
 
 .mtm-breakdown-popover {

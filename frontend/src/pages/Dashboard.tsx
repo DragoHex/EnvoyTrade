@@ -1,6 +1,7 @@
 import { createResource, For, Show, onMount, onCleanup } from 'solid-js'
 import {
   getGroupDetail,
+  getGroupRebalanceDiff,
   getGroups,
   patchAccount,
   postAction,
@@ -17,6 +18,10 @@ import { registerSyncSubscriber, triggerSyncNow } from '../utils/syncBus'
 
 function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
+  const [diff, { refetch: refetchDiff }] = createResource(
+    () => props.id,
+    (groupId) => getGroupRebalanceDiff(groupId).catch(() => null)
+  )
 
   onMount(() => {
     const unregister = registerSyncSubscriber(() => {
@@ -25,9 +30,39 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
     onCleanup(unregister)
   })
 
+  const allDriftingFollowerIds = () => {
+    const dList = diff()?.drifts ?? []
+    const ids = new Set<string>()
+    for (const d of dList) {
+      if ((d.symbols ?? []).length > 0) {
+        ids.add(d.account_id)
+      }
+    }
+    return ids
+  }
+
+  const hasActiveImbalance = () => {
+    const dList = diff()?.drifts ?? []
+    const followers = detail()?.followers ?? []
+    const enabledMap = new Map<string, boolean>()
+    for (const f of followers) {
+      enabledMap.set(f.accountId, f.enabled)
+    }
+    for (const d of dList) {
+      if ((d.symbols ?? []).length > 0) {
+        const isEnabled = enabledMap.has(d.account_id) ? enabledMap.get(d.account_id)! : d.enabled
+        if (isEnabled) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
   const onToggleCopy = async (accountId: string, next: boolean) => {
     await patchAccount(accountId, { enabled: next })
     refetch()
+    refetchDiff()
     triggerSyncNow()
   }
 
@@ -35,6 +70,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
     const masterId = detail()?.masterId || props.id
     await patchAccount(masterId, { active: next })
     refetch()
+    refetchDiff()
     triggerSyncNow()
   }
 
@@ -43,6 +79,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await postAction(accountId, type)
     } finally {
       refetch()
+      refetchDiff()
       triggerSyncNow()
     }
   }
@@ -52,6 +89,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await squareOffGroup(groupId, symbols ? { symbols } : undefined)
     } finally {
       refetch()
+      refetchDiff()
       triggerSyncNow()
     }
   }
@@ -61,6 +99,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await squareOffAccount(accountId, symbols ? { symbols } : undefined)
     } finally {
       refetch()
+      refetchDiff()
       triggerSyncNow()
     }
   }
@@ -70,6 +109,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await rebalanceGroup(groupId, followerIds ? { follower_ids: followerIds } : undefined)
     } finally {
       refetch()
+      refetchDiff()
       triggerSyncNow()
     }
   }
@@ -79,6 +119,7 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       await rebalanceAccount(accountId)
     } finally {
       refetch()
+      refetchDiff()
       triggerSyncNow()
     }
   }
@@ -93,6 +134,8 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
       <GroupCard
         detail={detail()!}
         status={props.status}
+        hasImbalance={hasActiveImbalance()}
+        imbalancedFollowerIds={allDriftingFollowerIds()}
         onToggleCopy={onToggleCopy}
         onToggleMasterActive={onToggleMasterActive}
         onAction={onAction}

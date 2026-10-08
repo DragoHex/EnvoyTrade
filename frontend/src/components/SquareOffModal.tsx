@@ -1,6 +1,7 @@
 import { createSignal, createResource, createEffect, For, Show } from 'solid-js'
 import { getAccountOrders, squareOffAccount, squareOffGroup } from '../api'
 import { SyncIcon, CropSquareIcon, InfoIcon } from './icons'
+import { useEscapeKey } from '../utils/useEscapeKey'
 
 export interface SquareOffModalTarget {
   type: 'group' | 'account'
@@ -58,6 +59,12 @@ export function SquareOffModal(props: SquareOffModalProps) {
         setSelectedSymbols([])
       }
     }
+  })
+
+  useEscapeKey({
+    enabled: () => Boolean(props.open && props.target),
+    canDismiss: () => !submitting(),
+    onEscape: () => props.onCancel(),
   })
 
   const toggleSelectAll = () => {

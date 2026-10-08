@@ -102,4 +102,32 @@ describe('MtmBreakdownPopover', () => {
     await userEvent.click(triggerBtn)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  it('hides hover help text (data-tooltip and title) once popover window appears', async () => {
+    render(() => (
+      <MtmBreakdownPopover
+        totalMtm={200}
+        breakdown={{ MIS: 200, NRML: 0 }}
+      />
+    ))
+
+    const triggerBtn = screen.getByLabelText('View MTM breakdown')
+    expect(triggerBtn).toHaveAttribute('data-tooltip', 'View MTM breakdown')
+    expect(triggerBtn).toHaveAttribute('title', 'View MTM breakdown')
+
+    await userEvent.click(triggerBtn)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    // Hover help text is removed while popover is open
+    expect(triggerBtn).not.toHaveAttribute('data-tooltip')
+    expect(triggerBtn).not.toHaveAttribute('title')
+
+    await userEvent.click(triggerBtn)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    // Hover help text is restored when closed
+    expect(triggerBtn).toHaveAttribute('data-tooltip', 'View MTM breakdown')
+    expect(triggerBtn).toHaveAttribute('title', 'View MTM breakdown')
+  })
 })
+

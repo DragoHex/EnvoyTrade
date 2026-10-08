@@ -591,6 +591,75 @@ describe('AccountRow', () => {
     expect(screen.getByText('NRML')).toBeInTheDocument()
     expect(screen.getByText('₹1,000.00')).toBeInTheDocument()
   })
+
+  it('renders rebalance notification dot when master has imbalance', () => {
+    render(() => (
+      <AccountRow
+        follower={follower}
+        isMaster
+        hasImbalance={true}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
+    expect(within(rebalanceBtn).getByTestId('rebalance-notification-dot')).toBeInTheDocument()
+  })
+
+  it('does not render rebalance notification dot when master has no imbalance', () => {
+    render(() => (
+      <AccountRow
+        follower={follower}
+        isMaster
+        hasImbalance={false}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
+    expect(within(rebalanceBtn).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
+  })
+
+  it('renders rebalance notification dot when follower has imbalance', () => {
+    render(() => (
+      <AccountRow
+        follower={follower}
+        isMaster={false}
+        hasImbalance={true}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
+    expect(within(rebalanceBtn).getByTestId('rebalance-notification-dot')).toBeInTheDocument()
+  })
+
+  it('does not render rebalance notification dot when follower has no imbalance', () => {
+    render(() => (
+      <AccountRow
+        follower={follower}
+        isMaster={false}
+        hasImbalance={false}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
+    expect(within(rebalanceBtn).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
+  })
 })
+
 
 

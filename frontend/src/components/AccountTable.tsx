@@ -21,6 +21,8 @@ export function AccountTable(props: {
     mtmBreakdown?: Record<string, number | string>
   }
   followers: GroupFollower[]
+  hasImbalance?: boolean
+  imbalancedFollowerIds?: Set<string>
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void
   onToggleMasterActive: (next: boolean) => Promise<void> | void
   onAction: (accountId: string, type: ActionType) => Promise<void>
@@ -86,6 +88,7 @@ export function AccountTable(props: {
             mtmBreakdown: props.master.mtmBreakdown,
           }}
           isMaster
+          hasImbalance={props.hasImbalance}
           targetGroupId={props.master.groupId || props.master.masterId}
           targetGroupName={props.master.groupName}
           actionsDisabled={!props.master.active}
@@ -114,6 +117,7 @@ export function AccountTable(props: {
           {(f) => (
             <AccountRow
               follower={f()}
+              hasImbalance={props.imbalancedFollowerIds?.has(f().accountId)}
               actionsDisabled={!props.master.active || !f().enabled}
               toggleDisabled={!props.master.active || togglingId() === f().accountId}
               onToggleCopy={(next) => handleToggleFollower(f().accountId, next)}
