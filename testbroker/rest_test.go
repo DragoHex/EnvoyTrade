@@ -242,7 +242,69 @@ func TestREST_PositionsAndMargins(t *testing.T) {
 	if recMar.Code != http.StatusOK {
 		t.Fatalf("user/margins expected 200, got %d", recMar.Code)
 	}
+
+	var marResp struct {
+		Data struct {
+			Equity struct {
+				Utilised struct {
+					M2MRealised   float64 `json:"m2m_realised"`
+					M2MUnrealised float64 `json:"m2m_unrealised"`
+				} `json:"utilised"`
+			} `json:"equity"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recMar.Body.Bytes(), &marResp); err != nil {
+		t.Fatalf("unmarshal margins: %v", err)
+	}
 }
+
+func TestREST_Margins_UtilisedM2M_CalculatedFromPositions(t *testing.T) {
+	router, eng, _ := setupTestServer()
+	eng.config.ExecutionMode = "instant"
+
+	// Place BUY order: 150 NIFTY @ 25000 (Equity segment)
+	_, err := eng.PlaceOrder("MASTER01", "regular", OrderParams{
+		Exchange: "NFO", Tradingsymbol: "NIFTY26OCTFUT",
+		TransactionType: "BUY", Product: "NRML", OrderType: "MARKET", Quantity: 150,
+	})
+	if err != nil {
+		t.Fatalf("place order: %v", err)
+	}
+
+	// Move LTP to 25100 (+100 pts -> +15000 unrealised)
+	_ = eng.UpdateLTP("NFO", "NIFTY26OCTFUT", 25100.0)
+
+	// Fetch /user/margins
+	reqMar := httptest.NewRequest(http.MethodGet, "/user/margins", nil)
+	reqMar.Header.Set("Authorization", "token key_master:tok_master")
+	recMar := httptest.NewRecorder()
+	router.ServeHTTP(recMar, reqMar)
+	if recMar.Code != http.StatusOK {
+		t.Fatalf("user/margins expected 200, got %d", recMar.Code)
+	}
+
+	var resp struct {
+		Data struct {
+			Equity struct {
+				Utilised struct {
+					M2MRealised   float64 `json:"m2m_realised"`
+					M2MUnrealised float64 `json:"m2m_unrealised"`
+				} `json:"utilised"`
+			} `json:"equity"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recMar.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal margins: %v", err)
+	}
+
+	if resp.Data.Equity.Utilised.M2MUnrealised != 15000.0 {
+		t.Errorf("m2m_unrealised = %f, want 15000.0", resp.Data.Equity.Utilised.M2MUnrealised)
+	}
+	if resp.Data.Equity.Utilised.M2MRealised != 0.0 {
+		t.Errorf("m2m_realised = %f, want 0.0", resp.Data.Equity.Utilised.M2MRealised)
+	}
+}
+
 
 func TestREST_SessionToken(t *testing.T) {
 	router, _, _ := setupTestServer()

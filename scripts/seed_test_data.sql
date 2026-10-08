@@ -107,30 +107,31 @@ ON CONFLICT (follower_id) DO UPDATE SET
   group_id          = EXCLUDED.group_id;
 
 -- 4. Margins: Summary metrics for master account MASTER01
-INSERT INTO account_margins (account_id, net_qty, total_mtm, realized_pnl, account_value, status, updated_at)
+INSERT INTO account_margins (account_id, net_qty, total_mtm, realized_pnl, account_value, status, product_mtm, updated_at)
 VALUES
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', -890, 380.0000, 0.0000, 2163520.8400, 'online', now())
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', -890, 380.0000, 2320.0000, 2163520.8400, 'online', '{"NRML": "3250.0000", "MIS": "-2870.0000"}'::jsonb, now())
 ON CONFLICT (account_id) DO UPDATE SET
   net_qty       = EXCLUDED.net_qty,
   total_mtm     = EXCLUDED.total_mtm,
   realized_pnl  = EXCLUDED.realized_pnl,
   account_value = EXCLUDED.account_value,
   status        = EXCLUDED.status,
+  product_mtm   = EXCLUDED.product_mtm,
   updated_at    = EXCLUDED.updated_at;
 
 -- 5. Positions: Open and closed positions for master account MASTER01
 INSERT INTO account_positions (account_id, product, instrument, quantity, buy_price, sell_price, buy_quantity, sell_quantity, ltp, mtm, pnl, action, updated_at)
 VALUES
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26C10600', -100, 0.0000,    111.1000, 0,   100, 114.4000, -330.0000, -330.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26C10700', -100, 0.0000,    137.2000, 0,   100, 101.6000, 3560.0000, 3560.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26C11000', -200, 0.0000,    67.1000,  0,   200, 71.0000,  -780.0000, -780.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26P8400',  -200, 0.0000,    45.6500,  0,   200, 43.0000,   530.0000,  530.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26P8500',  -100, 0.0000,    53.2000,  0,   100, 50.5000,   270.0000,  270.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26P8600',  -100, 0.0000,    59.7000,  0,   100, 60.6000,   -90.0000,  -90.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26P8700',  -100, 0.0000,    53.9000,  0,   100, 73.3000, -1940.0000, -1940.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOILM21SEP26',       10,   9896.0000, 0.0000,   10,  0,   9580.0000, -3160.0000, -3160.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL17SEP26P8200',   0,    23.0000,   40.2000,  100, 100, 29.7000,  1720.0000, 1720.0000, 'exit', now()),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'CNC', 'CRUDEOIL21SEP26',        0,    9885.0000, 9891.0000, 100, 100, 9584.0000,  600.0000,  600.0000, 'exit', now())
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'NRML', 'CRUDEOIL17SEP26C10600', -100, 0.0000,    111.1000, 0,   100, 114.4000, -330.0000, -330.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'NRML', 'CRUDEOIL17SEP26C10700', -100, 0.0000,    137.2000, 0,   100, 101.6000, 3560.0000, 3560.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'NRML', 'CRUDEOIL17SEP26C11000', -200, 0.0000,    67.1000,  0,   200, 71.0000,  -780.0000, -780.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'NRML', 'CRUDEOIL17SEP26P8400',  -200, 0.0000,    45.6500,  0,   200, 43.0000,   530.0000,  530.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'NRML', 'CRUDEOIL17SEP26P8500',  -100, 0.0000,    53.2000,  0,   100, 50.5000,   270.0000,  270.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'MIS',  'CRUDEOIL17SEP26P8600',  -100, 0.0000,    59.7000,  0,   100, 60.6000,   -90.0000,  -90.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'MIS',  'CRUDEOIL17SEP26P8700',  -100, 0.0000,    53.9000,  0,   100, 73.3000, -1940.0000, -1940.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'MIS',  'CRUDEOILM21SEP26',       10,   9896.0000, 0.0000,   10,  0,   9580.0000, -3160.0000, -3160.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'MIS',  'CRUDEOIL17SEP26P8200',   0,    23.0000,   40.2000,  100, 100, 29.7000,  1720.0000, 1720.0000, 'exit', now()),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'MIS',  'CRUDEOIL21SEP26',        0,    9885.0000, 9891.0000, 100, 100, 9584.0000,  600.0000,  600.0000, 'exit', now())
 ON CONFLICT (account_id, product, instrument) DO UPDATE SET
   quantity      = EXCLUDED.quantity,
   buy_price     = EXCLUDED.buy_price,
@@ -171,13 +172,13 @@ INSERT INTO master_fills
    transaction_type, product, order_type, filled_quantity, average_price,
    status, order_timestamp, raw_payload, dispatch_state)
 VALUES
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-001', 'MCX', 'CRUDEOIL17SEP26C10600', 0, 'SELL', 'CNC', 'LIMIT', 100, 111.1000, 'COMPLETE', '2026-09-11 14:24:05+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-002', 'MCX', 'CRUDEOIL17SEP26C10700', 0, 'SELL', 'CNC', 'LIMIT', 100, 137.2000, 'COMPLETE', '2026-09-11 11:18:42+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-003', 'MCX', 'CRUDEOIL21SEP26',      0, 'SELL', 'CNC', 'LIMIT', 100, 9891.0000, 'COMPLETE', '2026-09-11 09:22:37+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-004', 'MCX', 'CRUDEOILM21SEP26',     0, 'BUY',  'CNC', 'LIMIT',  10, 9896.0000, 'COMPLETE', '2026-09-11 09:22:34+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-005', 'MCX', 'CRUDEOIL21SEP26',      0, 'BUY',  'CNC', 'LIMIT', 100, 9885.0000, 'COMPLETE', '2026-09-11 09:19:01+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-006', 'MCX', 'CRUDEOIL17SEP26P8200',  0, 'BUY',  'CNC', 'LIMIT', 100,   23.0000, 'COMPLETE', '2026-09-11 09:17:37+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-007', 'MCX', 'CRUDEOIL17SEP26P8700',  0, 'SELL', 'CNC', 'LIMIT', 100,   53.9000, 'COMPLETE', '2026-09-11 09:17:28+00', '{}'::jsonb, 'dispatched')
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-001', 'MCX', 'CRUDEOIL17SEP26C10600', 0, 'SELL', 'NRML', 'LIMIT', 100, 111.1000, 'COMPLETE', '2026-09-11 14:24:05+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-002', 'MCX', 'CRUDEOIL17SEP26C10700', 0, 'SELL', 'NRML', 'LIMIT', 100, 137.2000, 'COMPLETE', '2026-09-11 11:18:42+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-003', 'MCX', 'CRUDEOIL21SEP26',      0, 'SELL', 'MIS',  'LIMIT', 100, 9891.0000, 'COMPLETE', '2026-09-11 09:22:37+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-004', 'MCX', 'CRUDEOILM21SEP26',     0, 'BUY',  'MIS',  'LIMIT',  10, 9896.0000, 'COMPLETE', '2026-09-11 09:22:34+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-005', 'MCX', 'CRUDEOIL21SEP26',      0, 'BUY',  'MIS',  'LIMIT', 100, 9885.0000, 'COMPLETE', '2026-09-11 09:19:01+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-006', 'MCX', 'CRUDEOIL17SEP26P8200',  0, 'BUY',  'MIS',  'LIMIT', 100,   23.0000, 'COMPLETE', '2026-09-11 09:17:37+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-007', 'MCX', 'CRUDEOIL17SEP26P8700',  0, 'SELL', 'MIS',  'LIMIT', 100,   53.9000, 'COMPLETE', '2026-09-11 09:17:28+00', '{}'::jsonb, 'dispatched')
 ON CONFLICT (master_id, broker_order_id, filled_quantity, status) DO NOTHING;
 
 -- 8. Instruments: Canonical lot sizes and tick sizes for test contracts
