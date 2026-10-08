@@ -36,6 +36,7 @@ type AccountsStore interface {
 	CreateFollowLink(ctx context.Context, link domain.FollowLink) error
 	UpdateFollowLinkTerms(ctx context.Context, followerID uuid.UUID, cloneFactor decimal.Decimal, maxQtyPerOrder *int) error
 	SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error
+	GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDetail, error)
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
@@ -229,11 +230,8 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	var cloneFactor decimal.Decimal = decimal.NewFromInt(1)
 	var masterID uuid.UUID
 	var groupID uuid.UUID
+	var attachGroup bool
 	if req.Role == "follower" {
-		if req.MaxQtyPerOrder == nil || (req.MasterID == nil && req.GroupID == nil) {
-			writeError(w, http.StatusBadRequest, "maxQtyPerOrder, and masterId or groupId are required for a follower account")
-			return
-		}
 		rawCF := req.CloneFactor
 		if rawCF == nil {
 			rawCF = req.CapitalRatio
@@ -246,28 +244,42 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if req.GroupID != nil && *req.GroupID != "" {
-			groupID, err = uuid.Parse(*req.GroupID)
+		if req.GroupID != nil && strings.TrimSpace(*req.GroupID) != "" {
+			parsedGroup, err := uuid.Parse(strings.TrimSpace(*req.GroupID))
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid groupId")
 				return
 			}
-		}
-		if req.MasterID != nil && *req.MasterID != "" {
-			masterID, err = uuid.Parse(*req.MasterID)
+			gDetail, err := h.store.GroupDetail(r.Context(), parsedGroup)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					writeError(w, http.StatusBadRequest, "group not found")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed to resolve group")
+				return
+			}
+			groupID = gDetail.GroupID
+			masterID = gDetail.MasterID
+			attachGroup = true
+		} else if req.MasterID != nil && strings.TrimSpace(*req.MasterID) != "" {
+			parsedMaster, err := uuid.Parse(strings.TrimSpace(*req.MasterID))
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid masterId")
 				return
 			}
-			role, err := h.store.AccountRole(r.Context(), masterID)
-			if errors.Is(err, domain.ErrNotFound) || (err == nil && role != "master") {
-				writeError(w, http.StatusBadRequest, "invalid masterId")
+			gDetail, err := h.store.GroupDetail(r.Context(), parsedMaster)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					writeError(w, http.StatusBadRequest, "selected master has no group; create a group first")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed to resolve master group")
 				return
 			}
-			if err != nil && !errors.Is(err, domain.ErrNotFound) {
-				writeError(w, http.StatusInternalServerError, "failed to validate masterId")
-				return
-			}
+			groupID = gDetail.GroupID
+			masterID = gDetail.MasterID
+			attachGroup = true
 		}
 	}
 
@@ -337,36 +349,38 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		resp.IP = &validIP
 	}
 	if req.Role == "follower" {
-		maxQty := 0
-		if req.MaxQtyPerOrder != nil {
-			maxQty = *req.MaxQtyPerOrder
-		}
-		link := domain.FollowLink{
-			FollowerID:     id,
-			GroupID:        groupID,
-			MasterID:       masterID,
-			CloneFactor:    cloneFactor,
-			MaxQtyPerOrder: maxQty,
-			Enabled:        true,
-		}
-		if err := h.store.CreateFollowLink(r.Context(), link); err != nil {
-			writeError(w, http.StatusInternalServerError, "account created but failed to attach to group")
-			return
+		if attachGroup {
+			maxQty := 0
+			if req.MaxQtyPerOrder != nil {
+				maxQty = *req.MaxQtyPerOrder
+			}
+			link := domain.FollowLink{
+				FollowerID:     id,
+				GroupID:        groupID,
+				MasterID:       masterID,
+				CloneFactor:    cloneFactor,
+				MaxQtyPerOrder: maxQty,
+				Enabled:        true,
+			}
+			if err := h.store.CreateFollowLink(r.Context(), link); err != nil {
+				writeError(w, http.StatusInternalServerError, "account created but failed to attach to group")
+				return
+			}
+			if masterID != uuid.Nil {
+				masterIDStr := masterID.String()
+				resp.MasterID = &masterIDStr
+			}
+			if groupID != uuid.Nil {
+				groupIDStr := groupID.String()
+				resp.GroupID = &groupIDStr
+			}
+			cloneFactorStr := cloneFactor.String()
+			resp.CloneFactor = &cloneFactorStr
+			resp.MaxQtyPerOrder = req.MaxQtyPerOrder
 		}
 		if h.followerRegistrar != nil {
 			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 		}
-		if masterID != uuid.Nil {
-			masterIDStr := masterID.String()
-			resp.MasterID = &masterIDStr
-		}
-		if groupID != uuid.Nil {
-			groupIDStr := groupID.String()
-			resp.GroupID = &groupIDStr
-		}
-		cloneFactorStr := cloneFactor.String()
-		resp.CloneFactor = &cloneFactorStr
-		resp.MaxQtyPerOrder = req.MaxQtyPerOrder
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -386,6 +400,7 @@ type patchAccountRequest struct {
 	AccessToken    *string `json:"accessToken"`
 	Password       *string `json:"password"`
 	TotpSecret     *string `json:"totpSecret"`
+	GroupID        *string `json:"groupId"`
 }
 
 // writePatchStoreError writes the appropriate error response for a store
@@ -449,15 +464,91 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		resp["enabled"] = *req.Enabled
 		updated = true
 	}
-	if req.CloneFactor != nil || req.CapitalRatio != nil || req.MaxQtyPerOrder != nil {
-		linkResp, ok := h.applyFollowLinkTerms(w, r, id, req)
-		if !ok {
+	if req.GroupID != nil {
+		role, err := h.store.AccountRole(r.Context(), id)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "account not found")
 			return
 		}
-		for k, v := range linkResp {
-			resp[k] = v
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check account role")
+			return
 		}
-		updated = true
+		if role != "follower" {
+			writeError(w, http.StatusBadRequest, "group can only be set on follower accounts")
+			return
+		}
+
+		rawGroupID := strings.TrimSpace(*req.GroupID)
+		if rawGroupID == "" {
+			// Detach from current group if any
+			if err := h.store.DeleteFollowLink(r.Context(), id); err != nil && !errors.Is(err, domain.ErrNotFound) {
+				writeError(w, http.StatusInternalServerError, "failed to detach from group")
+				return
+			}
+			resp["groupId"] = nil
+			resp["masterId"] = nil
+			resp["groupName"] = nil
+			updated = true
+		} else {
+			parsedGroupID, err := uuid.Parse(rawGroupID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid groupId")
+				return
+			}
+			gDetail, err := h.store.GroupDetail(r.Context(), parsedGroupID)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					writeError(w, http.StatusBadRequest, "group not found")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed to resolve group")
+				return
+			}
+
+			// Delete existing link if present, then insert new link
+			_ = h.store.DeleteFollowLink(r.Context(), id)
+			cf := decimal.NewFromInt(1)
+			if req.CloneFactor != nil && strings.TrimSpace(*req.CloneFactor) != "" {
+				if parsedCF, err := decimal.NewFromString(strings.TrimSpace(*req.CloneFactor)); err == nil && parsedCF.Sign() > 0 {
+					cf = parsedCF
+				}
+			}
+			maxQty := 0
+			if req.MaxQtyPerOrder != nil {
+				maxQty = *req.MaxQtyPerOrder
+			}
+			err = h.store.CreateFollowLink(r.Context(), domain.FollowLink{
+				FollowerID:     id,
+				GroupID:        gDetail.GroupID,
+				MasterID:       gDetail.MasterID,
+				CloneFactor:    cf,
+				MaxQtyPerOrder: maxQty,
+				Enabled:        true,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to attach account to group")
+				return
+			}
+			resp["groupId"] = gDetail.GroupID.String()
+			resp["groupName"] = gDetail.GroupName
+			resp["masterId"] = gDetail.MasterID.String()
+			resp["cloneFactor"] = cf.String()
+			resp["maxQtyPerOrder"] = req.MaxQtyPerOrder
+			updated = true
+		}
+	}
+	if req.CloneFactor != nil || req.CapitalRatio != nil || req.MaxQtyPerOrder != nil {
+		if req.GroupID == nil { // only apply if not already handled by GroupID above
+			linkResp, ok := h.applyFollowLinkTerms(w, r, id, req)
+			if !ok {
+				return
+			}
+			for k, v := range linkResp {
+				resp[k] = v
+			}
+			updated = true
+		}
 	}
 	if req.Status != nil {
 		status, err := domain.ParseAccountStatus(*req.Status)

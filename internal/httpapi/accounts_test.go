@@ -137,6 +137,68 @@ func TestPatchAccount_CloneFactor_UpdatesFollowLinkTerms(t *testing.T) {
 	}
 }
 
+func TestPatchAccount_AssignGroupID_Succeeds(t *testing.T) {
+	follower := uuid.New()
+	groupID := uuid.New()
+	masterID := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{follower: "follower"},
+		accounts:     []domain.Account{{ID: follower, Role: "follower"}},
+		groupDetails: map[uuid.UUID]domain.GroupDetail{
+			groupID: {
+				GroupID:   groupID,
+				GroupName: "Target Group",
+				MasterID:  masterID,
+			},
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"groupId":     groupID.String(),
+		"cloneFactor": "2.0",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createFollowLinkArgs) != 1 {
+		t.Fatalf("expected 1 CreateFollowLink call, got %d", len(store.createFollowLinkArgs))
+	}
+	link := store.createFollowLinkArgs[0]
+	if link.FollowerID != follower || link.GroupID != groupID || link.MasterID != masterID || link.CloneFactor.String() != "2" {
+		t.Errorf("unexpected link: %+v", link)
+	}
+}
+
+func TestPatchAccount_DetachGroupID_Succeeds(t *testing.T) {
+	follower := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{follower: "follower"},
+		accounts:     []domain.Account{{ID: follower, Role: "follower"}},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"groupId": "",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["groupId"] != nil {
+		t.Errorf("expected groupId null in response, got %v", resp["groupId"])
+	}
+}
+
 func TestPatchAccount_CloneFactorOnMaster_Returns400(t *testing.T) {
 	master := uuid.New()
 	store := &stubStore{
@@ -461,21 +523,64 @@ func TestPostAccount_FollowerDefaultCloneFactor_DefaultsToOne(t *testing.T) {
 	}
 }
 
-func TestPostAccount_FollowerMissingMasterID_Returns400(t *testing.T) {
+func TestPostAccount_FollowerWithoutGroup_Succeeds(t *testing.T) {
 	store := &stubStore{}
-	r := httpapi.NewRouter(store, &stubActionEngine{})
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
 
 	body, _ := json.Marshal(map[string]any{
 		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
-		"cloneFactor": "0.5", "maxQtyPerOrder": 10,
 		"ip": "192.168.1.100",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createFollowLinkArgs) != 0 {
+		t.Errorf("expected 0 CreateFollowLink calls for unassigned follower, got %d", len(store.createFollowLinkArgs))
+	}
+	if len(registrar.registered) != 1 {
+		t.Errorf("expected follower to register with pool, got %d", len(registrar.registered))
+	}
+}
+
+func TestPostAccount_FollowerWithGroupID_Succeeds(t *testing.T) {
+	groupID := uuid.New()
+	masterID := uuid.New()
+	store := &stubStore{
+		groupDetails: map[uuid.UUID]domain.GroupDetail{
+			groupID: {
+				GroupID:         groupID,
+				GroupName:       "Alpha Group",
+				MasterID:        masterID,
+				MasterAccountID: "ZX1234",
+				MasterActive:    true,
+			},
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
+		"ip": "192.168.1.100", "groupId": groupID.String(),
+		"cloneFactor": "1.5",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createFollowLinkArgs) != 1 {
+		t.Fatalf("expected 1 CreateFollowLink call, got %d", len(store.createFollowLinkArgs))
+	}
+	link := store.createFollowLinkArgs[0]
+	if link.GroupID != groupID || link.MasterID != masterID || link.CloneFactor.String() != "1.5" {
+		t.Errorf("unexpected link args: %+v", link)
 	}
 }
 

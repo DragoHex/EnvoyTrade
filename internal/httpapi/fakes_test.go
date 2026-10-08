@@ -26,8 +26,9 @@ type stubStore struct {
 	createGroupErr error
 	updateGroupErr error
 
-	detail    domain.GroupDetail
-	detailErr error
+	detail       domain.GroupDetail
+	detailErr    error
+	groupDetails map[uuid.UUID]domain.GroupDetail
 
 	setEnabledErr  error
 	setEnabledArgs []setEnabledCall
@@ -167,7 +168,17 @@ func (s *stubStore) GroupDetail(_ context.Context, id uuid.UUID) (domain.GroupDe
 	if s.detailErr != nil {
 		return domain.GroupDetail{}, s.detailErr
 	}
-	if s.detail.GroupID == uuid.Nil && s.detail.MasterID == uuid.Nil {
+	if s.groupDetails != nil {
+		if d, ok := s.groupDetails[id]; ok {
+			return d, nil
+		}
+	}
+	if s.detail.GroupID != uuid.Nil || s.detail.MasterID != uuid.Nil {
+		if s.detail.GroupID == id || s.detail.MasterID == id {
+			return s.detail, nil
+		}
+	}
+	if s.accountRoles != nil && s.accountRoles[id] == "master" {
 		return domain.GroupDetail{
 			GroupID:         id,
 			GroupName:       "Group " + id.String()[:8],
@@ -176,7 +187,7 @@ func (s *stubStore) GroupDetail(_ context.Context, id uuid.UUID) (domain.GroupDe
 			MasterActive:    true,
 		}, nil
 	}
-	return s.detail, nil
+	return domain.GroupDetail{}, domain.ErrNotFound
 }
 
 func (s *stubStore) CreateGroup(_ context.Context, id uuid.UUID, name string, masterID uuid.UUID) error {
