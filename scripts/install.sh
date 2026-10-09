@@ -136,6 +136,17 @@ if [ -f "${MAINT_SRC}" ]; then
     run_privileged chmod 755 /usr/local/bin/envoytrade-db-maintenance
 fi
 
+# Migration script source
+MIGRATE_SRC="${SCRIPT_DIR}/migrate_deployed_db.sh"
+if [ ! -f "${MIGRATE_SRC}" ]; then
+    MIGRATE_SRC="${SCRIPT_DIR}/../scripts/migrate_deployed_db.sh"
+fi
+if [ -f "${MIGRATE_SRC}" ]; then
+    echo "--> Installing database migration script to /usr/local/bin/envoytrade-db-migrate..."
+    run_privileged cp "${MIGRATE_SRC}" /usr/local/bin/envoytrade-db-migrate
+    run_privileged chmod 755 /usr/local/bin/envoytrade-db-migrate
+fi
+
 # 3. OS-Specific Installation
 if [ "${OS}" = "Darwin" ]; then
     # ==========================================
@@ -389,7 +400,7 @@ EOF
         PG_CONF_SRC="${SCRIPT_DIR}/../packaging/postgres/envoytrade-postgres.conf"
     fi
     if [ -f "${PG_CONF_SRC}" ]; then
-        for conf_d in /etc/postgresql/16/main/conf.d /etc/postgresql/conf.d; do
+        for conf_d in /etc/postgresql/*/main/conf.d /etc/postgresql/conf.d; do
             if [ -d "${conf_d}" ]; then
                 echo "--> Installing canonical PostgreSQL tuning configuration to ${conf_d}/envoytrade.conf..."
                 run_privileged cp "${PG_CONF_SRC}" "${conf_d}/envoytrade.conf"

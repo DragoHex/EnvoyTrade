@@ -96,6 +96,10 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 	}
 	out := make([]broker.Position, 0, len(positions.Net))
 	for _, p := range positions.Net {
+		posMtm := p.PnL
+		if posMtm == 0 && p.M2M != 0 {
+			posMtm = p.M2M
+		}
 		out = append(out, broker.Position{
 			Exchange:      p.Exchange,
 			Tradingsymbol: p.Tradingsymbol,
@@ -103,7 +107,7 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 			Quantity:      p.Quantity,
 			AveragePrice:  p.AveragePrice,
 			LastPrice:     p.LastPrice,
-			M2M:           p.M2M,
+			M2M:           posMtm,
 			PnL:           p.PnL,
 		})
 	}

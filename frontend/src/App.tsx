@@ -38,17 +38,21 @@ function TopNav(props: { children?: JSX.Element }) {
   return (
     <>
       <Show when={!isNotFound()}>
-        <nav>
-          <span class="brand-title">
-            <EnvoyLogo size={24} />
-            <span>EnvoyTrade</span>
-          </span>
+        <nav class="app-nav">
+          <div class="nav-brand-bar">
+            <span class="brand-title">
+              <EnvoyLogo size={24} />
+              <span>EnvoyTrade</span>
+            </span>
+          </div>
           <Show when={isAuthenticated()}>
-            <A href="/" end>Dashboard</A>
-            <A href="/accounts">Accounts</A>
-            <A href="/analytics">Analytics</A>
+            <div class="nav-links">
+              <A href="/" end>Dashboard</A>
+              <A href="/accounts">Accounts</A>
+              <A href="/analytics">Analytics</A>
+            </div>
           </Show>
-          <div style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', gap: '0.75rem' }}>
+          <div class="nav-actions">
             <Show when={isAuthenticated()}>
               <A
                 href="/settings"

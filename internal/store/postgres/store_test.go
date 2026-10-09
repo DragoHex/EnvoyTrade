@@ -98,6 +98,16 @@ func seedAccountWithSecret(t *testing.T, s *postgres.Store, role string, apiSecr
 	return id, id.String()
 }
 
+func seedAccountWithoutGroup(t *testing.T, s *postgres.Store, role string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	ip := fmt.Sprintf("10.0.%d.%d", id[0], id[1])
+	if err := s.CreateAccount(context.Background(), id, "Account "+id.String()[:8], role, "zerodha", id.String(), "test-api-key", "test-secret", ip); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	return id
+}
+
 func TestMigrate_AppliesCleanlyOnEmptyDatabase(t *testing.T) {
 	newTestStore(t) // Migrate runs inside newTestStore; failure fails the test.
 }

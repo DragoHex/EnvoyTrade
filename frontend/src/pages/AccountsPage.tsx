@@ -254,75 +254,77 @@ export function AccountsPage() {
         <Show when={sortedGroups()} fallback={<LoadingTimeout><TableSkeleton /></LoadingTimeout>}>
           {(gs) => (
             <section class="accounts-card">
-              <table class="groups-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Master Account</th>
-                    <th>Broker</th>
-                    <th>Follower Count</th>
-                    <th class="col-status">Status</th>
-                    <th class="col-actions"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <Index each={gs()}>
-                    {(g) => (
-                      <tr
-                        class="clickable-row"
-                        data-testid="group-row"
-                        onClick={() => navigate(`/accounts/groups/${g().id || g().masterId}`)}
-                      >
-                        <td>{g().name || '—'}</td>
-                        <td>
-                          {g().masterName
-                            ? `${g().masterName} (${g().masterAccountId})`
-                            : g().masterAccountId}
-                        </td>
-                        <td>
-                          <BrokerLogo broker={g().broker} />
-                        </td>
-                        <td>{g().followerCount}</td>
-                        <td class="col-status">
-                          <span class="status-cell-centered" title={g().status}>
-                            <StatusDot status={g().status} />
-                          </span>
-                        </td>
-                        <td class="col-actions">
-                          <div class="table-actions">
-                            <button
-                              type="button"
-                              class="icon-button"
-                              aria-label="Edit"
-                              data-tooltip="Edit Group"
-                              title="Edit Group"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setEditingGroup(g())
-                              }}
-                            >
-                              <EditIcon />
-                            </button>
-                            <button
-                              type="button"
-                              class="icon-button icon-button-danger"
-                              aria-label="Delete"
-                              data-tooltip="Delete Group"
-                              title="Delete Group"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setPendingAction({ type: 'delete_group', group: g() })
-                              }}
-                            >
-                              <TrashIcon />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Index>
-                </tbody>
-              </table>
+              <div class="account-table-container">
+                <table class="groups-table">
+                  <thead>
+                    <tr>
+                      <th class="col-name">Name</th>
+                      <th class="col-master">Master Account</th>
+                      <th class="col-broker">Broker</th>
+                      <th class="col-followers">Follower Count</th>
+                      <th class="col-status">Status</th>
+                      <th class="col-actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <Index each={gs()}>
+                      {(g) => (
+                        <tr
+                          class="clickable-row"
+                          data-testid="group-row"
+                          onClick={() => navigate(`/accounts/groups/${g().id || g().masterId}`)}
+                        >
+                          <td class="col-name">{g().name || '—'}</td>
+                          <td class="col-master">
+                            {g().masterName
+                              ? `${g().masterName} (${g().masterAccountId})`
+                              : g().masterAccountId}
+                          </td>
+                          <td class="col-broker">
+                            <BrokerLogo broker={g().broker} />
+                          </td>
+                          <td class="col-followers">{g().followerCount}</td>
+                          <td class="col-status">
+                            <span class="status-cell-centered" title={g().status}>
+                              <StatusDot status={g().status} />
+                            </span>
+                          </td>
+                          <td class="col-actions">
+                            <div class="table-actions">
+                              <button
+                                type="button"
+                                class="icon-button"
+                                aria-label="Edit"
+                                data-tooltip="Edit Group"
+                                title="Edit Group"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingGroup(g())
+                                }}
+                              >
+                                <EditIcon />
+                              </button>
+                              <button
+                                type="button"
+                                class="icon-button icon-button-danger"
+                                aria-label="Delete"
+                                data-tooltip="Delete Group"
+                                title="Delete Group"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setPendingAction({ type: 'delete_group', group: g() })
+                                }}
+                              >
+                                <TrashIcon />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Index>
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
         </Show>

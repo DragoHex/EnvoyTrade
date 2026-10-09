@@ -54,6 +54,13 @@ describe('App authentication & navigation', () => {
     expect(userBadge).toHaveAttribute('href', '/settings')
     expect(userBadge).not.toHaveAttribute('data-tooltip')
 
+    // Verify semantic navigation layout containers
+    const nav = screen.getByRole('navigation')
+    expect(nav).toHaveClass('app-nav')
+    expect(nav.querySelector('.nav-brand-bar')).toBeInTheDocument()
+    expect(nav.querySelector('.nav-links')).toBeInTheDocument()
+    expect(nav.querySelector('.nav-actions')).toBeInTheDocument()
+
     const signOutBtn = screen.getByRole('button', { name: 'Sign Out' })
     expect(signOutBtn).toBeInTheDocument()
     expect(signOutBtn).toHaveAttribute('data-tooltip', 'Sign Out')

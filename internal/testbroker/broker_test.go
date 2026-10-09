@@ -154,3 +154,43 @@ func TestBroker_GetPositions_MTMCalculation(t *testing.T) {
 	}
 }
 
+func TestBroker_GetPositions_OvernightZeroM2M(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"status": "success",
+			"data": {
+				"net": [
+					{
+						"tradingsymbol": "CRUDEOIL26OCT10200CE",
+						"exchange": "MCX",
+						"product": "NRML",
+						"quantity": -2,
+						"average_price": 72.65,
+						"last_price": 20.40,
+						"pnl": 10450.0,
+						"m2m": 0.0
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	b := NewLiveBroker("key1", "tok1", server.URL, nil)
+	positions, err := b.GetPositions(context.Background())
+	if err != nil {
+		t.Fatalf("GetPositions failed: %v", err)
+	}
+	if len(positions) != 1 {
+		t.Fatalf("expected 1 position, got %d", len(positions))
+	}
+	if positions[0].M2M != 10450.0 {
+		t.Errorf("expected M2M = 10450.0 (from PnL), got %f", positions[0].M2M)
+	}
+	if positions[0].PnL != 10450.0 {
+		t.Errorf("expected PnL = 10450.0, got %f", positions[0].PnL)
+	}
+}
+

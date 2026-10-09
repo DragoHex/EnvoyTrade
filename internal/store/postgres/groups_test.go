@@ -17,8 +17,8 @@ import (
 func TestGroups_ListsMastersWithFollowerCountAndStatus(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	master := seedAccount(t, s, "master")
-	otherMaster := seedAccount(t, s, "master")
+	master := seedAccountWithoutGroup(t, s, "master")
+	otherMaster := seedAccountWithoutGroup(t, s, "master")
 	if err := s.CreateGroup(ctx, master, "Master Group", master); err != nil {
 		t.Fatalf("CreateGroup master: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestSetFollowLinkEnabled_UnknownFollowerReturnsErrNotFound(t *testing.T) {
 func TestGroups_NewMasterIsActiveByDefault(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	master := seedAccount(t, s, "master")
+	master := seedAccountWithoutGroup(t, s, "master")
 	if err := s.CreateGroup(ctx, master, "Master Group", master); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestGroups_NewMasterIsActiveByDefault(t *testing.T) {
 func TestGroupDetail_MasterActiveReflectsAccountsActive(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	master := seedAccount(t, s, "master")
+	master := seedAccountWithoutGroup(t, s, "master")
 	if err := s.CreateGroup(ctx, master, "Master Group", master); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestLatestMasterFill_NoneReturnsErrNotFound(t *testing.T) {
 func TestCreateGroup_DuplicateMasterReturnsErrDuplicate(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	master := seedAccount(t, s, "master")
+	master := seedAccountWithoutGroup(t, s, "master")
 	if err := s.CreateGroup(ctx, master, "First Group", master); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
@@ -384,8 +384,8 @@ func TestCreateGroup_DuplicateMasterReturnsErrDuplicate(t *testing.T) {
 func TestUpdateGroup_SwapMasterBothAssigned_SwapsSuccessfully(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	master1 := seedAccount(t, s, "master")
-	master2 := seedAccount(t, s, "master")
+	master1 := seedAccountWithoutGroup(t, s, "master")
+	master2 := seedAccountWithoutGroup(t, s, "master")
 
 	// Confirm masters initially have no group assigned
 	initialAccs, err := s.Accounts(ctx, []uuid.UUID{master1, master2})
@@ -455,8 +455,8 @@ func TestUpdateGroup_SwapMasterBothAssigned_SwapsSuccessfully(t *testing.T) {
 func TestUpdateGroup_SwapMasterTargetMasterHasOpenPositions_ReturnsErrMasterHasOpenPositions(t *testing.T) {
 	s, pool := newTestStoreWithPool(t)
 	ctx := context.Background()
-	master1 := seedAccount(t, s, "master")
-	master2 := seedAccount(t, s, "master")
+	master1 := seedAccountWithoutGroup(t, s, "master")
+	master2 := seedAccountWithoutGroup(t, s, "master")
 	if err := s.CreateGroup(ctx, master1, "Group 1", master1); err != nil {
 		t.Fatalf("CreateGroup master1: %v", err)
 	}
@@ -478,8 +478,8 @@ func TestUpdateGroup_SwapMasterTargetMasterHasOpenPositions_ReturnsErrMasterHasO
 func TestUpdateGroup_SwapMasterBlockedWithOpenPositions(t *testing.T) {
 	s, pool := newTestStoreWithPool(t)
 	ctx := context.Background()
-	master1 := seedAccount(t, s, "master")
-	master2 := seedAccount(t, s, "master")
+	master1 := seedAccountWithoutGroup(t, s, "master")
+	master2 := seedAccountWithoutGroup(t, s, "master")
 	if err := s.CreateGroup(ctx, master1, "Group 1", master1); err != nil {
 		t.Fatalf("CreateGroup master1: %v", err)
 	}

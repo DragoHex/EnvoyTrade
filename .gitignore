@@ -20,3 +20,5 @@ secrets.json
 scratch/
 artifacts/
 testbroker/bin/
+backups/
+*.sql.gz
