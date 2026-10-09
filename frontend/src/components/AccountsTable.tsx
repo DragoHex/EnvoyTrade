@@ -40,6 +40,8 @@ export function AccountsTable(props: {
   const columns: Column<Account>[] = [
     {
       header: '',
+      headerClass: 'col-toggle',
+      cellClass: 'col-toggle',
       cell: (a) => (
         <CopyToggle
           enabled={a.active}
@@ -52,6 +54,8 @@ export function AccountsTable(props: {
     },
     {
       header: 'Name',
+      headerClass: 'col-name',
+      cellClass: 'col-name',
       cell: (a) => (
         <span class="account-name-cell" title={a.name || a.brokerAccountId}>
           {a.name || '—'}
@@ -70,14 +74,20 @@ export function AccountsTable(props: {
     },
     {
       header: 'Broker User ID',
+      headerClass: 'col-broker-id',
+      cellClass: 'col-broker-id',
       cell: (a) => a.brokerAccountId,
     },
     {
       header: 'Broker',
+      headerClass: 'col-broker',
+      cellClass: 'col-broker',
       cell: (a) => <BrokerLogo broker={a.broker} />,
     },
     {
       header: 'Group',
+      headerClass: 'col-group',
+      cellClass: 'col-group',
       cell: (a) => (
         <Show when={a.groupName || a.groupId || a.masterId} fallback={<span>—</span>}>
           <span>{a.groupName || a.groupId || a.masterId}</span>
@@ -86,14 +96,14 @@ export function AccountsTable(props: {
     },
     {
       header: 'Clone Factor',
-      headerClass: 'col-center',
-      cellClass: 'col-center',
+      headerClass: 'col-center col-clone-factor',
+      cellClass: 'col-center col-clone-factor',
       cell: (a) => a.cloneFactor ?? '—',
     },
     {
       header: 'Max Qty/Order',
-      headerClass: 'col-center',
-      cellClass: 'col-center',
+      headerClass: 'col-center col-max-qty',
+      cellClass: 'col-center col-max-qty',
       cell: (a) => (a.maxQtyPerOrder != null ? a.maxQtyPerOrder : '—'),
     },
     {
@@ -108,6 +118,8 @@ export function AccountsTable(props: {
     },
     {
       header: '',
+      headerClass: 'col-actions',
+      cellClass: 'col-actions',
       cell: (a) => (
         <div class="table-actions">
           <button
@@ -149,8 +161,8 @@ export function AccountsTable(props: {
     },
     {
       header: '',
-      headerClass: 'th-expand-col',
-      cellClass: 'row-expand-cell',
+      headerClass: 'th-expand-col col-expand',
+      cellClass: 'row-expand-cell col-expand',
       cell: (a) => (
         <button
           type="button"
@@ -167,22 +179,24 @@ export function AccountsTable(props: {
   ]
 
   return (
-    <DataTable
-      tableClass="accounts-table"
-      columns={columns}
-      rows={props.accounts}
-      rowKey={(a) => a.id}
-      emptyMessage={props.emptyMessage}
-      renderExpandedRow={(a) => (
-        <Show when={expandedId() === a.id}>
-          <AccountHoldingsRow
-            accountId={a.id}
-            accountName={a.name}
-            brokerAccountId={a.brokerAccountId}
-            colspan={columns.length}
-          />
-        </Show>
-      )}
-    />
+    <div class="account-table-container">
+      <DataTable
+        tableClass="accounts-table"
+        columns={columns}
+        rows={props.accounts}
+        rowKey={(a) => a.id}
+        emptyMessage={props.emptyMessage}
+        renderExpandedRow={(a) => (
+          <Show when={expandedId() === a.id}>
+            <AccountHoldingsRow
+              accountId={a.id}
+              accountName={a.name}
+              brokerAccountId={a.brokerAccountId}
+              colspan={columns.length}
+            />
+          </Show>
+        )}
+      />
+    </div>
   )
 }

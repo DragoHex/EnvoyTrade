@@ -246,75 +246,77 @@ export function GroupManagePage() {
         <h2>Group Members</h2>
         <Show when={members()} fallback={<LoadingTimeout><TableSkeleton /></LoadingTimeout>}>
           {(ms) => (
-            <table class="group-members-table">
-              <thead>
-                <tr>
-                  <th class="col-toggle"></th>
-                  <th class="col-name">Name</th>
-                  <th class="col-broker-id">Broker User ID</th>
-                  <th class="col-role">Role</th>
-                  <th class="col-clone-factor">Clone Factor</th>
-                  <th class="col-max-qty">Max Qty/Order</th>
-                  <th class="col-status">Status</th>
-                  <th class="col-actions"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <Index each={ms()}>
-                  {(a) => (
-                    <tr>
-                      <td class="col-toggle">
-                        <CopyToggle
-                          enabled={a().role === 'master' ? a().active : a().enabled}
-                          disabled={togglingId() === a().id}
-                          ariaLabel={`Toggle active for ${a().name || a().brokerAccountId}`}
-                          title={
-                            a().role === 'master'
-                              ? a().active
-                                ? 'Active — click to deactivate'
-                                : 'Inactive — click to activate'
-                              : a().enabled
-                                ? 'Enabled — click to disable'
-                                : 'Disabled — click to enable'
-                          }
-                          onToggle={(next) => handleToggleActive(a(), next)}
-                        />
-                      </td>
-                      <td class="col-name">{a().name || '—'}</td>
-                      <td class="col-broker-id">{a().brokerAccountId}</td>
-                      <td class="col-role">
-                        <span class="role-cell-centered">
-                          <RoleIcon role={a().role} />
-                        </span>
-                      </td>
-                      <td class="col-clone-factor">{a().role === 'follower' ? (a().cloneFactor ?? '—') : '—'}</td>
-                      <td class="col-max-qty">{a().role === 'follower' ? (a().maxQtyPerOrder ?? '—') : '—'}</td>
-                      <td class="col-status">
-                        <span class="status-cell-centered" title={a().status}>
-                          <StatusDot status={a().status} />
-                        </span>
-                      </td>
-                      <td class="col-actions">
-                        <div class="table-actions">
-                          <Show when={a().role === 'follower'}>
-                            <button
-                              type="button"
-                              class="icon-button icon-button-danger"
-                              aria-label="Remove from group"
-                              data-tooltip="Remove from Group"
-                              title="Remove from Group"
-                              onClick={() => setPendingRemove(a())}
-                            >
-                              <UserMinusIcon />
-                            </button>
-                          </Show>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Index>
-              </tbody>
-            </table>
+            <div class="account-table-container">
+              <table class="group-members-table">
+                <thead>
+                  <tr>
+                    <th class="col-toggle"></th>
+                    <th class="col-name">Name</th>
+                    <th class="col-broker-id">Broker User ID</th>
+                    <th class="col-role">Role</th>
+                    <th class="col-clone-factor">Clone Factor</th>
+                    <th class="col-max-qty">Max Qty/Order</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <Index each={ms()}>
+                    {(a) => (
+                      <tr>
+                        <td class="col-toggle">
+                          <CopyToggle
+                            enabled={a().role === 'master' ? a().active : a().enabled}
+                            disabled={togglingId() === a().id}
+                            ariaLabel={`Toggle active for ${a().name || a().brokerAccountId}`}
+                            title={
+                              a().role === 'master'
+                                ? a().active
+                                  ? 'Active — click to deactivate'
+                                  : 'Inactive — click to activate'
+                                : a().enabled
+                                  ? 'Enabled — click to disable'
+                                  : 'Disabled — click to enable'
+                            }
+                            onToggle={(next) => handleToggleActive(a(), next)}
+                          />
+                        </td>
+                        <td class="col-name">{a().name || '—'}</td>
+                        <td class="col-broker-id">{a().brokerAccountId}</td>
+                        <td class="col-role">
+                          <span class="role-cell-centered">
+                            <RoleIcon role={a().role} />
+                          </span>
+                        </td>
+                        <td class="col-clone-factor">{a().role === 'follower' ? (a().cloneFactor ?? '—') : '—'}</td>
+                        <td class="col-max-qty">{a().role === 'follower' ? (a().maxQtyPerOrder ?? '—') : '—'}</td>
+                        <td class="col-status">
+                          <span class="status-cell-centered" title={a().status}>
+                            <StatusDot status={a().status} />
+                          </span>
+                        </td>
+                        <td class="col-actions">
+                          <div class="table-actions">
+                            <Show when={a().role === 'follower'}>
+                              <button
+                                type="button"
+                                class="icon-button icon-button-danger"
+                                aria-label="Remove from group"
+                                data-tooltip="Remove from Group"
+                                title="Remove from Group"
+                                onClick={() => setPendingRemove(a())}
+                              >
+                                <UserMinusIcon />
+                              </button>
+                            </Show>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Index>
+                </tbody>
+              </table>
+            </div>
           )}
         </Show>
       </section>

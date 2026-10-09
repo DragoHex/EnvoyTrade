@@ -49,17 +49,16 @@ export function CreateGroupModal(props: {
         <div
           role="dialog"
           aria-label="Create Group"
-          class="confirm-modal"
-          style={{ width: '400px', padding: '1.5rem' }}
+          class="confirm-modal create-group-modal"
           onClick={(e) => e.stopPropagation()}
         >
-          <div class="drawer-header" style={{ "margin-bottom": "1rem" }}>
-            <h3 style={{ margin: 0 }}>Create Group</h3>
+          <div class="modal-header">
+            <h3>Create Group</h3>
             <button type="button" class="drawer-close" aria-label="Close" onClick={props.onClose}>
               ×
             </button>
           </div>
-          <form onSubmit={handleSubmit} class="drawer-form">
+          <form onSubmit={handleSubmit} class="modal-form">
             <label>
               Group Name
               <input

@@ -52,6 +52,7 @@ export function LoginPage() {
 
   return (
     <div
+      class="login-container"
       style={{
         display: 'flex',
         'align-items': 'center',
@@ -61,6 +62,7 @@ export function LoginPage() {
       }}
     >
       <div
+        class="login-card"
         style={{
           width: '100%',
           'max-width': '420px',

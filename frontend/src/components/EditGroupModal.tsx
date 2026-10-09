@@ -51,17 +51,16 @@ export function EditGroupModal(props: {
         <div
           role="dialog"
           aria-label="Edit Group"
-          class="confirm-modal"
-          style={{ width: '380px', padding: '1.25rem' }}
+          class="confirm-modal edit-group-modal"
           onClick={(e) => e.stopPropagation()}
         >
-          <div class="drawer-header" style={{ "margin-bottom": "0.75rem" }}>
-            <h3 style={{ margin: 0 }}>Edit Group</h3>
+          <div class="modal-header">
+            <h3>Edit Group</h3>
             <button type="button" class="drawer-close" aria-label="Close" onClick={props.onClose}>
               ×
             </button>
           </div>
-          <form onSubmit={handleSubmit} class="drawer-form" style={{ padding: 0, gap: '0.75rem' }}>
+          <form onSubmit={handleSubmit} class="modal-form">
             <label>
               Group Name
               <input
