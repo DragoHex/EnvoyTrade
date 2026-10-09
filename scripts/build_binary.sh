@@ -45,6 +45,8 @@ cp "${ARTIFACTS_DIR}/${TARGET_NAME}" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/scripts/install.sh" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/scripts/uninstall.sh" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/scripts/db_maintenance.sh" "${STAGE_DIR}/"
+cp "${ROOT_DIR}/scripts/migrate_deployed_db.sh" "${STAGE_DIR}/"
+cp "${ROOT_DIR}/scripts/migrate_deployed_db.sql" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/packaging/systemd/envoytrade.service" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/packaging/launchd/com.envoytrade.server.plist" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/packaging/postgres/envoytrade-postgres.conf" "${STAGE_DIR}/"
@@ -52,7 +54,7 @@ cp "${ROOT_DIR}/packaging/cron/envoytrade-maintenance.cron" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/packaging/envoytrade.env.example" "${STAGE_DIR}/"
 cp "${ROOT_DIR}/packaging/envoytrade.env.example" "${STAGE_DIR}/.env.example"
 
-chmod +x "${STAGE_DIR}/install.sh" "${STAGE_DIR}/uninstall.sh" "${STAGE_DIR}/db_maintenance.sh"
+chmod +x "${STAGE_DIR}/install.sh" "${STAGE_DIR}/uninstall.sh" "${STAGE_DIR}/db_maintenance.sh" "${STAGE_DIR}/migrate_deployed_db.sh"
 
 echo "--> Packaging release archive: ${ARTIFACTS_DIR}/${TARBALL_NAME}"
 tar -czf "${ARTIFACTS_DIR}/${TARBALL_NAME}" -C "${STAGE_DIR}" .

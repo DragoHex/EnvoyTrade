@@ -1,10 +1,12 @@
--- 0001_init.sql
--- Unified Baseline Schema for EnvoyTrade
--- Consolidates all tables, constraints, enums, and indexes in topological dependency order.
+-- scripts/migrate_deployed_db.sql
+-- Idempotent, non-destructive migration script for upgrading existing EnvoyTrade deployments.
+-- Retains and enriches all existing data (accounts, credentials, groups, links, fills, orders, positions).
 
+BEGIN;
+
+-- 1. Extensions & Enums
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 1. Enums
 DO $$ BEGIN
   CREATE TYPE account_role AS ENUM ('master', 'follower');
 EXCEPTION WHEN duplicate_object THEN NULL;
@@ -59,7 +61,7 @@ CREATE TABLE IF NOT EXISTS proxy_ips (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- 4. Broker Accounts (Masters and Followers)
+-- 4. Broker Accounts & Groups Tenant Scoping
 CREATE TABLE IF NOT EXISTS accounts (
     id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id               uuid REFERENCES users(id) ON DELETE CASCADE,
@@ -83,12 +85,25 @@ CREATE TABLE IF NOT EXISTS accounts (
     UNIQUE (broker, broker_user_id)
 );
 
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS api_key text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS api_secret text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS ip_address text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS encrypted_password text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS encrypted_totp_secret text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS access_token text NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS token_expires_at timestamptz;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS auth_status text NOT NULL DEFAULT 'unauthenticated';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS auth_error text NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts (user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_ip_address_unique
 ON accounts (ip_address)
 WHERE ip_address IS NOT NULL AND ip_address != '';
 
--- 5. Trading Groups (Strictly 1 Master Account per Group)
 CREATE TABLE IF NOT EXISTS groups (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     uuid REFERENCES users(id) ON DELETE CASCADE,
@@ -99,10 +114,24 @@ CREATE TABLE IF NOT EXISTS groups (
     CONSTRAINT groups_master_id_unique UNIQUE (master_id) DEFERRABLE INITIALLY DEFERRED
 );
 
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_groups_user_id ON groups (user_id);
 CREATE INDEX IF NOT EXISTS groups_master_id_idx ON groups (master_id);
 
--- 6. Follow Links (1 Follower assigned to 1 Group)
+-- Auto-link orphaned accounts and groups to the primary tenant user if available
+DO $$
+DECLARE
+    v_primary_user_id uuid;
+BEGIN
+    SELECT id INTO v_primary_user_id FROM users ORDER BY created_at ASC LIMIT 1;
+    IF v_primary_user_id IS NOT NULL THEN
+        UPDATE accounts SET user_id = v_primary_user_id WHERE user_id IS NULL;
+        UPDATE groups SET user_id = v_primary_user_id WHERE user_id IS NULL;
+    END IF;
+END $$;
+
+-- 5. Follow Links (Align capital_ratio -> clone_factor)
 CREATE TABLE IF NOT EXISTS follow_links (
     follower_id       uuid PRIMARY KEY REFERENCES accounts(id),
     group_id          uuid NOT NULL REFERENCES groups(id),
@@ -112,9 +141,19 @@ CREATE TABLE IF NOT EXISTS follow_links (
     effective_from    timestamptz NOT NULL DEFAULT now()
 );
 
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'follow_links' AND column_name = 'capital_ratio'
+    ) THEN
+        ALTER TABLE follow_links RENAME COLUMN capital_ratio TO clone_factor;
+    END IF;
+END $$;
+
+ALTER TABLE follow_links ALTER COLUMN clone_factor SET DEFAULT 1.0;
 CREATE INDEX IF NOT EXISTS follow_links_group_id_idx ON follow_links (group_id);
 
--- 7. Master Execution Signals & Follower Orders
+-- 6. Master Fills
 CREATE TABLE IF NOT EXISTS master_fills (
     id               bigserial PRIMARY KEY,
     master_id        uuid NOT NULL REFERENCES accounts(id),
@@ -138,6 +177,7 @@ CREATE TABLE IF NOT EXISTS master_fills (
 
 CREATE INDEX IF NOT EXISTS master_fills_master_id_idx ON master_fills (master_id, order_timestamp DESC);
 
+-- 7. Follower Orders (Relax master_fill_id, add columns, backfill from master_fills)
 CREATE TABLE IF NOT EXISTS follower_orders (
     id               bigserial PRIMARY KEY,
     master_fill_id   bigint REFERENCES master_fills(id),
@@ -164,10 +204,40 @@ CREATE TABLE IF NOT EXISTS follower_orders (
     UNIQUE (master_fill_id, follower_id)
 );
 
-CREATE INDEX IF NOT EXISTS follower_orders_follower_id_idx ON follower_orders (follower_id, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS follower_orders_follower_broker_order_id_idx ON follower_orders (follower_id, broker_order_id) WHERE broker_order_id IS NOT NULL;
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'follower_orders' AND column_name = 'master_fill_id' AND is_nullable = 'NO'
+    ) THEN
+        ALTER TABLE follower_orders ALTER COLUMN master_fill_id DROP NOT NULL;
+    END IF;
+END $$;
 
--- 8. Audit Event Trail
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'copy_trade';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS tradingsymbol text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS exchange text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS product text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS transaction_type text NOT NULL DEFAULT '';
+ALTER TABLE follower_orders ADD COLUMN IF NOT EXISTS order_type text NOT NULL DEFAULT '';
+
+-- Data Enrichment: Backfill historical follower orders from linked master fills
+UPDATE follower_orders fo
+SET tradingsymbol    = COALESCE(mf.tradingsymbol, ''),
+    exchange         = COALESCE(mf.exchange, ''),
+    product          = COALESCE(mf.product, ''),
+    transaction_type = COALESCE(mf.transaction_type, ''),
+    order_type       = COALESCE(mf.order_type, ''),
+    origin           = 'copy_trade'
+FROM master_fills mf
+WHERE fo.master_fill_id = mf.id
+  AND (fo.tradingsymbol = '' OR fo.tradingsymbol IS NULL);
+
+CREATE INDEX IF NOT EXISTS follower_orders_follower_id_idx ON follower_orders (follower_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS follower_orders_follower_broker_order_id_idx 
+ON follower_orders (follower_id, broker_order_id) 
+WHERE broker_order_id IS NOT NULL;
+
+-- 8. Order Events
 CREATE TABLE IF NOT EXISTS order_events (
     id                bigserial PRIMARY KEY,
     follower_order_id bigint REFERENCES follower_orders(id),
@@ -185,7 +255,7 @@ CREATE TABLE IF NOT EXISTS order_events (
 CREATE INDEX IF NOT EXISTS order_events_account_id_occurred_at_idx ON order_events (account_id, occurred_at);
 CREATE INDEX IF NOT EXISTS order_events_follower_order_id_id_idx ON order_events (follower_order_id, id);
 
--- 9. Instrument Master Cache
+-- 9. Instruments Master Catalog
 CREATE TABLE IF NOT EXISTS instruments (
     instrument_token bigint PRIMARY KEY,
     exchange         text NOT NULL,
@@ -198,7 +268,7 @@ CREATE TABLE IF NOT EXISTS instruments (
     UNIQUE (exchange, tradingsymbol)
 );
 
--- 10. Portfolio: Positions, Holdings, and Margins
+-- 10. Positions, Holdings, and Margins
 CREATE TABLE IF NOT EXISTS account_positions (
     id              bigserial PRIMARY KEY,
     account_id      uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -249,6 +319,10 @@ CREATE TABLE IF NOT EXISTS account_margins (
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE account_margins ADD COLUMN IF NOT EXISTS product_mtm jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE account_margins ADD COLUMN IF NOT EXISTS available_cash numeric(18,4) NOT NULL DEFAULT 0;
+ALTER TABLE account_margins ADD COLUMN IF NOT EXISTS available_margin numeric(18,4) NOT NULL DEFAULT 0;
+
 -- 11. Pending Order Updates (Stash Table for Zero-Lag Ingestion)
 CREATE TABLE IF NOT EXISTS pending_order_updates (
     broker_order_id  text PRIMARY KEY,
@@ -260,3 +334,5 @@ CREATE TABLE IF NOT EXISTS pending_order_updates (
 );
 
 CREATE INDEX IF NOT EXISTS pending_order_updates_received_at_idx ON pending_order_updates(received_at);
+
+COMMIT;

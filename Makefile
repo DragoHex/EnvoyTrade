@@ -12,7 +12,7 @@ CLOUDFLARED_LOG ?= /tmp/cloudflared.log
 TUNNEL_NAME ?= mytunnel
 
 .PHONY: build build-backend build-frontend run-backend run-frontend test test-integration e2e install \
-	db-up db-down db-seed db-flush seed flush db-maintenance \
+	db-up db-down db-seed db-flush seed flush db-maintenance db-migrate \
 	backend-up backend-down frontend-up frontend-down tunnel-up tunnel-down \
 	up up-all all-up up-everything down down-all all-down down-everything \
 	check-log-dir setup-log-dir check-encryption-key sqlc-generate
@@ -77,6 +77,9 @@ sync-instruments:
 
 db-maintenance:
 	DATABASE_URL="$(DATABASE_URL)" CONTAINER_NAME="$(DB_CONTAINER)" ./scripts/db_maintenance.sh
+
+db-migrate:
+	DATABASE_URL="$(DATABASE_URL)" CONTAINER_NAME="$(DB_CONTAINER)" ./scripts/migrate_deployed_db.sh
 
 
 # ============================================================================
