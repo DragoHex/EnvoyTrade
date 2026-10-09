@@ -103,6 +103,9 @@ type Position struct {
 	LastPrice       float64 `json:"last_price"`
 	Value           float64 `json:"value"`
 	PnL             float64 `json:"pnl"`
+	M2M             float64 `json:"m2m"`
+	Unrealised      float64 `json:"unrealised"`
+	Realised        float64 `json:"realised"`
 	BuyQuantity     int     `json:"buy_quantity"`
 	BuyPrice        float64 `json:"buy_price"`
 	SellQuantity    int     `json:"sell_quantity"`

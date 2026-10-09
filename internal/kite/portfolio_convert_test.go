@@ -295,5 +295,64 @@ func TestCalculatePositionMetrics_DynamicMTMScenarios(t *testing.T) {
 			t.Errorf("unexpected counts: %+v", summary)
 		}
 	})
+
+	t.Run("Scenario E: Overnight carry-forward positions where M2M is zero but PnL is non-zero", func(t *testing.T) {
+		positions := []kiteconnect.Position{
+			{
+				Exchange:      "MCX",
+				Tradingsymbol: "CRUDEOIL26OCT10200CE",
+				Product:       "NRML",
+				Quantity:      -2,
+				AveragePrice:  72.65,
+				LastPrice:     20.40,
+				M2M:           0.0,      // Zerodha returns 0.0 overnight / pre-market
+				PnL:           10450.00, // True floating PnL from entry
+			},
+			{
+				Exchange:      "MCX",
+				Tradingsymbol: "CRUDEOIL26OCT7500PE",
+				Product:       "NRML",
+				Quantity:      -2,
+				AveragePrice:  69.35,
+				LastPrice:     23.00,
+				M2M:           0.0,     // Zerodha returns 0.0 overnight / pre-market
+				PnL:           9270.00, // True floating PnL from entry
+			},
+		}
+		summary := kite.CalculatePositionMetrics(positions, margins)
+		expectedMtm := decimal.NewFromFloat(19720.00) // 10450 + 9270
+		if !summary.TotalMtm.Equal(expectedMtm) {
+			t.Errorf("TotalMtm = %s, want %s (must use PnL for open positions when M2M is 0)", summary.TotalMtm, expectedMtm)
+		}
+		if !summary.ProductMtm["NRML"].Equal(expectedMtm) {
+			t.Errorf("ProductMtm[NRML] = %s, want %s", summary.ProductMtm["NRML"], expectedMtm)
+		}
+		if summary.OpenPositions != 2 {
+			t.Errorf("OpenPositions = %d, want 2", summary.OpenPositions)
+		}
+	})
+}
+
+func TestConvertPosition_OvernightPosition(t *testing.T) {
+	accID := uuid.New()
+	p := kiteconnect.Position{
+		Product:       "NRML",
+		Tradingsymbol: "CRUDEOIL26OCT10200CE",
+		Quantity:      -2,
+		AveragePrice:  72.65,
+		LastPrice:     20.40,
+		M2M:           0.0,
+		PnL:           10450.00,
+	}
+
+	converted := kite.ConvertPosition(accID, p)
+
+	expectedPnl := decimal.NewFromFloat(10450.00)
+	if !converted.Mtm.Equal(expectedPnl) {
+		t.Errorf("converted.Mtm = %s, want %s (must reflect PnL when M2M is 0)", converted.Mtm, expectedPnl)
+	}
+	if !converted.Pnl.Equal(expectedPnl) {
+		t.Errorf("converted.Pnl = %s, want %s", converted.Pnl, expectedPnl)
+	}
 }
 

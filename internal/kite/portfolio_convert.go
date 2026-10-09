@@ -98,7 +98,11 @@ func CalculatePositionMetrics(positions []kiteconnect.Position, margins kiteconn
 		}
 		positionsRealisedSum = positionsRealisedSum.Add(decimal.NewFromFloat(p.Realised))
 
-		posMtm := decimal.NewFromFloat(p.M2M)
+		posMtmVal := p.PnL
+		if posMtmVal == 0 && p.M2M != 0 {
+			posMtmVal = p.M2M
+		}
+		posMtm := decimal.NewFromFloat(posMtmVal)
 		productMtm[prod] = productMtm[prod].Add(posMtm)
 		positionsMtmSum = positionsMtmSum.Add(posMtm)
 	}
@@ -164,6 +168,10 @@ func ConvertPosition(accountID uuid.UUID, p kiteconnect.Position) ConvertedPosit
 	if sellPrice == 0 && p.Quantity < 0 {
 		sellPrice = p.AveragePrice
 	}
+	posMtm := p.PnL
+	if posMtm == 0 && p.M2M != 0 {
+		posMtm = p.M2M
+	}
 	return ConvertedPosition{
 		AccountID:    accountID,
 		Product:      p.Product,
@@ -174,7 +182,7 @@ func ConvertPosition(accountID uuid.UUID, p kiteconnect.Position) ConvertedPosit
 		BuyQuantity:  p.BuyQuantity,
 		SellQuantity: p.SellQuantity,
 		Ltp:          decimal.NewFromFloat(p.LastPrice),
-		Mtm:          decimal.NewFromFloat(p.M2M),
+		Mtm:          decimal.NewFromFloat(posMtm),
 		Pnl:          decimal.NewFromFloat(p.PnL),
 		Action:       "exit",
 	}
