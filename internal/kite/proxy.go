@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -35,21 +36,70 @@ func (p ProxyConfig) url() (*url.URL, error) {
 	return url.Parse(u.String())
 }
 
-// RESTClientFor builds an *http.Client that egresses every request
-// through this account's dedicated proxy IP (PLAN.md §3.3).
-func RESTClientFor(cfg ProxyConfig) (*http.Client, error) {
+// TransportPool manages persistent, reusable *http.Transport instances keyed by proxy URL.
+// It ensures that TCP connections and TLS sessions through dedicated static proxies are kept
+// warm and reused across order placement, portfolio syncs, and reconciliation checks.
+type TransportPool struct {
+	mu         sync.RWMutex
+	transports map[string]*http.Transport
+}
+
+// DefaultTransportPool is the package-level transport pool shared across the application.
+var DefaultTransportPool = NewTransportPool()
+
+// NewTransportPool initializes an empty TransportPool.
+func NewTransportPool() *TransportPool {
+	return &TransportPool{
+		transports: make(map[string]*http.Transport),
+	}
+}
+
+// GetClient returns an *http.Client configured with a persistent *http.Transport for the given proxy.
+func (p *TransportPool) GetClient(cfg ProxyConfig) (*http.Client, error) {
 	proxyURL, err := cfg.url()
 	if err != nil {
 		return nil, fmt.Errorf("bad proxy config: %w", err)
 	}
+
+	key := proxyURL.String()
+
+	p.mu.RLock()
+	tr, ok := p.transports[key]
+	p.mu.RUnlock()
+	if ok {
+		return &http.Client{
+			Transport: tr,
+			Timeout:   10 * time.Second,
+		}, nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if tr, ok = p.transports[key]; ok {
+		return &http.Client{
+			Transport: tr,
+			Timeout:   10 * time.Second,
+		}, nil
+	}
+
+	tr = &http.Transport{
+		Proxy:               http.ProxyURL(proxyURL),
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: false},
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	p.transports[key] = tr
+
 	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:               http.ProxyURL(proxyURL),
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: false},
-			MaxIdleConnsPerHost: 4,
-		},
-		Timeout: 10 * time.Second,
+		Transport: tr,
+		Timeout:   10 * time.Second,
 	}, nil
+}
+
+// RESTClientFor builds or reuses an *http.Client that egresses requests
+// through this account's dedicated proxy IP using DefaultTransportPool (PLAN.md §3.3).
+func RESTClientFor(cfg ProxyConfig) (*http.Client, error) {
+	return DefaultTransportPool.GetClient(cfg)
 }
 
 // NewLiveBroker creates a live kite.Broker client for Kite Connect API calls,
