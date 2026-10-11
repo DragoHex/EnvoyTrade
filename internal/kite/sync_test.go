@@ -125,9 +125,17 @@ func TestSyncAccountPortfolio_WithValidAccessToken(t *testing.T) {
 		},
 		margins: kiteconnect.AllMargins{
 			Equity: kiteconnect.Margins{
+				Net: 200000.0,
 				Available: kiteconnect.AvailableMargins{
-					Cash:        100000.0,
+					Cash:        0.0,
 					LiveBalance: 95000.0,
+				},
+			},
+			Commodity: kiteconnect.Margins{
+				Net: 50000.0,
+				Available: kiteconnect.AvailableMargins{
+					Cash:        0.0,
+					LiveBalance: 10000.0,
 				},
 			},
 		},
@@ -158,8 +166,20 @@ func TestSyncAccountPortfolio_WithValidAccessToken(t *testing.T) {
 	if len(store.syncedPositions) != 1 || store.syncedPositions[0].Instrument != "NIFTY26SEPFUT" {
 		t.Fatalf("syncedPositions = %+v, want 1 position", store.syncedPositions)
 	}
-	if store.syncedMargins == nil || !store.syncedMargins.AccountValue.Equal(decimal.NewFromFloat(95000.0)) {
+	if store.syncedMargins == nil || !store.syncedMargins.AccountValue.Equal(decimal.NewFromFloat(250000.0)) {
 		t.Fatalf("syncedMargins = %+v", store.syncedMargins)
+	}
+	if !store.syncedMargins.AvailableMargin.Equal(decimal.NewFromFloat(250000.0)) {
+		t.Fatalf("syncedMargins AvailableMargin = %v, want 250000.0", store.syncedMargins.AvailableMargin)
+	}
+	if !store.syncedMargins.AvailableCash.Equal(decimal.NewFromFloat(105000.0)) {
+		t.Fatalf("syncedMargins AvailableCash = %v, want 105000.0", store.syncedMargins.AvailableCash)
+	}
+	if !store.syncedMargins.MarginBreakdown.Equity.Equal(decimal.NewFromFloat(200000.0)) {
+		t.Fatalf("syncedMargins MarginBreakdown.Equity = %v, want 200000.0", store.syncedMargins.MarginBreakdown.Equity)
+	}
+	if !store.syncedMargins.CashBreakdown.Equity.Equal(decimal.NewFromFloat(95000.0)) {
+		t.Fatalf("syncedMargins CashBreakdown.Equity = %v, want 95000.0", store.syncedMargins.CashBreakdown.Equity)
 	}
 }
 

@@ -3,6 +3,8 @@ package kite
 import (
 	"strings"
 
+	"envoytrade/internal/domain"
+
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -18,6 +20,8 @@ type AccountPortfolioSummary struct {
 	AvailableCash   decimal.Decimal
 	AvailableMargin decimal.Decimal
 	ProductMtm      map[string]decimal.Decimal
+	MarginBreakdown domain.SegmentBreakdown
+	CashBreakdown   domain.SegmentBreakdown
 }
 
 // ConvertedHolding holds database-ready holding fields.
@@ -125,8 +129,22 @@ func CalculatePositionMetrics(positions []kiteconnect.Position, margins kiteconn
 		realizedPnl = brokerM2MRealised
 	}
 
-	availableCash := decimal.NewFromFloat(margins.Equity.Available.Cash).Add(decimal.NewFromFloat(margins.Commodity.Available.Cash))
-	availableMargin := decimal.NewFromFloat(margins.Equity.Available.LiveBalance).Add(decimal.NewFromFloat(margins.Commodity.Available.LiveBalance))
+	eqMargin := decimal.NewFromFloat(margins.Equity.Net)
+	commMargin := decimal.NewFromFloat(margins.Commodity.Net)
+	availableMargin := eqMargin.Add(commMargin)
+
+	eqCash := decimal.NewFromFloat(margins.Equity.Available.LiveBalance)
+	commCash := decimal.NewFromFloat(margins.Commodity.Available.LiveBalance)
+	availableCash := eqCash.Add(commCash)
+
+	marginBreakdown := domain.SegmentBreakdown{
+		Equity:    eqMargin,
+		Commodity: commMargin,
+	}
+	cashBreakdown := domain.SegmentBreakdown{
+		Equity:    eqCash,
+		Commodity: commCash,
+	}
 
 	return AccountPortfolioSummary{
 		NetQty:          netQty,
@@ -137,6 +155,8 @@ func CalculatePositionMetrics(positions []kiteconnect.Position, margins kiteconn
 		AvailableCash:   availableCash,
 		AvailableMargin: availableMargin,
 		ProductMtm:      productMtm,
+		MarginBreakdown: marginBreakdown,
+		CashBreakdown:   cashBreakdown,
 	}
 }
 
