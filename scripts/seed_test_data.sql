@@ -107,17 +107,21 @@ ON CONFLICT (follower_id) DO UPDATE SET
   group_id          = EXCLUDED.group_id;
 
 -- 4. Margins: Summary metrics for master account MASTER01
-INSERT INTO account_margins (account_id, net_qty, total_mtm, realized_pnl, account_value, status, product_mtm, updated_at)
+INSERT INTO account_margins (account_id, net_qty, total_mtm, realized_pnl, account_value, status, available_cash, available_margin, product_mtm, margin_breakdown, cash_breakdown, updated_at)
 VALUES
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', -890, 380.0000, 2320.0000, 2163520.8400, 'online', '{"NRML": "3250.0000", "MIS": "-2870.0000"}'::jsonb, now())
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', -890, 380.0000, 2320.0000, 2163520.8400, 'online', 2163520.8400, 2163520.8400, '{"NRML": "3250.0000", "MIS": "-2870.0000"}'::jsonb, '{"EQUITY": "1500000.0000", "COMMODITY": "663520.8400"}'::jsonb, '{"EQUITY": "1500000.0000", "COMMODITY": "663520.8400"}'::jsonb, now())
 ON CONFLICT (account_id) DO UPDATE SET
-  net_qty       = EXCLUDED.net_qty,
-  total_mtm     = EXCLUDED.total_mtm,
-  realized_pnl  = EXCLUDED.realized_pnl,
-  account_value = EXCLUDED.account_value,
-  status        = EXCLUDED.status,
-  product_mtm   = EXCLUDED.product_mtm,
-  updated_at    = EXCLUDED.updated_at;
+  net_qty          = EXCLUDED.net_qty,
+  total_mtm        = EXCLUDED.total_mtm,
+  realized_pnl     = EXCLUDED.realized_pnl,
+  account_value    = EXCLUDED.account_value,
+  status           = EXCLUDED.status,
+  available_cash   = EXCLUDED.available_cash,
+  available_margin = EXCLUDED.available_margin,
+  product_mtm      = EXCLUDED.product_mtm,
+  margin_breakdown = EXCLUDED.margin_breakdown,
+  cash_breakdown   = EXCLUDED.cash_breakdown,
+  updated_at       = EXCLUDED.updated_at;
 
 -- 5. Positions: Open and closed positions for master account MASTER01
 INSERT INTO account_positions (account_id, product, instrument, quantity, buy_price, sell_price, buy_quantity, sell_quantity, ltp, mtm, pnl, action, updated_at)

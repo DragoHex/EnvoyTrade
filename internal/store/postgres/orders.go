@@ -259,7 +259,7 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 	var netQty int32
 	var totalMtm, realizedPnl, accountValue, availableCash, availableMargin decimal.Decimal
 	var marginStatus string
-	var rawProductMtm []byte
+	var rawProductMtm, rawMarginBreakdown, rawCashBreakdown []byte
 	err = s.pool.QueryRow(ctx, `
 		SELECT 
 			net_qty, 
@@ -289,13 +289,28 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					),
 					'{}'::jsonb
 				)
-			END
+			END,
+			COALESCE(margin_breakdown, '{}'::jsonb),
+			COALESCE(cash_breakdown, '{}'::jsonb)
 		FROM account_margins
 		WHERE account_id = $1
-	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus, &rawProductMtm)
+	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus, &rawProductMtm, &rawMarginBreakdown, &rawCashBreakdown)
 	var breakdown map[string]decimal.Decimal
+	var marginBreakdown, cashBreakdown *domain.SegmentBreakdown
 	if len(rawProductMtm) > 0 {
 		_ = json.Unmarshal(rawProductMtm, &breakdown)
+	}
+	if len(rawMarginBreakdown) > 0 && string(rawMarginBreakdown) != "{}" {
+		var mb domain.SegmentBreakdown
+		if err := json.Unmarshal(rawMarginBreakdown, &mb); err == nil && !mb.IsZero() {
+			marginBreakdown = &mb
+		}
+	}
+	if len(rawCashBreakdown) > 0 && string(rawCashBreakdown) != "{}" {
+		var cb domain.SegmentBreakdown
+		if err := json.Unmarshal(rawCashBreakdown, &cb); err == nil && !cb.IsZero() {
+			cashBreakdown = &cb
+		}
 	}
 	if err == nil {
 		detail.Summary = domain.AccountSummaryMetrics{
@@ -310,6 +325,8 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 			AvailableMargin:      &availableMargin,
 			Status:               marginStatus,
 			MtmBreakdown:         breakdown,
+			MarginBreakdown:      marginBreakdown,
+			CashBreakdown:        cashBreakdown,
 		}
 	} else {
 		var fallbackProductMtm []byte

@@ -115,11 +115,23 @@ func (s *Store) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, m M
 			productMtmJSON = b
 		}
 	}
+	marginBreakdownJSON := []byte("{}")
+	if m.MarginBreakdown != nil && !m.MarginBreakdown.IsZero() {
+		if b, err := json.Marshal(m.MarginBreakdown); err == nil {
+			marginBreakdownJSON = b
+		}
+	}
+	cashBreakdownJSON := []byte("{}")
+	if m.CashBreakdown != nil && !m.CashBreakdown.IsZero() {
+		if b, err := json.Marshal(m.CashBreakdown); err == nil {
+			cashBreakdownJSON = b
+		}
+	}
 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO account_margins
-		  (account_id, net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status, product_mtm, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+		  (account_id, net_qty, total_mtm, realized_pnl, account_value, available_cash, available_margin, status, product_mtm, margin_breakdown, cash_breakdown, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
 		ON CONFLICT (account_id)
 		DO UPDATE SET
 		  net_qty = EXCLUDED.net_qty,
@@ -130,7 +142,9 @@ func (s *Store) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, m M
 		  available_margin = EXCLUDED.available_margin,
 		  status = EXCLUDED.status,
 		  product_mtm = EXCLUDED.product_mtm,
+		  margin_breakdown = EXCLUDED.margin_breakdown,
+		  cash_breakdown = EXCLUDED.cash_breakdown,
 		  updated_at = now();
-	`, accountID, m.NetQty, m.TotalMtm, m.RealizedPnl, m.AccountValue, cash, margin, status, productMtmJSON)
+	`, accountID, m.NetQty, m.TotalMtm, m.RealizedPnl, m.AccountValue, cash, margin, status, productMtmJSON, marginBreakdownJSON, cashBreakdownJSON)
 	return err
 }

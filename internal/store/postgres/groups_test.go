@@ -101,6 +101,14 @@ func TestGroupDetail_ReturnsMasterAndFollowers(t *testing.T) {
 		AvailableCash:   &cash,
 		AvailableMargin: &margin,
 		Status:          "online",
+		MarginBreakdown: &domain.SegmentBreakdown{
+			Equity:    decimal.NewFromInt(100000),
+			Commodity: decimal.NewFromInt(50000),
+		},
+		CashBreakdown: &domain.SegmentBreakdown{
+			Equity:    decimal.NewFromInt(40000),
+			Commodity: decimal.NewFromInt(20000),
+		},
 	}); err != nil {
 		t.Fatalf("SyncAccountMargins: %v", err)
 	}
@@ -129,6 +137,12 @@ func TestGroupDetail_ReturnsMasterAndFollowers(t *testing.T) {
 	}
 	if detail.Followers[0].AvailableCash == nil || !detail.Followers[0].AvailableCash.Equal(cash) {
 		t.Errorf("follower AvailableCash = %v, want %v", detail.Followers[0].AvailableCash, cash)
+	}
+	if detail.Followers[0].MarginBreakdown == nil || detail.Followers[0].MarginBreakdown.Equity.Cmp(decimal.NewFromInt(100000)) != 0 {
+		t.Errorf("follower MarginBreakdown.Equity = %v, want 100000", detail.Followers[0].MarginBreakdown)
+	}
+	if detail.Followers[0].CashBreakdown == nil || detail.Followers[0].CashBreakdown.Equity.Cmp(decimal.NewFromInt(40000)) != 0 {
+		t.Errorf("follower CashBreakdown.Equity = %v, want 40000", detail.Followers[0].CashBreakdown)
 	}
 }
 
