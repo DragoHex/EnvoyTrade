@@ -8,6 +8,7 @@ import { StatusDot } from './StatusDot'
 import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, ChevronDownIcon, ThanosBalanceIcon } from './icons'
 import { AccountOrderDetails } from './AccountOrderDetails'
 import { MtmBreakdownPopover } from './MtmBreakdownPopover'
+import { SegmentBreakdownPopover } from './SegmentBreakdownPopover'
 import { getAccountOrders, type GroupFollower, type AccountSummaryMetrics } from '../api'
 
 type DestructiveAction = 'square_off' | 'exit_open_orders' | 'rebalance' | null
@@ -68,6 +69,22 @@ export function AccountRow(props: {
     return props.follower.mtmBreakdown
   }
 
+  const currentMarginBreakdown = () => {
+    const b = summary()?.marginBreakdown
+    if (b && Object.keys(b).length > 0) {
+      return b
+    }
+    return props.follower.marginBreakdown
+  }
+
+  const currentCashBreakdown = () => {
+    const b = summary()?.cashBreakdown
+    if (b && Object.keys(b).length > 0) {
+      return b
+    }
+    return props.follower.cashBreakdown
+  }
+
   const showToast = (result: ToastResult) => {
     setToast(result)
     clearTimeout(dismissTimer)
@@ -124,8 +141,34 @@ export function AccountRow(props: {
             />
           </div>
         </td>
-        <td class="col-cash">{summary() && summary()!.availableCash != null ? formatCurrency(summary()!.availableCash) : (props.follower.availableCash != null ? formatCurrency(props.follower.availableCash) : '—')}</td>
-        <td class="col-margin">{summary() && summary()!.availableMargin != null ? formatCurrency(summary()!.availableMargin) : (props.follower.availableMargin != null ? formatCurrency(props.follower.availableMargin) : '—')}</td>
+        <td class="col-cash">
+          <div class="col-cash-wrap">
+            <span>
+              {summary() && summary()!.availableCash != null
+                ? formatCurrency(summary()!.availableCash)
+                : (props.follower.availableCash != null ? formatCurrency(props.follower.availableCash) : '—')}
+            </span>
+            <SegmentBreakdownPopover
+              title="Cash breakdown"
+              total={summary() && summary()!.availableCash != null ? summary()!.availableCash : props.follower.availableCash}
+              breakdown={currentCashBreakdown()}
+            />
+          </div>
+        </td>
+        <td class="col-margin">
+          <div class="col-margin-wrap">
+            <span>
+              {summary() && summary()!.availableMargin != null
+                ? formatCurrency(summary()!.availableMargin)
+                : (props.follower.availableMargin != null ? formatCurrency(props.follower.availableMargin) : '—')}
+            </span>
+            <SegmentBreakdownPopover
+              title="Margin breakdown"
+              total={summary() && summary()!.availableMargin != null ? summary()!.availableMargin : props.follower.availableMargin}
+              breakdown={currentMarginBreakdown()}
+            />
+          </div>
+        </td>
         <td class="col-status">
           <StatusDot status={props.follower.status} />
         </td>

@@ -659,6 +659,55 @@ describe('AccountRow', () => {
     const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
     expect(within(rebalanceBtn).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
   })
+
+  it('renders cash and margin breakdown popovers and opens them on expand icon click', async () => {
+    const followerWithBreakdowns: GroupFollower = {
+      ...follower,
+      availableCash: 75000,
+      availableMargin: 300000,
+      marginBreakdown: {
+        EQUITY: 250000,
+        COMMODITY: 50000,
+      },
+      cashBreakdown: {
+        EQUITY: 60000,
+        COMMODITY: 15000,
+      },
+    }
+
+    render(() => (
+      <table>
+        <tbody>
+          <AccountRow
+            follower={followerWithBreakdowns}
+            onToggleCopy={() => {}}
+            onRebalance={() => Promise.resolve()}
+            onSquareOff={() => {}}
+            onExitOpenOrders={() => {}}
+          />
+        </tbody>
+      </table>
+    ))
+
+    // Cash popover trigger
+    const cashTrigger = screen.getByLabelText('View Cash breakdown')
+    expect(cashTrigger).toBeInTheDocument()
+    await userEvent.click(cashTrigger)
+    expect(screen.getByRole('dialog', { name: 'Cash breakdown' })).toBeInTheDocument()
+    expect(screen.getByText('₹60,000.00')).toBeInTheDocument()
+    expect(screen.getByText('₹15,000.00')).toBeInTheDocument()
+
+    // Close cash popover
+    await userEvent.keyboard('{Escape}')
+
+    // Margin popover trigger
+    const marginTrigger = screen.getByLabelText('View Margin breakdown')
+    expect(marginTrigger).toBeInTheDocument()
+    await userEvent.click(marginTrigger)
+    expect(screen.getByRole('dialog', { name: 'Margin breakdown' })).toBeInTheDocument()
+    expect(screen.getByText('₹2,50,000.00')).toBeInTheDocument()
+    expect(screen.getByText('₹50,000.00')).toBeInTheDocument()
+  })
 })
 
 

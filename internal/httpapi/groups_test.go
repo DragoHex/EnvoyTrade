@@ -68,6 +68,14 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 				"NRML": decimal.NewFromFloat(1000.0),
 				"MIS":  decimal.NewFromFloat(500.50),
 			},
+			MasterMarginBreakdown: &domain.SegmentBreakdown{
+				Equity:    decimal.NewFromFloat(200000.0),
+				Commodity: decimal.NewFromFloat(50000.0),
+			},
+			MasterCashBreakdown: &domain.SegmentBreakdown{
+				Equity:    decimal.NewFromFloat(40000.0),
+				Commodity: decimal.NewFromFloat(10000.0),
+			},
 			Followers: []domain.GroupFollower{
 				{
 					AccountID:            follower,
@@ -83,6 +91,12 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 					AvailableMargin:      &margin,
 					MtmBreakdown: map[string]decimal.Decimal{
 						"MIS": decimal.NewFromFloat(750.25),
+					},
+					MarginBreakdown: &domain.SegmentBreakdown{
+						Equity: decimal.NewFromFloat(250000.0),
+					},
+					CashBreakdown: &domain.SegmentBreakdown{
+						Equity: decimal.NewFromFloat(50000.0),
 					},
 				},
 			},
@@ -111,11 +125,27 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	if !ok || masterBreakdown["NRML"] != "1000" {
 		t.Errorf("masterMtmBreakdown = %v, want NRML=1000", got["masterMtmBreakdown"])
 	}
+	masterMarginBreakdown, ok := got["masterMarginBreakdown"].(map[string]any)
+	if !ok || masterMarginBreakdown["equity"] != "200000" {
+		t.Errorf("masterMarginBreakdown = %v, want equity=200000", got["masterMarginBreakdown"])
+	}
+	masterCashBreakdown, ok := got["masterCashBreakdown"].(map[string]any)
+	if !ok || masterCashBreakdown["equity"] != "40000" {
+		t.Errorf("masterCashBreakdown = %v, want equity=40000", got["masterCashBreakdown"])
+	}
 	followers, ok := got["followers"].([]any)
 	if !ok || len(followers) != 1 {
 		t.Fatalf("followers = %v, want 1 entry", got["followers"])
 	}
 	f0 := followers[0].(map[string]any)
+	fMarginBreakdown, ok := f0["marginBreakdown"].(map[string]any)
+	if !ok || fMarginBreakdown["equity"] != "250000" {
+		t.Errorf("follower marginBreakdown = %v, want equity=250000", f0["marginBreakdown"])
+	}
+	fCashBreakdown, ok := f0["cashBreakdown"].(map[string]any)
+	if !ok || fCashBreakdown["equity"] != "50000" {
+		t.Errorf("follower cashBreakdown = %v, want equity=50000", f0["cashBreakdown"])
+	}
 	if f0["brokerAccountId"] != "ZY5678" {
 		t.Errorf("brokerAccountId = %v, want ZY5678", f0["brokerAccountId"])
 	}

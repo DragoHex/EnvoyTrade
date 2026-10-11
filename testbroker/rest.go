@@ -137,13 +137,45 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 			}
 		}
 
+		eqEnabled := true
+		eqNet := 10000000.0
+		eqCash := 10000000.0
+		eqLiveBal := 10000000.0
+		eqCollateral := 0.0
+
+		commEnabled := true
+		commNet := 10000000.0
+		commCash := 10000000.0
+		commLiveBal := 10000000.0
+		commCollateral := 0.0
+
+		if userID != "" && cfg != nil && cfg.Users != nil {
+			if u, ok := cfg.Users[userID]; ok {
+				if u.EquityMargin != nil {
+					eqEnabled = u.EquityMargin.Enabled
+					eqNet = u.EquityMargin.Net
+					eqCash = u.EquityMargin.Cash
+					eqLiveBal = u.EquityMargin.LiveBalance
+					eqCollateral = u.EquityMargin.Collateral
+				}
+				if u.CommodityMargin != nil {
+					commEnabled = u.CommodityMargin.Enabled
+					commNet = u.CommodityMargin.Net
+					commCash = u.CommodityMargin.Cash
+					commLiveBal = u.CommodityMargin.LiveBalance
+					commCollateral = u.CommodityMargin.Collateral
+				}
+			}
+		}
+
 		writeKiteSuccess(w, map[string]any{
 			"equity": map[string]any{
-				"enabled": true,
-				"net":     10000000.0,
+				"enabled": eqEnabled,
+				"net":     eqNet,
 				"available": map[string]any{
-					"cash":         10000000.0,
-					"live_balance": 10000000.0,
+					"cash":         eqCash,
+					"live_balance": eqLiveBal,
+					"collateral":   eqCollateral,
 				},
 				"utilised": map[string]any{
 					"m2m_realised":   eqRealised,
@@ -151,11 +183,12 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 				},
 			},
 			"commodity": map[string]any{
-				"enabled": true,
-				"net":     10000000.0,
+				"enabled": commEnabled,
+				"net":     commNet,
 				"available": map[string]any{
-					"cash":         10000000.0,
-					"live_balance": 10000000.0,
+					"cash":         commCash,
+					"live_balance": commLiveBal,
+					"collateral":   commCollateral,
 				},
 				"utilised": map[string]any{
 					"m2m_realised":   commRealised,
@@ -183,12 +216,37 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 			}
 		}
 
+		enabled := true
+		net := 10000000.0
+		cash := 10000000.0
+		liveBal := 10000000.0
+		collateral := 0.0
+
+		if userID != "" && cfg != nil && cfg.Users != nil {
+			if u, ok := cfg.Users[userID]; ok {
+				if segment == "equity" && u.EquityMargin != nil {
+					enabled = u.EquityMargin.Enabled
+					net = u.EquityMargin.Net
+					cash = u.EquityMargin.Cash
+					liveBal = u.EquityMargin.LiveBalance
+					collateral = u.EquityMargin.Collateral
+				} else if segment == "commodity" && u.CommodityMargin != nil {
+					enabled = u.CommodityMargin.Enabled
+					net = u.CommodityMargin.Net
+					cash = u.CommodityMargin.Cash
+					liveBal = u.CommodityMargin.LiveBalance
+					collateral = u.CommodityMargin.Collateral
+				}
+			}
+		}
+
 		writeKiteSuccess(w, map[string]any{
-			"enabled": true,
-			"net":     10000000.0,
+			"enabled": enabled,
+			"net":     net,
 			"available": map[string]any{
-				"cash":         10000000.0,
-				"live_balance": 10000000.0,
+				"cash":         cash,
+				"live_balance": liveBal,
+				"collateral":   collateral,
 			},
 			"utilised": map[string]any{
 				"m2m_realised":   realised,

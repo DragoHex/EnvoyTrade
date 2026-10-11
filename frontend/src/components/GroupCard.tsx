@@ -43,6 +43,8 @@ export function GroupCard(props: {
           availableCash: props.detail.masterAvailableCash,
           availableMargin: props.detail.masterAvailableMargin,
           mtmBreakdown: props.detail.masterMtmBreakdown,
+          marginBreakdown: props.detail.masterMarginBreakdown,
+          cashBreakdown: props.detail.masterCashBreakdown,
         }}
         followers={props.detail.followers}
         hasImbalance={props.hasImbalance}

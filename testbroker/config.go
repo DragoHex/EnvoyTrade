@@ -33,13 +33,25 @@ type Holding struct {
 	PnL             float64 `json:"pnl"`
 }
 
+// SegmentMarginConfig defines simulated margin figures for a segment.
+type SegmentMarginConfig struct {
+	Enabled        bool    `json:"enabled"`
+	Net            float64 `json:"net"`
+	Cash           float64 `json:"cash"`
+	LiveBalance    float64 `json:"live_balance"`
+	Collateral     float64 `json:"collateral"`
+	OpeningBalance float64 `json:"opening_balance"`
+}
+
 // UserConfig defines a simulated broker account.
 type UserConfig struct {
-	APIKey      string    `json:"api_key"`
-	APISecret   string    `json:"api_secret"`
-	AccessToken string    `json:"access_token"`
-	Role        string    `json:"role"` // "master" | "follower"
-	Holdings    []Holding `json:"holdings,omitempty"`
+	APIKey          string               `json:"api_key"`
+	APISecret       string               `json:"api_secret"`
+	AccessToken     string               `json:"access_token"`
+	Role            string               `json:"role"` // "master" | "follower"
+	Holdings        []Holding            `json:"holdings,omitempty"`
+	EquityMargin    *SegmentMarginConfig `json:"equity_margin,omitempty"`
+	CommodityMargin *SegmentMarginConfig `json:"commodity_margin,omitempty"`
 }
 
 // Instrument defines a tradeable instrument in the mock.

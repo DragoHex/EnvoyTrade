@@ -258,6 +258,73 @@ func TestREST_PositionsAndMargins(t *testing.T) {
 	}
 }
 
+func TestREST_ConfiguredSegmentMargins(t *testing.T) {
+	cfg := &Config{
+		ExecutionMode: "instant",
+		Users: map[string]UserConfig{
+			"USER_COLLATERAL": {
+				APIKey:      "key_col",
+				AccessToken: "tok_col",
+				EquityMargin: &SegmentMarginConfig{
+					Enabled:     true,
+					Net:         1304250.99,
+					LiveBalance: -437945.10,
+					Collateral:  2300911.09,
+				},
+				CommodityMargin: &SegmentMarginConfig{
+					Enabled:     true,
+					Net:         500000.0,
+					LiveBalance: 100000.0,
+				},
+			},
+		},
+	}
+	cfg.tokenIndex = map[string]string{
+		"key_col:tok_col": "USER_COLLATERAL",
+	}
+	eng := NewOrderEngine(cfg)
+	router := NewRouter(cfg, eng, NewWSHub(cfg), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/user/margins", nil)
+	req.Header.Set("Authorization", "token key_col:tok_col")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Data struct {
+			Equity struct {
+				Net       float64 `json:"net"`
+				Available struct {
+					LiveBalance float64 `json:"live_balance"`
+					Collateral  float64 `json:"collateral"`
+				} `json:"available"`
+			} `json:"equity"`
+			Commodity struct {
+				Net       float64 `json:"net"`
+				Available struct {
+					LiveBalance float64 `json:"live_balance"`
+				} `json:"available"`
+			} `json:"commodity"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if resp.Data.Equity.Net != 1304250.99 {
+		t.Errorf("equity.net = %v, want 1304250.99", resp.Data.Equity.Net)
+	}
+	if resp.Data.Equity.Available.LiveBalance != -437945.10 {
+		t.Errorf("equity.available.live_balance = %v, want -437945.10", resp.Data.Equity.Available.LiveBalance)
+	}
+	if resp.Data.Commodity.Net != 500000.0 {
+		t.Errorf("commodity.net = %v, want 500000.0", resp.Data.Commodity.Net)
+	}
+}
+
 func TestREST_Margins_UtilisedM2M_CalculatedFromPositions(t *testing.T) {
 	router, eng, _ := setupTestServer()
 	eng.config.ExecutionMode = "instant"

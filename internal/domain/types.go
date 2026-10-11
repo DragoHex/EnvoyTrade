@@ -1,12 +1,65 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
+
+// SegmentBreakdown represents the breakdown of funds or margins across
+// regulatory segments (Equity and Commodity).
+type SegmentBreakdown struct {
+	Equity    decimal.Decimal `json:"equity"`
+	Commodity decimal.Decimal `json:"commodity"`
+}
+
+// IsZero reports whether both Equity and Commodity amounts are zero.
+func (s SegmentBreakdown) IsZero() bool {
+	return s.Equity.IsZero() && s.Commodity.IsZero()
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling supporting both lowercase
+// and uppercase/legacy segment keys ("equity"/"EQUITY", "commodity"/"COMMODITY").
+func (s *SegmentBreakdown) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for k, v := range raw {
+		if v == nil {
+			continue
+		}
+		var d decimal.Decimal
+		switch val := v.(type) {
+		case string:
+			parsed, err := decimal.NewFromString(val)
+			if err != nil {
+				return err
+			}
+			d = parsed
+		case float64:
+			d = decimal.NewFromFloat(val)
+		default:
+			// Let json unmarshal handle standard fallback
+			b, _ := json.Marshal(val)
+			if err := json.Unmarshal(b, &d); err != nil {
+				return err
+			}
+		}
+
+		switch strings.ToUpper(k) {
+		case "EQUITY":
+			s.Equity = d
+		case "COMMODITY":
+			s.Commodity = d
+		}
+	}
+	return nil
+}
 
 // DispatchState tracks a master fill through the transactional outbox
 // (PLAN.md §4.1). The channel between listener and engine is a latency
@@ -216,6 +269,8 @@ type MarginSyncParam struct {
 	AvailableMargin *decimal.Decimal
 	Status          string
 	ProductMtm      map[string]decimal.Decimal
+	MarginBreakdown *SegmentBreakdown
+	CashBreakdown   *SegmentBreakdown
 }
 
 // Group models a trading group with a designated master account.
@@ -311,6 +366,8 @@ type GroupFollower struct {
 	AvailableCash        *decimal.Decimal
 	AvailableMargin      *decimal.Decimal
 	MtmBreakdown         map[string]decimal.Decimal
+	MarginBreakdown      *SegmentBreakdown
+	CashBreakdown        *SegmentBreakdown
 }
 
 // GroupDetail is the full Dashboard GroupCard payload for one group.
@@ -329,6 +386,8 @@ type GroupDetail struct {
 	MasterAvailableCash        *decimal.Decimal
 	MasterAvailableMargin      *decimal.Decimal
 	MasterMtmBreakdown         map[string]decimal.Decimal
+	MasterMarginBreakdown      *SegmentBreakdown
+	MasterCashBreakdown        *SegmentBreakdown
 	Followers                  []GroupFollower
 }
 
@@ -358,6 +417,8 @@ type AccountSummaryMetrics struct {
 	AvailableMargin      *decimal.Decimal           `json:"availableMargin,omitempty"`
 	Status               string                     `json:"status"`
 	MtmBreakdown         map[string]decimal.Decimal `json:"mtmBreakdown,omitempty"`
+	MarginBreakdown      *SegmentBreakdown          `json:"marginBreakdown,omitempty"`
+	CashBreakdown        *SegmentBreakdown          `json:"cashBreakdown,omitempty"`
 }
 
 // PositionItem represents an open or closed position row.

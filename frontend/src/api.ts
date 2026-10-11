@@ -55,6 +55,13 @@ export interface GroupSummary {
   active?: boolean
 }
 
+export interface SegmentBreakdown {
+  equity?: number | string
+  commodity?: number | string
+  EQUITY?: number | string
+  COMMODITY?: number | string
+}
+
 export interface GroupFollower {
   accountId: string
   name: string
@@ -69,6 +76,8 @@ export interface GroupFollower {
   availableCash?: number | string
   availableMargin?: number | string
   mtmBreakdown?: Record<string, number | string>
+  marginBreakdown?: SegmentBreakdown | Record<string, number | string>
+  cashBreakdown?: SegmentBreakdown | Record<string, number | string>
 }
 
 export interface GroupDetail {
@@ -86,6 +95,8 @@ export interface GroupDetail {
   masterAvailableCash?: number | string
   masterAvailableMargin?: number | string
   masterMtmBreakdown?: Record<string, number | string>
+  masterMarginBreakdown?: SegmentBreakdown | Record<string, number | string>
+  masterCashBreakdown?: SegmentBreakdown | Record<string, number | string>
   followers: GroupFollower[]
 }
 
@@ -462,6 +473,8 @@ export interface AccountSummaryMetrics {
   availableMargin?: number | string
   status: string
   mtmBreakdown?: Record<string, number | string>
+  marginBreakdown?: SegmentBreakdown | Record<string, number | string>
+  cashBreakdown?: SegmentBreakdown | Record<string, number | string>
 }
 
 export interface TabCounts {

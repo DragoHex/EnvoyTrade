@@ -70,14 +70,16 @@ func TestCalculatePositionMetrics(t *testing.T) {
 
 	margins := kiteconnect.AllMargins{
 		Equity: kiteconnect.Margins{
+			Net: 250000.0,
 			Available: kiteconnect.AvailableMargins{
-				Cash:        25000.0,
+				Cash:        0.0,
 				LiveBalance: 60000.0,
 			},
 		},
 		Commodity: kiteconnect.Margins{
+			Net: 50000.0,
 			Available: kiteconnect.AvailableMargins{
-				Cash:        10000.0,
+				Cash:        0.0,
 				LiveBalance: 15000.0,
 			},
 		},
@@ -102,13 +104,58 @@ func TestCalculatePositionMetrics(t *testing.T) {
 	if !summary.RealizedPnl.Equal(expectedRealized) {
 		t.Errorf("RealizedPnl = %s, want %s", summary.RealizedPnl, expectedRealized)
 	}
-	expectedCash := decimal.NewFromFloat(35000.0)
+	expectedCash := decimal.NewFromFloat(75000.0)
 	if !summary.AvailableCash.Equal(expectedCash) {
 		t.Errorf("AvailableCash = %s, want %s", summary.AvailableCash, expectedCash)
 	}
-	expectedMargin := decimal.NewFromFloat(75000.0)
+	expectedMargin := decimal.NewFromFloat(300000.0)
 	if !summary.AvailableMargin.Equal(expectedMargin) {
 		t.Errorf("AvailableMargin = %s, want %s", summary.AvailableMargin, expectedMargin)
+	}
+	if !summary.MarginBreakdown.Equity.Equal(decimal.NewFromFloat(250000.0)) {
+		t.Errorf("MarginBreakdown.Equity = %s, want 250000.0", summary.MarginBreakdown.Equity)
+	}
+	if !summary.MarginBreakdown.Commodity.Equal(decimal.NewFromFloat(50000.0)) {
+		t.Errorf("MarginBreakdown.Commodity = %s, want 50000.0", summary.MarginBreakdown.Commodity)
+	}
+	if !summary.CashBreakdown.Equity.Equal(decimal.NewFromFloat(60000.0)) {
+		t.Errorf("CashBreakdown.Equity = %s, want 60000.0", summary.CashBreakdown.Equity)
+	}
+	if !summary.CashBreakdown.Commodity.Equal(decimal.NewFromFloat(15000.0)) {
+		t.Errorf("CashBreakdown.Commodity = %s, want 15000.0", summary.CashBreakdown.Commodity)
+	}
+}
+
+func TestCalculatePositionMetrics_PledgedCollateralNegativeCash(t *testing.T) {
+	// Replicates real CXZ019 account state where cash live_balance is negative
+	// because utilized debits exceed cash, but pledged collateral makes net margin positive.
+	margins := kiteconnect.AllMargins{
+		Equity: kiteconnect.Margins{
+			Net: 1304250.99,
+			Available: kiteconnect.AvailableMargins{
+				LiveBalance: -437945.10,
+				Collateral:  2300911.09,
+			},
+		},
+		Commodity: kiteconnect.Margins{
+			Net: 0.0,
+			Available: kiteconnect.AvailableMargins{
+				LiveBalance: 0.0,
+			},
+		},
+	}
+	summary := kite.CalculatePositionMetrics(nil, margins)
+	if !summary.AvailableMargin.Equal(decimal.NewFromFloat(1304250.99)) {
+		t.Errorf("AvailableMargin = %s, want 1304250.99", summary.AvailableMargin)
+	}
+	if !summary.AvailableCash.Equal(decimal.NewFromFloat(-437945.10)) {
+		t.Errorf("AvailableCash = %s, want -437945.10", summary.AvailableCash)
+	}
+	if !summary.MarginBreakdown.Equity.Equal(decimal.NewFromFloat(1304250.99)) {
+		t.Errorf("MarginBreakdown.Equity = %s, want 1304250.99", summary.MarginBreakdown.Equity)
+	}
+	if !summary.CashBreakdown.Equity.Equal(decimal.NewFromFloat(-437945.10)) {
+		t.Errorf("CashBreakdown.Equity = %s, want -437945.10", summary.CashBreakdown.Equity)
 	}
 }
 
