@@ -103,8 +103,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 		closedPositionsCount int
 		openOrdersCount      int
 		mtmBreakdown         map[string]decimal.Decimal
-		marginBreakdown      *domain.SegmentBreakdown
-		cashBreakdown        *domain.SegmentBreakdown
+		marginBreakdown      *domain.MarginBreakdown
 	}
 
 	metricsMap := make(map[uuid.UUID]accountMetricsRow, len(accountIDs))
@@ -130,8 +129,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 					'{}'::jsonb
 				)
 			END,
-			COALESCE(m.margin_breakdown, '{}'::jsonb),
-			COALESCE(m.cash_breakdown, '{}'::jsonb),
+			m.margin_breakdown,
 			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity != 0 AND ap.product != 'CNC'),
 			(SELECT COUNT(*) FROM account_positions ap WHERE ap.account_id = a.id AND ap.quantity = 0 AND ap.product != 'CNC'),
 			CASE 
@@ -155,7 +153,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 		var netQty int32
 		var totalMtm decimal.Decimal
 		var availCash, availMargin *decimal.Decimal
-		var rawProductMtm, rawMarginBreakdown, rawCashBreakdown []byte
+		var rawProductMtm, rawMarginBreakdown []byte
 		var openPos, closedPos, openOrders int64
 		if err := mRows.Scan(
 			&accID,
@@ -165,7 +163,6 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 			&availMargin,
 			&rawProductMtm,
 			&rawMarginBreakdown,
-			&rawCashBreakdown,
 			&openPos,
 			&closedPos,
 			&openOrders,
@@ -186,15 +183,9 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 			}
 		}
 		if len(rawMarginBreakdown) > 0 && string(rawMarginBreakdown) != "{}" {
-			var breakdown domain.SegmentBreakdown
-			if err := json.Unmarshal(rawMarginBreakdown, &breakdown); err == nil && !breakdown.IsZero() {
-				m.marginBreakdown = &breakdown
-			}
-		}
-		if len(rawCashBreakdown) > 0 && string(rawCashBreakdown) != "{}" {
-			var breakdown domain.SegmentBreakdown
-			if err := json.Unmarshal(rawCashBreakdown, &breakdown); err == nil && !breakdown.IsZero() {
-				m.cashBreakdown = &breakdown
+			var mb domain.MarginBreakdown
+			if err := json.Unmarshal(rawMarginBreakdown, &mb); err == nil {
+				m.marginBreakdown = &mb
 			}
 		}
 		metricsMap[accID] = m
@@ -213,7 +204,6 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 	detail.MasterAvailableMargin = masterM.availableMargin
 	detail.MasterMtmBreakdown = masterM.mtmBreakdown
 	detail.MasterMarginBreakdown = masterM.marginBreakdown
-	detail.MasterCashBreakdown = masterM.cashBreakdown
 
 	for _, r := range rows {
 		fMetrics := metricsMap[r.ID]
@@ -232,7 +222,6 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 			AvailableMargin:      fMetrics.availableMargin,
 			MtmBreakdown:         fMetrics.mtmBreakdown,
 			MarginBreakdown:      fMetrics.marginBreakdown,
-			CashBreakdown:        fMetrics.cashBreakdown,
 		})
 	}
 	return detail, nil

@@ -168,7 +168,7 @@ export function AccountsTable(props: {
           type="button"
           class={`row-expand-toggle-btn ${expandedId() === a.id ? 'row-expand-open' : ''}`}
           aria-label={expandedId() === a.id ? 'Collapse holdings' : 'Expand holdings'}
-          data-tooltip={expandedId() === a.id ? 'Hide holdings' : 'View holdings'}
+          data-tooltip={expandedId() === a.id ? 'Hide holdings' : 'View Holdings'}
           onClick={() => toggleExpand(a.id)}
           data-testid={`expand-holdings-btn-${a.id}`}
         >

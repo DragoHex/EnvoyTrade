@@ -236,8 +236,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		AvailableMargin: &summary.AvailableMargin,
 		Status:          "online",
 		ProductMtm:      summary.ProductMtm,
-		MarginBreakdown: &summary.MarginBreakdown,
-		CashBreakdown:   &summary.CashBreakdown,
+		MarginBreakdown: summary.MarginBreakdown,
 	}
 	if err := s.Store.SyncAccountMargins(ctx, accountID, marginParam); err != nil {
 		return fmt.Errorf("sync margins: %w", err)

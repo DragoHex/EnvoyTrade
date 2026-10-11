@@ -247,12 +247,10 @@ CREATE TABLE IF NOT EXISTS account_margins (
     available_margin numeric(18,4) NOT NULL DEFAULT 0,
     product_mtm      jsonb NOT NULL DEFAULT '{}'::jsonb,
     margin_breakdown jsonb NOT NULL DEFAULT '{}'::jsonb,
-    cash_breakdown   jsonb NOT NULL DEFAULT '{}'::jsonb,
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE account_margins ADD COLUMN IF NOT EXISTS margin_breakdown jsonb NOT NULL DEFAULT '{}'::jsonb;
-ALTER TABLE account_margins ADD COLUMN IF NOT EXISTS cash_breakdown jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 -- 11. Pending Order Updates (Stash Table for Zero-Lag Ingestion)
 CREATE TABLE IF NOT EXISTS pending_order_updates (

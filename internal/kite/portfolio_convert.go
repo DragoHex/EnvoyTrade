@@ -20,8 +20,7 @@ type AccountPortfolioSummary struct {
 	AvailableCash   decimal.Decimal
 	AvailableMargin decimal.Decimal
 	ProductMtm      map[string]decimal.Decimal
-	MarginBreakdown domain.SegmentBreakdown
-	CashBreakdown   domain.SegmentBreakdown
+	MarginBreakdown *domain.MarginBreakdown
 }
 
 // ConvertedHolding holds database-ready holding fields.
@@ -137,13 +136,16 @@ func CalculatePositionMetrics(positions []kiteconnect.Position, margins kiteconn
 	commCash := decimal.NewFromFloat(margins.Commodity.Available.LiveBalance)
 	availableCash := eqCash.Add(commCash)
 
-	marginBreakdown := domain.SegmentBreakdown{
-		Equity:    eqMargin,
-		Commodity: commMargin,
-	}
-	cashBreakdown := domain.SegmentBreakdown{
-		Equity:    eqCash,
-		Commodity: commCash,
+	openingCash := decimal.NewFromFloat(margins.Equity.Available.OpeningBalance).Add(decimal.NewFromFloat(margins.Commodity.Available.OpeningBalance))
+	collateral := decimal.NewFromFloat(margins.Equity.Available.Collateral).Add(decimal.NewFromFloat(margins.Commodity.Available.Collateral))
+	utilised := decimal.NewFromFloat(margins.Equity.Used.Debits).Add(decimal.NewFromFloat(margins.Commodity.Used.Debits))
+
+	marginBreakdown := &domain.MarginBreakdown{
+		Net:         availableMargin,
+		Cash:        availableCash,
+		OpeningCash: openingCash,
+		Collateral:  collateral,
+		Utilised:    utilised,
 	}
 
 	return AccountPortfolioSummary{
@@ -156,7 +158,6 @@ func CalculatePositionMetrics(positions []kiteconnect.Position, margins kiteconn
 		AvailableMargin: availableMargin,
 		ProductMtm:      productMtm,
 		MarginBreakdown: marginBreakdown,
-		CashBreakdown:   cashBreakdown,
 	}
 }
 

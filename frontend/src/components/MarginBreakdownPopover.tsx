@@ -1,12 +1,12 @@
 import { createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import { ExpandArrowsIcon } from './ExpandArrowsIcon'
-import type { SegmentBreakdown } from '../api'
+import type { MarginBreakdown } from '../api'
 
-export interface SegmentBreakdownPopoverProps {
-  title?: string
-  total?: number | string
-  breakdown?: SegmentBreakdown | Record<string, number | string>
+export interface MarginBreakdownPopoverProps {
+  availableMargin?: number | string
+  availableCash?: number | string
+  breakdown?: MarginBreakdown
   class?: string
 }
 
@@ -23,7 +23,7 @@ function formatCurrency(val: unknown): string {
   return `${sign}₹${abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-export function SegmentBreakdownPopover(props: SegmentBreakdownPopoverProps) {
+export function MarginBreakdownPopover(props: MarginBreakdownPopoverProps) {
   const [isOpen, setIsOpen] = createSignal(false)
   const [coords, setCoords] = createSignal<{ top: number; left: number }>({ top: 0, left: 0 })
 
@@ -33,7 +33,7 @@ export function SegmentBreakdownPopover(props: SegmentBreakdownPopoverProps) {
   const updatePosition = () => {
     if (!triggerBtnRef) return
     const rect = triggerBtnRef.getBoundingClientRect()
-    const popoverWidth = 175
+    const popoverWidth = 200
     let left = rect.left + rect.width / 2 - popoverWidth / 2
     if (left < 8) left = 8
     if (typeof window !== 'undefined' && window.innerWidth > 0 && left + popoverWidth > window.innerWidth - 8) {
@@ -90,34 +90,50 @@ export function SegmentBreakdownPopover(props: SegmentBreakdownPopoverProps) {
     })
   })
 
-  const equityVal = () => {
-    const b = (props.breakdown || {}) as any
-    return parseNum(b.equity ?? b.EQUITY)
-  }
-
-  const commodityVal = () => {
-    const b = (props.breakdown || {}) as any
-    return parseNum(b.commodity ?? b.COMMODITY)
-  }
-
-  const totalVal = () => {
-    if (props.total !== undefined && props.total !== null && props.total !== '') {
-      return parseNum(props.total)
+  const cashVal = () => {
+    if (props.breakdown && props.breakdown.cash !== undefined) {
+      return parseNum(props.breakdown.cash)
     }
-    return equityVal() + commodityVal()
+    return parseNum(props.availableCash)
   }
 
-  const label = () => `View ${props.title || 'breakdown'}`
+  const openingCashVal = () => {
+    if (props.breakdown && props.breakdown.openingCash !== undefined) {
+      return parseNum(props.breakdown.openingCash)
+    }
+    return undefined
+  }
+
+  const collateralVal = () => {
+    if (props.breakdown && props.breakdown.collateral !== undefined) {
+      return parseNum(props.breakdown.collateral)
+    }
+    return 0
+  }
+
+  const utilisedVal = () => {
+    if (props.breakdown && props.breakdown.utilised !== undefined) {
+      return parseNum(props.breakdown.utilised)
+    }
+    return 0
+  }
+
+  const netVal = () => {
+    if (props.breakdown && props.breakdown.net !== undefined) {
+      return parseNum(props.breakdown.net)
+    }
+    return parseNum(props.availableMargin)
+  }
 
   return (
-    <div class={`mtm-popover-anchor ${props.class ?? ''}`.trim()}>
+    <div class={`margin-popover-anchor ${props.class ?? ''}`.trim()}>
       <button
         ref={triggerBtnRef}
         type="button"
-        class="mtm-breakdown-trigger-btn"
-        aria-label={label()}
-        title={isOpen() ? undefined : label()}
-        data-tooltip={isOpen() ? undefined : label()}
+        class="margin-breakdown-trigger-btn"
+        aria-label="View Margin Breakdown"
+        title={isOpen() ? undefined : 'View Margin Breakdown'}
+        data-tooltip={isOpen() ? undefined : 'View Margin Breakdown'}
         data-active={isOpen() ? 'true' : 'false'}
         onClick={toggleOpen}
       >
@@ -128,9 +144,9 @@ export function SegmentBreakdownPopover(props: SegmentBreakdownPopoverProps) {
         <Portal>
           <div
             ref={popoverRef}
-            class="mtm-breakdown-popover"
+            class="margin-breakdown-popover"
             role="dialog"
-            aria-label={props.title || 'Segment breakdown'}
+            aria-label="Margin breakdown"
             style={{
               position: 'fixed',
               top: `${coords().top}px`,
@@ -138,26 +154,48 @@ export function SegmentBreakdownPopover(props: SegmentBreakdownPopoverProps) {
               'z-index': 1000,
             }}
           >
-            <div class="mtm-popover-row">
-              <span class="mtm-popover-label">Equity</span>
-              <span class="mtm-popover-value font-mono">
-                {formatCurrency(equityVal())}
+            <div class="margin-popover-row">
+              <span class="margin-popover-label">Live Cash</span>
+              <span
+                class={`margin-popover-value font-mono ${
+                  cashVal() < 0 ? 'text-negative' : ''
+                }`}
+              >
+                {formatCurrency(cashVal())}
               </span>
             </div>
 
-            <div class="mtm-popover-row">
-              <span class="mtm-popover-label">Commodity</span>
-              <span class="mtm-popover-value font-mono">
-                {formatCurrency(commodityVal())}
+            <Show when={openingCashVal() !== undefined}>
+              <div class="margin-popover-row">
+                <span class="margin-popover-label">Opening Cash</span>
+                <span class="margin-popover-value font-mono">
+                  {formatCurrency(openingCashVal())}
+                </span>
+              </div>
+            </Show>
+
+            <div class="margin-popover-row">
+              <span class="margin-popover-label">Collateral</span>
+              <span class="margin-popover-value font-mono text-positive">
+                {formatCurrency(collateralVal())}
               </span>
             </div>
 
-            <div class="mtm-popover-divider" />
+            <Show when={utilisedVal() > 0}>
+              <div class="margin-popover-row">
+                <span class="margin-popover-label">Utilised</span>
+                <span class="margin-popover-value font-mono text-negative">
+                  {formatCurrency(utilisedVal())}
+                </span>
+              </div>
+            </Show>
 
-            <div class="mtm-popover-row mtm-popover-total">
-              <span class="mtm-popover-label font-semibold">Total</span>
-              <span class="mtm-popover-value font-mono font-semibold">
-                {formatCurrency(totalVal())}
+            <div class="margin-popover-divider" />
+
+            <div class="margin-popover-row margin-popover-total">
+              <span class="margin-popover-label font-semibold">Total Margin</span>
+              <span class="margin-popover-value font-mono font-semibold">
+                {formatCurrency(netVal())}
               </span>
             </div>
           </div>
