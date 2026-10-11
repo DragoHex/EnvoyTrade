@@ -294,6 +294,153 @@ func TestMasterActive_NonMasterReturnsErrNotFound(t *testing.T) {
 	}
 }
 
+func TestSetAccountActive_Follower_DeactivatesAndDisablesCopy(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1.0), Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+
+	// Follower starts with active=true and enabled=true
+	if err := s.SetAccountActive(ctx, follower, false); err != nil {
+		t.Fatalf("SetAccountActive(false): %v", err)
+	}
+
+	// Verify account active is false
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("Accounts: %v, len=%d", err, len(accs))
+	}
+	if accs[0].Active {
+		t.Errorf("expected follower.Active = false, got true")
+	}
+
+	// Verify follow link copy is disabled
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+	if detail.Followers[0].Enabled {
+		t.Errorf("expected detail.Followers[0].Enabled = false after deactivating account, got true")
+	}
+}
+
+func TestSetAccountActive_Follower_ReactivatesAndLeavesCopyDisabled(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1.0), Enabled: false,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+	_ = s.SetAccountActive(ctx, follower, false)
+
+	// Reactivating account sets active=true, but leaves copy disabled (Safety First)
+	if err := s.SetAccountActive(ctx, follower, true); err != nil {
+		t.Fatalf("SetAccountActive(true): %v", err)
+	}
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("Accounts: %v, len=%d", err, len(accs))
+	}
+	if !accs[0].Active {
+		t.Errorf("expected follower.Active = true, got false")
+	}
+
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+	if detail.Followers[0].Enabled {
+		t.Errorf("expected detail.Followers[0].Enabled = false (safety first), got true")
+	}
+}
+
+func TestSetFollowLinkEnabled_Follower_EnablesCopyAndActivatesAccount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1.0), Enabled: false,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+	_ = s.SetAccountActive(ctx, follower, false)
+
+	// Turning copy ON from dashboard automatically activates the account
+	if err := s.SetFollowLinkEnabled(ctx, follower, true); err != nil {
+		t.Fatalf("SetFollowLinkEnabled(true): %v", err)
+	}
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("Accounts: %v, len=%d", err, len(accs))
+	}
+	if !accs[0].Active {
+		t.Errorf("expected follower.Active = true after turning copy ON, got false")
+	}
+
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+	if !detail.Followers[0].Enabled {
+		t.Errorf("expected detail.Followers[0].Enabled = true, got false")
+	}
+}
+
+func TestEnabledFollowLinks_ExcludesInactiveOrDeletedFollower(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1.0), Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+
+	// 1. When follower active=true, link enabled=true: returned
+	links, err := s.EnabledFollowLinks(ctx, master)
+	if err != nil || len(links) != 1 {
+		t.Fatalf("EnabledFollowLinks: %v, len=%d (want 1)", err, len(links))
+	}
+
+	// 2. Directly setting active=false on account excludes it from EnabledFollowLinks
+	_, err = pool.Exec(ctx, "UPDATE accounts SET active = false WHERE id = $1", follower)
+	if err != nil {
+		t.Fatalf("exec update active false: %v", err)
+	}
+	links, err = s.EnabledFollowLinks(ctx, master)
+	if err != nil {
+		t.Fatalf("EnabledFollowLinks: %v", err)
+	}
+	if len(links) != 0 {
+		t.Errorf("expected 0 enabled links when follower is inactive, got %d", len(links))
+	}
+
+	// 3. Directly setting deleted_at on account excludes it from EnabledFollowLinks
+	_, err = pool.Exec(ctx, "UPDATE accounts SET active = true, deleted_at = now() WHERE id = $1", follower)
+	if err != nil {
+		t.Fatalf("exec update deleted_at: %v", err)
+	}
+	links, err = s.EnabledFollowLinks(ctx, master)
+	if err != nil {
+		t.Fatalf("EnabledFollowLinks: %v", err)
+	}
+	if len(links) != 0 {
+		t.Errorf("expected 0 enabled links when follower is deleted, got %d", len(links))
+	}
+}
+
 func TestLatestMasterFill_ReturnsMostRecent(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

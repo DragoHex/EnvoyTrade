@@ -27,7 +27,7 @@ type AccountsStore interface {
 	Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 	CreateAccount(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress string) error
-	CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret string) error
+	CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret string) (uuid.UUID, error)
 	SetAccountName(ctx context.Context, id uuid.UUID, name string) error
 	SetAccountIPAddress(ctx context.Context, id uuid.UUID, ip string) error
 	SetAccountAPIKey(ctx context.Context, id uuid.UUID, apiKey string) error
@@ -302,7 +302,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		encTotp = enc
 	}
 
-	err = h.store.CreateAccountWithCredentials(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiKey, req.ApiSecret, validIP, encPass, encTotp)
+	resolvedID, err := h.store.CreateAccountWithCredentials(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiKey, req.ApiSecret, validIP, encPass, encTotp)
 	if errors.Is(err, domain.ErrIPAlreadyAssigned) {
 		writeError(w, http.StatusConflict, "IP address "+validIP+" is already assigned to another account")
 		return
@@ -315,6 +315,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create account")
 		return
 	}
+	id = resolvedID
 
 	if req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "" {
 		if err := h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), nil, "authenticated", ""); err != nil {
@@ -455,6 +456,15 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp["active"] = *req.Active
+		if !*req.Active {
+			role, _ := h.store.AccountRole(r.Context(), id)
+			if role == "follower" {
+				if writePatchStoreError(w, h.store.SetFollowLinkEnabled(r.Context(), id, false)) {
+					return
+				}
+				resp["enabled"] = false
+			}
+		}
 		updated = true
 	}
 	if req.Enabled != nil {
@@ -462,6 +472,12 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp["enabled"] = *req.Enabled
+		if *req.Enabled {
+			if writePatchStoreError(w, h.store.SetAccountActive(r.Context(), id, true)) {
+				return
+			}
+			resp["active"] = true
+		}
 		updated = true
 	}
 	if req.GroupID != nil {

@@ -47,7 +47,6 @@ export function AccountsTable(props: {
           enabled={a.active}
           disabled={!props.onToggleActive || togglingId() === a.id}
           ariaLabel={`Toggle active for ${a.name || a.brokerAccountId}`}
-          title={a.active ? 'Active — click to deactivate' : 'Inactive — click to activate'}
           onToggle={(next) => handleToggle(a, next)}
         />
       ),

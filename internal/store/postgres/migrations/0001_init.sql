@@ -78,10 +78,14 @@ CREATE TABLE IF NOT EXISTS accounts (
     token_expires_at      timestamptz,
     auth_status           text NOT NULL DEFAULT 'unauthenticated',
     auth_error            text NOT NULL DEFAULT '',
+    deleted_at            timestamptz DEFAULT NULL,
     created_at            timestamptz NOT NULL DEFAULT now(),
     updated_at            timestamptz NOT NULL DEFAULT now(),
     UNIQUE (broker, broker_user_id)
 );
+
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts (deleted_at);
 
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts (user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_ip_address_unique

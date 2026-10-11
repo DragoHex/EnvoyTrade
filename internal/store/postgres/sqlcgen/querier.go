@@ -13,15 +13,20 @@ import (
 
 type Querier interface {
 	AccountAuthInfo(ctx context.Context, id uuid.UUID) (AccountAuthInfoRow, error)
+	AccountByBrokerAndUserIDAny(ctx context.Context, arg AccountByBrokerAndUserIDAnyParams) (AccountByBrokerAndUserIDAnyRow, error)
 	AccountByBrokerUserID(ctx context.Context, brokerUserID string) (AccountByBrokerUserIDRow, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 	Accounts(ctx context.Context, arg AccountsParams) ([]AccountsRow, error)
 	AppendOrderEvent(ctx context.Context, arg AppendOrderEventParams) error
 	AvailableProxyIPs(ctx context.Context, arg AvailableProxyIPsParams) ([]AvailableProxyIPsRow, error)
+	ClearAccountHoldings(ctx context.Context, accountID uuid.UUID) error
+	ClearAccountMargins(ctx context.Context, accountID uuid.UUID) error
+	ClearAccountPositions(ctx context.Context, accountID uuid.UUID) error
 	CountAccountHoldings(ctx context.Context, accountID uuid.UUID) (int64, error)
 	CountClosedFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error)
 	CountClosedMasterOrders(ctx context.Context, masterID uuid.UUID) (int64, error)
 	CountClosedPositionsByAccount(ctx context.Context, accountID uuid.UUID) (int64, error)
+	CountFollowersByMasterID(ctx context.Context, masterID uuid.UUID) (int32, error)
 	CountOpenFollowerOrders(ctx context.Context, followerID uuid.UUID) (int64, error)
 	CountOpenMasterOrders(ctx context.Context, masterID uuid.UUID) (int64, error)
 	CountOpenPositionsByAccount(ctx context.Context, accountID uuid.UUID) (int64, error)
@@ -38,12 +43,13 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) (int64, error)
 	DeleteGroup(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteGroupByMasterID(ctx context.Context, masterID uuid.UUID) (int64, error)
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (int64, error)
 	DeleteSession(ctx context.Context, tokenHash string) (int64, error)
 	EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]EnabledFollowLinksRow, error)
 	FollowerOrderTerminalExists(ctx context.Context, arg FollowerOrderTerminalExistsParams) (bool, error)
 	FollowerOrdersByMasterFill(ctx context.Context, masterFillID *int64) ([]FollowerOrdersByMasterFillRow, error)
-	GetAccountMargins(ctx context.Context, accountID uuid.UUID) (AccountMargin, error)
+	GetAccountMargins(ctx context.Context, accountID uuid.UUID) (GetAccountMarginsRow, error)
 	GetFollowerOrder(ctx context.Context, id int64) (FollowerOrder, error)
 	GetSessionWithUser(ctx context.Context, tokenHash string) (GetSessionWithUserRow, error)
 	GetUserByEmail(ctx context.Context, lower string) (GetUserByEmailRow, error)
@@ -80,6 +86,7 @@ type Querier interface {
 	OrderEventsByFollowerOrder(ctx context.Context, followerOrderID *int64) ([]OrderEventsByFollowerOrderRow, error)
 	PendingFollowerOrders(ctx context.Context, createdAt pgtype.Timestamptz) ([]FollowerOrder, error)
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (ProxyIp, error)
+	ReactivateAccountWithCredentials(ctx context.Context, arg ReactivateAccountWithCredentialsParams) (uuid.UUID, error)
 	SetAccountAPIKey(ctx context.Context, arg SetAccountAPIKeyParams) (int64, error)
 	SetAccountAPISecret(ctx context.Context, arg SetAccountAPISecretParams) (int64, error)
 	SetAccountAccessToken(ctx context.Context, arg SetAccountAccessTokenParams) (int64, error)
@@ -90,6 +97,7 @@ type Querier interface {
 	SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) (int64, error)
 	SetFollowLinkEnabled(ctx context.Context, arg SetFollowLinkEnabledParams) (int64, error)
 	SetMasterFillDispatchState(ctx context.Context, arg SetMasterFillDispatchStateParams) error
+	SoftDeleteAccount(ctx context.Context, id uuid.UUID) (int64, error)
 	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)
 	UpdateFollowLinkTerms(ctx context.Context, arg UpdateFollowLinkTermsParams) (int64, error)
 	UpdateFollowerOrderByTag(ctx context.Context, arg UpdateFollowerOrderByTagParams) (int64, error)

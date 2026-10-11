@@ -81,37 +81,57 @@ func (s *Store) Migrate(ctx context.Context) error {
 // each follower) has its own app, needed to verify that account's
 // postback checksums.
 func (s *Store) CreateAccount(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string) error {
-	var userID *uuid.UUID
-	if u, ok := domain.UserFromContext(ctx); ok {
-		userID = &u.ID
-	}
-	err := s.queries.CreateAccount(ctx, sqlcgen.CreateAccountParams{
-		ID:           id,
-		Name:         name,
-		Role:         role,
-		Broker:       broker,
-		BrokerUserID: brokerUserID,
-		ApiKey:       apiKey,
-		ApiSecret:    apiSecret,
-		IpAddress:    ipAddress,
-		UserID:       userID,
-	})
-	if isIPUniqueViolation(err) {
-		return domain.ErrIPAlreadyAssigned
-	}
-	if isUniqueViolation(err) {
-		return domain.ErrDuplicate
-	}
+	_, err := s.CreateAccountWithCredentials(ctx, id, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, "", "")
 	return err
 }
 
-// CreateAccountWithCredentials creates an account with encrypted credentials.
-func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string, encPassword, encTotpSecret string) error {
+// CreateAccountWithCredentials creates an account with encrypted credentials, or reactivates
+// an existing soft-deleted account with the same broker and broker user id.
+// Returns the resolved account UUID (the original UUID if reactivated, or id if newly created).
+func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, name string, role string, broker string, brokerUserID string, apiKey string, apiSecret string, ipAddress string, encPassword, encTotpSecret string) (uuid.UUID, error) {
 	var userID *uuid.UUID
 	if u, ok := domain.UserFromContext(ctx); ok {
 		userID = &u.ID
 	}
-	err := s.queries.CreateAccountWithCredentials(ctx, sqlcgen.CreateAccountWithCredentialsParams{
+
+	// 1. Check if an account with (broker, broker_user_id) already exists
+	existing, err := s.queries.AccountByBrokerAndUserIDAny(ctx, sqlcgen.AccountByBrokerAndUserIDAnyParams{
+		Broker:       broker,
+		BrokerUserID: brokerUserID,
+	})
+	if err == nil {
+		if !existing.DeletedAt.Valid {
+			// Account exists and is currently active!
+			return uuid.Nil, domain.ErrDuplicate
+		}
+		// Multi-tenant check: if user context is present and existing account belongs to another user
+		if userID != nil && existing.UserID != nil && *existing.UserID != *userID {
+			return uuid.Nil, domain.ErrDuplicate
+		}
+		// Reactivate existing account
+		restoredID, err := s.queries.ReactivateAccountWithCredentials(ctx, sqlcgen.ReactivateAccountWithCredentialsParams{
+			ID:                  existing.ID,
+			Name:                name,
+			Role:                role,
+			ApiKey:              apiKey,
+			ApiSecret:           apiSecret,
+			IpAddress:           ipAddress,
+			EncryptedPassword:   encPassword,
+			EncryptedTotpSecret: encTotpSecret,
+		})
+		if isIPUniqueViolation(err) {
+			return uuid.Nil, domain.ErrIPAlreadyAssigned
+		}
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return restoredID, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("check existing account: %w", err)
+	}
+
+	// 2. Insert new account
+	err = s.queries.CreateAccountWithCredentials(ctx, sqlcgen.CreateAccountWithCredentialsParams{
 		ID:                  id,
 		Name:                name,
 		Role:                role,
@@ -125,12 +145,15 @@ func (s *Store) CreateAccountWithCredentials(ctx context.Context, id uuid.UUID, 
 		UserID:              userID,
 	})
 	if isIPUniqueViolation(err) {
-		return domain.ErrIPAlreadyAssigned
+		return uuid.Nil, domain.ErrIPAlreadyAssigned
 	}
 	if isUniqueViolation(err) {
-		return domain.ErrDuplicate
+		return uuid.Nil, domain.ErrDuplicate
 	}
-	return err
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
 }
 
 // SetAccountEncryptedCredentials updates encrypted password and TOTP secret.
@@ -810,23 +833,62 @@ func (s *Store) SetAccountStatus(ctx context.Context, id uuid.UUID, status domai
 	return nil
 }
 
-// DeleteAccount removes an account row. Returns domain.ErrConflict if the
-// account is still referenced (a follow_link, master_fill, or
-// follower_order FK) — Postgres's own constraints are the source of
-// truth here rather than re-implementing referential checks in Go.
-// Returns domain.ErrNotFound if id has no accounts row.
+// DeleteAccount soft-deletes an account row, releasing its proxy IP while preserving
+// order history. Returns domain.ErrConflict if a master has followers or a follower
+// is attached to a group. Returns domain.ErrNotFound if id has no active accounts row.
 func (s *Store) DeleteAccount(ctx context.Context, id uuid.UUID) error {
-	rowsAffected, err := s.queries.DeleteAccount(ctx, id)
-	if isForeignKeyViolation(err) {
-		return domain.ErrConflict
-	}
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+
+	// 1. Verify account exists and is not already deleted
+	acc, err := qtx.AccountAuthInfo(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("check account: %w", err)
+	}
+
+	// 2. Check group attachments
+	if acc.Role == "master" {
+		followerCount, err := qtx.CountFollowersByMasterID(ctx, id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("check master followers: %w", err)
+		}
+		if followerCount > 0 {
+			return domain.ErrConflict
+		}
+		// Clean up empty master group
+		_, _ = qtx.DeleteGroupByMasterID(ctx, id)
+	} else {
+		// Follower: check if attached to a group
+		_, err := qtx.GroupIDForFollower(ctx, id)
+		if err == nil {
+			return domain.ErrConflict
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("check follower group: %w", err)
+		}
+	}
+
+	// 3. Clear portfolio caches
+	_ = qtx.ClearAccountPositions(ctx, id)
+	_ = qtx.ClearAccountHoldings(ctx, id)
+	_ = qtx.ClearAccountMargins(ctx, id)
+
+	// 4. Soft-delete the account
+	rowsAffected, err := qtx.SoftDeleteAccount(ctx, id)
+	if err != nil {
+		return fmt.Errorf("soft delete account: %w", err)
 	}
 	if rowsAffected == 0 {
 		return domain.ErrNotFound
 	}
-	return nil
+
+	return tx.Commit(ctx)
 }
 
 // DeleteFollowLink detaches a follower from its group without deleting

@@ -218,12 +218,22 @@ func run(logger *slog.Logger) error {
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("master fill consumer panicked", "panic", r)
+			}
+		}()
 		logger.Info("master fill consumer started")
 		if err := masterFillConsumer.Run(ctx, masterFillQueue); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("master fill consumer stopped unexpectedly", "error", err)
 		}
 	}()
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("follower status consumer panicked", "panic", r)
+			}
+		}()
 		logger.Info("follower status consumer started")
 		if err := followerStatusConsumer.Run(ctx, orderUpdateQueue); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("follower status consumer stopped unexpectedly", "error", err)
@@ -250,6 +260,11 @@ func run(logger *slog.Logger) error {
 	)
 	poller.FollowerConsumer = followerStatusConsumer
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("reconciliation poller panicked", "panic", r)
+			}
+		}()
 		logger.Info("reconciliation poller started")
 		if err := poller.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("reconciliation poller stopped unexpectedly", "error", err)
@@ -276,6 +291,11 @@ func run(logger *slog.Logger) error {
 
 	// Periodic session expiration cleaner
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("session pruner panicked", "panic", r)
+			}
+		}()
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -294,6 +314,11 @@ func run(logger *slog.Logger) error {
 
 	// Periodic portfolio sync for active authenticated accounts to keep MTM and positions fresh
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("periodic portfolio syncer panicked", "panic", r)
+			}
+		}()
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 		for {

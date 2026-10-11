@@ -971,6 +971,421 @@ func TestDeleteFollowLink_Succeeds(t *testing.T) {
 	}
 }
 
+func TestDeleteAccount_WithOrderHistory_PreservesOrdersAndFreesIP(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+
+	// Set a known IP on proxy_ips table and follower
+	testIP := "192.168.100.55"
+	if err := s.UpsertProxyIP(ctx, domain.ProxyIP{
+		IPAddress:  testIP,
+		IPType:     "ipv4",
+		Host:       "proxy.example.com",
+		Port:       8080,
+		Username:   "user",
+		Password:   "pass",
+		ValidFrom:  time.Now().Add(-24 * time.Hour),
+		ValidUntil: time.Now().Add(24 * time.Hour),
+		Plan:       "PRO",
+	}); err != nil {
+		t.Fatalf("UpsertProxyIP: %v", err)
+	}
+	if err := s.SetAccountIPAddress(ctx, follower, testIP); err != nil {
+		t.Fatalf("SetAccountIPAddress: %v", err)
+	}
+
+	// Verify testIP is NOT available while assigned to follower
+	availBefore, err := s.AvailableProxyIPs(ctx, "", nil)
+	if err != nil {
+		t.Fatalf("AvailableProxyIPs before: %v", err)
+	}
+	for _, ip := range availBefore {
+		if ip.IPAddress == testIP {
+			t.Fatalf("expected %s to be assigned, but was in available list", testIP)
+		}
+	}
+
+	// Insert master fill and follower order
+	fillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID:       master,
+		BrokerOrderID:  "m-order-1",
+		Exchange:       "NSE",
+		Tradingsymbol:  "RELIANCE",
+		FilledQuantity: 10,
+		AveragePrice:   decimal.NewFromInt(2500),
+		Status:         "COMPLETE",
+		OrderTimestamp: time.Now(),
+		RawPayload:     []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+
+	orderID, err := s.InsertFollowerOrder(ctx, domain.FollowerOrder{
+		MasterFillID:   fillID,
+		FollowerID:     follower,
+		IdempotencyTag: "tag-1",
+		IntendedQty:    10,
+		LotSize:        1,
+		SizingReason:   domain.ReasonOK,
+	})
+	if err != nil {
+		t.Fatalf("InsertFollowerOrder: %v", err)
+	}
+
+	// Now delete the follower. Even though order history exists, this MUST succeed!
+	if err := s.DeleteAccount(ctx, follower); err != nil {
+		t.Fatalf("DeleteAccount with order history failed: %v, want success", err)
+	}
+
+	// 1. Account should no longer appear in Accounts listing
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if len(accs) != 0 {
+		t.Fatalf("expected account to be hidden, found: %+v", accs)
+	}
+
+	// 2. Proxy IP should immediately be available again
+	availAfter, err := s.AvailableProxyIPs(ctx, "", nil)
+	if err != nil {
+		t.Fatalf("AvailableProxyIPs after: %v", err)
+	}
+	found := false
+	for _, ip := range availAfter {
+		if ip.IPAddress == testIP {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected IP %s to be freed and available, but was not found in available list", testIP)
+	}
+
+	// 3. Follower order MUST still exist in database
+	var gotFollowerID uuid.UUID
+	err = pool.QueryRow(ctx, "SELECT follower_id FROM follower_orders WHERE id = $1", orderID).Scan(&gotFollowerID)
+	if err != nil {
+		t.Fatalf("follower_orders row should still exist in DB, got err = %v", err)
+	}
+	if gotFollowerID != follower {
+		t.Fatalf("gotFollowerID = %v, want %v", gotFollowerID, follower)
+	}
+}
+
+func TestReactivateAccount_RestoresOrderHistory(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) == 0 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	brokerUserID := accs[0].BrokerAccountID
+
+	// Create an order
+	fillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID:       master,
+		BrokerOrderID:  "m-order-reactivate",
+		Exchange:       "NSE",
+		Tradingsymbol:  "INFY",
+		FilledQuantity: 10,
+		AveragePrice:   decimal.NewFromInt(1500),
+		Status:         "COMPLETE",
+		OrderTimestamp: time.Now(),
+		RawPayload:     []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+	placedQty := 10
+	_, err = s.InsertFollowerOrder(ctx, domain.FollowerOrder{
+		MasterFillID:   fillID,
+		FollowerID:     follower,
+		IdempotencyTag: "tag-reactivate-1",
+		IntendedQty:    10,
+		LotSize:        1,
+		SizingReason:   domain.ReasonOK,
+		PlacedQty:      &placedQty,
+		TerminalStatus: "COMPLETE",
+		FilledQty:      10,
+		Tradingsymbol:  "INFY",
+	})
+	if err != nil {
+		t.Fatalf("InsertFollowerOrder: %v", err)
+	}
+
+	// Delete the follower
+	if err := s.DeleteAccount(ctx, follower); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	// Account is hidden
+	delAccs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(delAccs) != 0 {
+		t.Fatalf("expected 0 accounts for deleted follower, got %d", len(delAccs))
+	}
+
+	// Re-add the same broker user id with CreateAccountWithCredentials
+	newID := uuid.New()
+	restoredID, err := s.CreateAccountWithCredentials(ctx, newID, "Restored Account", "follower", "zerodha", brokerUserID, "new-key", "new-secret", "10.0.99.1", "new-pass", "new-totp")
+	if err != nil {
+		t.Fatalf("CreateAccountWithCredentials (reactivation): %v", err)
+	}
+	if restoredID != follower {
+		t.Fatalf("restoredID = %v, want original ID %v", restoredID, follower)
+	}
+
+	// The account should now appear in Accounts listing with new details
+	restoredAccs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(restoredAccs) != 1 {
+		t.Fatalf("Accounts after reactivation: len = %d, want 1, err = %v", len(restoredAccs), err)
+	}
+	if restoredAccs[0].Name != "Restored Account" {
+		t.Errorf("Name = %v, want Restored Account", restoredAccs[0].Name)
+	}
+	if restoredAccs[0].IPAddress != "10.0.99.1" {
+		t.Errorf("IPAddress = %v, want 10.0.99.1", restoredAccs[0].IPAddress)
+	}
+
+	// Order history should immediately be accessible again!
+	ordersDetail, err := s.AccountOrders(ctx, follower, "open_orders", 1, 10)
+	if err != nil {
+		t.Fatalf("AccountOrders: %v", err)
+	}
+	if len(ordersDetail.OpenOrders) == 0 {
+		t.Fatalf("expected order history to be restored, but found 0 open orders")
+	}
+
+	// Attempting to re-add while already active should return ErrDuplicate
+	_, err = s.CreateAccountWithCredentials(ctx, uuid.New(), "Another Account", "follower", "zerodha", brokerUserID, "k", "s", "10.0.99.2", "p", "t")
+	if !errors.Is(err, domain.ErrDuplicate) {
+		t.Fatalf("re-adding active account err = %v, want ErrDuplicate", err)
+	}
+}
+
+func TestDeleteMasterAccount_WithFillsAndEmptyGroup_DissolvesGroupAndPreservesFills(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+
+	fillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID:       master,
+		BrokerOrderID:  "master-order-x",
+		Exchange:       "NSE",
+		Tradingsymbol:  "TCS",
+		FilledQuantity: 5,
+		AveragePrice:   decimal.NewFromInt(3800),
+		Status:         "COMPLETE",
+		OrderTimestamp: time.Now(),
+		RawPayload:     []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+
+	// Master has group with 0 followers. Deleting master must succeed!
+	if err := s.DeleteAccount(ctx, master); err != nil {
+		t.Fatalf("DeleteAccount master: %v", err)
+	}
+
+	// 1. Master is hidden from Accounts
+	accs, err := s.Accounts(ctx, []uuid.UUID{master})
+	if err != nil {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if len(accs) != 0 {
+		t.Fatalf("expected master to be hidden, got %+v", accs)
+	}
+
+	// 2. Group was dissolved
+	groups, err := s.Groups(ctx)
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups after master deletion, got %d", len(groups))
+	}
+
+	// 3. master_fills row STILL EXISTS in database
+	var gotMasterID uuid.UUID
+	err = pool.QueryRow(ctx, "SELECT master_id FROM master_fills WHERE id = $1", fillID).Scan(&gotMasterID)
+	if err != nil {
+		t.Fatalf("master_fills row should still exist in DB, got err = %v", err)
+	}
+	if gotMasterID != master {
+		t.Fatalf("gotMasterID = %v, want %v", gotMasterID, master)
+	}
+}
+
+func TestDeleteAccount_WithOrderEvents_PreservesAuditTrail(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+
+	fillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID:       master,
+		BrokerOrderID:  "m-order-events",
+		Exchange:       "NSE",
+		Tradingsymbol:  "SBIN",
+		FilledQuantity: 20,
+		AveragePrice:   decimal.NewFromInt(600),
+		Status:         "COMPLETE",
+		OrderTimestamp: time.Now(),
+		RawPayload:     []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+
+	orderID, err := s.InsertFollowerOrder(ctx, domain.FollowerOrder{
+		MasterFillID:   fillID,
+		FollowerID:     follower,
+		IdempotencyTag: "tag-events-1",
+		IntendedQty:    20,
+		LotSize:        1,
+		SizingReason:   domain.ReasonOK,
+	})
+	if err != nil {
+		t.Fatalf("InsertFollowerOrder: %v", err)
+	}
+
+	// Append order event for follower account
+	if err := s.AppendOrderEvent(ctx, domain.OrderEvent{
+		FollowerOrderID: &orderID,
+		MasterFillID:    &fillID,
+		AccountID:       follower,
+		EventType:       "placed",
+		Payload:         []byte(`{"status":"placed"}`),
+	}); err != nil {
+		t.Fatalf("AppendOrderEvent: %v", err)
+	}
+
+	// Delete follower with order events
+	if err := s.DeleteAccount(ctx, follower); err != nil {
+		t.Fatalf("DeleteAccount with order events: %v", err)
+	}
+
+	// order_events row MUST still exist in database
+	var eventCount int
+	err = pool.QueryRow(ctx, "SELECT count(*) FROM order_events WHERE account_id = $1", follower).Scan(&eventCount)
+	if err != nil {
+		t.Fatalf("query order_events: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("order_events count = %d, want 1", eventCount)
+	}
+}
+
+func TestDeletedAccount_HiddenFromLookupAndOrders(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	follower := seedAccount(t, s, "follower")
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) == 0 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	brokerUserID := accs[0].BrokerAccountID
+
+	// Delete follower
+	if err := s.DeleteAccount(ctx, follower); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	// 1. AccountByBrokerUserID MUST return ErrNotFound (so postback webhook drops callbacks for deleted account)
+	_, _, _, err = s.AccountByBrokerUserID(ctx, brokerUserID)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("AccountByBrokerUserID for deleted account = %v, want ErrNotFound", err)
+	}
+
+	// 2. AccountOrders MUST return ErrNotFound
+	_, err = s.AccountOrders(ctx, follower, "open_orders", 1, 10)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("AccountOrders for deleted account = %v, want ErrNotFound", err)
+	}
+}
+
+func TestReactivateAccount_AttachToGroupAndIPConflict(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+
+	// Follower attached to master's group
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID:  follower,
+		MasterID:    master,
+		CloneFactor: decimal.NewFromFloat(1.0),
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) == 0 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	brokerUserID := accs[0].BrokerAccountID
+
+	// Detach follower and delete it
+	if err := s.DeleteFollowLink(ctx, follower); err != nil {
+		t.Fatalf("DeleteFollowLink: %v", err)
+	}
+	if err := s.DeleteAccount(ctx, follower); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	// Seed another active account holding IP 10.0.88.88
+	activeOther := uuid.New()
+	if err := s.CreateAccount(ctx, activeOther, "Other", "follower", "zerodha", "OTHER_USER", "k", "s", "10.0.88.88"); err != nil {
+		t.Fatalf("CreateAccount activeOther: %v", err)
+	}
+
+	// Attempting to reactivate with 10.0.88.88 MUST return ErrIPAlreadyAssigned
+	_, err = s.CreateAccountWithCredentials(ctx, uuid.New(), "Reactivated", "follower", "zerodha", brokerUserID, "k", "s", "10.0.88.88", "p", "t")
+	if !errors.Is(err, domain.ErrIPAlreadyAssigned) {
+		t.Fatalf("reactivating with taken IP err = %v, want ErrIPAlreadyAssigned", err)
+	}
+
+	// Reactivating with free IP 10.0.88.99 succeeds and returns original UUID
+	restoredID, err := s.CreateAccountWithCredentials(ctx, uuid.New(), "Reactivated Follower", "follower", "zerodha", brokerUserID, "k", "s", "10.0.88.99", "p", "t")
+	if err != nil {
+		t.Fatalf("reactivate with free IP: %v", err)
+	}
+	if restoredID != follower {
+		t.Fatalf("restoredID = %v, want original %v", restoredID, follower)
+	}
+
+	// Attach restored follower back to group
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID:  restoredID,
+		MasterID:    master,
+		CloneFactor: decimal.NewFromFloat(2.0),
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink after reactivation: %v", err)
+	}
+
+	// Verify GroupDetail shows restored follower
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+	if len(detail.Followers) != 1 {
+		t.Fatalf("GroupDetail followers count = %d, want 1", len(detail.Followers))
+	}
+	if detail.Followers[0].AccountID != follower {
+		t.Errorf("detail AccountID = %v, want %v", detail.Followers[0].AccountID, follower)
+	}
+}
+
 func TestSetAccountAPIKey_UpdatesKey(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

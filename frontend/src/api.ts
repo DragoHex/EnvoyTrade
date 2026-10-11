@@ -161,9 +161,22 @@ function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Res
     ...init,
     credentials: 'include',
   }
-  return fetch(input, options).then((res) => {
+  const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+  return fetch(input, options).then(async (res) => {
     if (res.status === 401 && onUnauthorizedCallback) {
-      onUnauthorizedCallback()
+      // Upstream broker token errors on trading/rebalance operations must not log the trader out
+      if (!urlStr.includes('/positions/rebalance') && !urlStr.includes('/positions/square-off') && !urlStr.includes('/actions')) {
+        try {
+          const clone = res.clone()
+          const data = await clone.json().catch(() => null)
+          const msg = data && typeof data === 'object' ? String(data.error || data.message || '') : ''
+          if (!msg.toLowerCase().includes('broker')) {
+            onUnauthorizedCallback()
+          }
+        } catch {
+          onUnauthorizedCallback()
+        }
+      }
     }
     return res
   })

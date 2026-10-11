@@ -71,6 +71,11 @@ func (c *MasterFillConsumer) Handle(ctx context.Context, fill domain.MasterFill)
 	err = c.Engine.HandleMasterFill(ctx, fill)
 	if err == nil && c.Syncer != nil {
 		go func(mID uuid.UUID) {
+			defer func() {
+				if r := recover(); r != nil {
+					c.log().Error("listener: master sync panicked", "master_id", mID, "panic", r)
+				}
+			}()
 			_ = c.Syncer.SyncAccountPortfolio(context.Background(), mID)
 		}(fill.MasterID)
 	}
@@ -180,6 +185,11 @@ func (c *FollowerStatusConsumer) Handle(ctx context.Context, upd domain.OrderUpd
 
 	if upd.Status == domain.TerminalComplete && c.Syncer != nil {
 		go func(accID uuid.UUID) {
+			defer func() {
+				if r := recover(); r != nil {
+					c.log().Error("listener: follower sync panicked", "follower_id", accID, "panic", r)
+				}
+			}()
 			_ = c.Syncer.SyncAccountPortfolio(context.Background(), accID)
 		}(followerID)
 	}

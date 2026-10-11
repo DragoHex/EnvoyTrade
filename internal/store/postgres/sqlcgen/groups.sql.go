@@ -12,6 +12,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countFollowersByMasterID = `-- name: CountFollowersByMasterID :one
+SELECT COUNT(f.follower_id)::int
+FROM groups g
+JOIN follow_links f ON f.group_id = g.id
+WHERE g.master_id = $1
+`
+
+func (q *Queries) CountFollowersByMasterID(ctx context.Context, masterID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countFollowersByMasterID, masterID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createGroup = `-- name: CreateGroup :exec
 INSERT INTO groups (id, name, master_id, user_id)
 VALUES ($1, $2, $3, $4)
@@ -40,6 +54,18 @@ DELETE FROM groups WHERE id = $1
 
 func (q *Queries) DeleteGroup(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteGroup, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteGroupByMasterID = `-- name: DeleteGroupByMasterID :execrows
+DELETE FROM groups WHERE master_id = $1
+`
+
+func (q *Queries) DeleteGroupByMasterID(ctx context.Context, masterID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupByMasterID, masterID)
 	if err != nil {
 		return 0, err
 	}
@@ -99,7 +125,7 @@ func (q *Queries) GroupByMasterID(ctx context.Context, masterID uuid.UUID) (Grou
 const groupFollowerRows = `-- name: GroupFollowerRows :many
 SELECT a.id, a.name, a.broker_user_id, f.enabled, a.status
 FROM follow_links f
-JOIN accounts a ON a.id = f.follower_id
+JOIN accounts a ON a.id = f.follower_id AND a.deleted_at IS NULL
 WHERE f.group_id = $1
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC
 `
@@ -144,7 +170,7 @@ SELECT g.id, g.name, g.master_id,
        a.name AS master_name,
        a.active AS master_active
 FROM groups g
-JOIN accounts a ON a.id = g.master_id
+JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 WHERE (g.id = $1 OR g.master_id = $1)
   AND ($2::uuid IS NULL OR g.user_id = $2::uuid)
 LIMIT 1
@@ -187,7 +213,7 @@ SELECT g.id, g.name, g.master_id,
        a.active,
        COUNT(f.follower_id)::int AS follower_count
 FROM groups g
-JOIN accounts a ON a.id = g.master_id
+JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 LEFT JOIN follow_links f ON f.group_id = g.id
 WHERE $1::uuid IS NULL OR g.user_id = $1::uuid
 GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active

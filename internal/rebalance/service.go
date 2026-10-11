@@ -526,6 +526,15 @@ func (s *Service) RebalanceGroup(ctx context.Context, groupID uuid.UUID, followe
 		wg.Add(1)
 		go func(targetID uuid.UUID) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					s.log().Error("rebalance: follower rebalance panicked", "follower_id", targetID, "panic", r)
+					mu.Lock()
+					result.Errors = append(result.Errors, fmt.Sprintf("follower %s panicked: %v", targetID, r))
+					result.Status = "partial"
+					mu.Unlock()
+				}
+			}()
 			fRes, fErr := s.RebalanceAccount(ctx, targetID)
 			mu.Lock()
 			defer mu.Unlock()
