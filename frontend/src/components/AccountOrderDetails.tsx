@@ -20,7 +20,7 @@ import {
 } from './icons'
 import { EmptyState } from './EmptyState'
 import { MtmBreakdownPopover } from './MtmBreakdownPopover'
-import { SegmentBreakdownPopover } from './SegmentBreakdownPopover'
+import { MarginBreakdownPopover } from './MarginBreakdownPopover'
 
 export type OrderTabId =
   | 'open_positions'
@@ -260,9 +260,8 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
       accountValue: toNumber(s.accountValue),
       availableMargin: s.availableMargin !== undefined ? toNumber(s.availableMargin) : undefined,
       availableCash: s.availableCash !== undefined ? toNumber(s.availableCash) : undefined,
-      marginBreakdown: s.marginBreakdown,
-      cashBreakdown: s.cashBreakdown,
       status: s.status ?? 'offline',
+      marginBreakdown: s.marginBreakdown,
     }
   }
 
@@ -434,9 +433,9 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
           <div class="summary-metric-item">
             <div class="metric-label-wrap">
               <span class="metric-label">Margin / Value</span>
-              <SegmentBreakdownPopover
-                title="Margin breakdown"
-                total={summary().availableMargin ?? summary().accountValue}
+              <MarginBreakdownPopover
+                availableMargin={summary().availableMargin ?? summary().accountValue}
+                availableCash={summary().availableCash}
                 breakdown={summary().marginBreakdown}
               />
             </div>

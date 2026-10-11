@@ -84,7 +84,7 @@ tr.row-expanded {
   border: 1px solid var(--color-border);
   border-radius: 6px;
   margin: 8px 12px 16px 12px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
@@ -96,7 +96,16 @@ tr.row-expanded {
   padding: 10px 16px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
   gap: 16px;
+}
+
+.order-drawer-header [data-tooltip]:hover::after {
+  right: 0;
+  left: auto;
+  transform: none;
+  z-index: 9999;
 }
 
 .order-summary-metrics {

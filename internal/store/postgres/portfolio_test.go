@@ -136,13 +136,12 @@ func TestStore_SyncPositions_OvernightPositionsWithPnL(t *testing.T) {
 		ProductMtm: map[string]decimal.Decimal{
 			"NRML": decimal.NewFromFloat(10450.0),
 		},
-		MarginBreakdown: &domain.SegmentBreakdown{
-			Equity:    decimal.NewFromFloat(200000.0),
-			Commodity: decimal.NewFromFloat(50000.0),
-		},
-		CashBreakdown: &domain.SegmentBreakdown{
-			Equity:    decimal.NewFromFloat(40000.0),
-			Commodity: decimal.NewFromFloat(10000.0),
+		MarginBreakdown: &domain.MarginBreakdown{
+			Net:         marginVal,
+			Cash:        cashVal,
+			OpeningCash: cashVal,
+			Collateral:  decimal.NewFromFloat(200000.0),
+			Utilised:    decimal.Zero,
 		},
 	}
 	if err := store.SyncAccountMargins(ctx, accID, margin); err != nil {
@@ -173,10 +172,13 @@ func TestStore_SyncPositions_OvernightPositionsWithPnL(t *testing.T) {
 	if !detail.Summary.TotalMtm.Equal(expectedPnl) {
 		t.Errorf("detail.Summary.TotalMtm = %s, want %s", detail.Summary.TotalMtm, expectedPnl)
 	}
-	if detail.Summary.MarginBreakdown == nil || detail.Summary.MarginBreakdown.Equity.Cmp(decimal.NewFromFloat(200000.0)) != 0 {
-		t.Errorf("MarginBreakdown.Equity = %v, want 200000.0", detail.Summary.MarginBreakdown)
+	if detail.Summary.MarginBreakdown == nil {
+		t.Fatalf("detail.Summary.MarginBreakdown is nil, want populated breakdown")
 	}
-	if detail.Summary.CashBreakdown == nil || detail.Summary.CashBreakdown.Equity.Cmp(decimal.NewFromFloat(40000.0)) != 0 {
-		t.Errorf("CashBreakdown.Equity = %v, want 40000.0", detail.Summary.CashBreakdown)
+	if !detail.Summary.MarginBreakdown.Net.Equal(marginVal) {
+		t.Errorf("MarginBreakdown.Net = %s, want %s", detail.Summary.MarginBreakdown.Net, marginVal)
+	}
+	if !detail.Summary.MarginBreakdown.Cash.Equal(cashVal) {
+		t.Errorf("MarginBreakdown.Cash = %s, want %s", detail.Summary.MarginBreakdown.Cash, cashVal)
 	}
 }

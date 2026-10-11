@@ -175,11 +175,11 @@ func TestSyncAccountPortfolio_WithValidAccessToken(t *testing.T) {
 	if !store.syncedMargins.AvailableCash.Equal(decimal.NewFromFloat(105000.0)) {
 		t.Fatalf("syncedMargins AvailableCash = %v, want 105000.0", store.syncedMargins.AvailableCash)
 	}
-	if !store.syncedMargins.MarginBreakdown.Equity.Equal(decimal.NewFromFloat(200000.0)) {
-		t.Fatalf("syncedMargins MarginBreakdown.Equity = %v, want 200000.0", store.syncedMargins.MarginBreakdown.Equity)
+	if store.syncedMargins.MarginBreakdown == nil {
+		t.Fatalf("syncedMargins MarginBreakdown is nil, want populated breakdown")
 	}
-	if !store.syncedMargins.CashBreakdown.Equity.Equal(decimal.NewFromFloat(95000.0)) {
-		t.Fatalf("syncedMargins CashBreakdown.Equity = %v, want 95000.0", store.syncedMargins.CashBreakdown.Equity)
+	if !store.syncedMargins.MarginBreakdown.Net.Equal(decimal.NewFromFloat(250000.0)) {
+		t.Errorf("syncedMargins MarginBreakdown.Net = %v, want 250000.0", store.syncedMargins.MarginBreakdown.Net)
 	}
 }
 

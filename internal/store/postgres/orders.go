@@ -259,7 +259,7 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 	var netQty int32
 	var totalMtm, realizedPnl, accountValue, availableCash, availableMargin decimal.Decimal
 	var marginStatus string
-	var rawProductMtm, rawMarginBreakdown, rawCashBreakdown []byte
+	var rawProductMtm, rawMarginBreakdown []byte
 	err = s.pool.QueryRow(ctx, `
 		SELECT 
 			net_qty, 
@@ -290,26 +290,19 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 					'{}'::jsonb
 				)
 			END,
-			COALESCE(margin_breakdown, '{}'::jsonb),
-			COALESCE(cash_breakdown, '{}'::jsonb)
+			margin_breakdown
 		FROM account_margins
 		WHERE account_id = $1
-	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus, &rawProductMtm, &rawMarginBreakdown, &rawCashBreakdown)
+	`, accountID).Scan(&netQty, &totalMtm, &realizedPnl, &accountValue, &availableCash, &availableMargin, &marginStatus, &rawProductMtm, &rawMarginBreakdown)
 	var breakdown map[string]decimal.Decimal
-	var marginBreakdown, cashBreakdown *domain.SegmentBreakdown
 	if len(rawProductMtm) > 0 {
 		_ = json.Unmarshal(rawProductMtm, &breakdown)
 	}
+	var marginBreakdown *domain.MarginBreakdown
 	if len(rawMarginBreakdown) > 0 && string(rawMarginBreakdown) != "{}" {
-		var mb domain.SegmentBreakdown
-		if err := json.Unmarshal(rawMarginBreakdown, &mb); err == nil && !mb.IsZero() {
+		var mb domain.MarginBreakdown
+		if err := json.Unmarshal(rawMarginBreakdown, &mb); err == nil {
 			marginBreakdown = &mb
-		}
-	}
-	if len(rawCashBreakdown) > 0 && string(rawCashBreakdown) != "{}" {
-		var cb domain.SegmentBreakdown
-		if err := json.Unmarshal(rawCashBreakdown, &cb); err == nil && !cb.IsZero() {
-			cashBreakdown = &cb
 		}
 	}
 	if err == nil {
@@ -326,7 +319,6 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 			Status:               marginStatus,
 			MtmBreakdown:         breakdown,
 			MarginBreakdown:      marginBreakdown,
-			CashBreakdown:        cashBreakdown,
 		}
 	} else {
 		var fallbackProductMtm []byte

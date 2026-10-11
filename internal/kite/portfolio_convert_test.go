@@ -112,17 +112,15 @@ func TestCalculatePositionMetrics(t *testing.T) {
 	if !summary.AvailableMargin.Equal(expectedMargin) {
 		t.Errorf("AvailableMargin = %s, want %s", summary.AvailableMargin, expectedMargin)
 	}
-	if !summary.MarginBreakdown.Equity.Equal(decimal.NewFromFloat(250000.0)) {
-		t.Errorf("MarginBreakdown.Equity = %s, want 250000.0", summary.MarginBreakdown.Equity)
+
+	if summary.MarginBreakdown == nil {
+		t.Fatalf("summary.MarginBreakdown is nil, want populated breakdown")
 	}
-	if !summary.MarginBreakdown.Commodity.Equal(decimal.NewFromFloat(50000.0)) {
-		t.Errorf("MarginBreakdown.Commodity = %s, want 50000.0", summary.MarginBreakdown.Commodity)
+	if !summary.MarginBreakdown.Net.Equal(expectedMargin) {
+		t.Errorf("MarginBreakdown.Net = %s, want %s", summary.MarginBreakdown.Net, expectedMargin)
 	}
-	if !summary.CashBreakdown.Equity.Equal(decimal.NewFromFloat(60000.0)) {
-		t.Errorf("CashBreakdown.Equity = %s, want 60000.0", summary.CashBreakdown.Equity)
-	}
-	if !summary.CashBreakdown.Commodity.Equal(decimal.NewFromFloat(15000.0)) {
-		t.Errorf("CashBreakdown.Commodity = %s, want 15000.0", summary.CashBreakdown.Commodity)
+	if !summary.MarginBreakdown.Cash.Equal(expectedCash) {
+		t.Errorf("MarginBreakdown.Cash = %s, want %s", summary.MarginBreakdown.Cash, expectedCash)
 	}
 }
 
@@ -150,12 +148,6 @@ func TestCalculatePositionMetrics_PledgedCollateralNegativeCash(t *testing.T) {
 	}
 	if !summary.AvailableCash.Equal(decimal.NewFromFloat(-437945.10)) {
 		t.Errorf("AvailableCash = %s, want -437945.10", summary.AvailableCash)
-	}
-	if !summary.MarginBreakdown.Equity.Equal(decimal.NewFromFloat(1304250.99)) {
-		t.Errorf("MarginBreakdown.Equity = %s, want 1304250.99", summary.MarginBreakdown.Equity)
-	}
-	if !summary.CashBreakdown.Equity.Equal(decimal.NewFromFloat(-437945.10)) {
-		t.Errorf("CashBreakdown.Equity = %s, want -437945.10", summary.CashBreakdown.Equity)
 	}
 }
 
