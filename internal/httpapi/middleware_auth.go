@@ -19,7 +19,8 @@ func authMiddleware(next http.Handler, store AuthStore, logger *slog.Logger) htt
 		path := r.URL.Path
 
 		// Public endpoints that never require session authentication
-		if path == "/broker-callback" ||
+		if path == "/healthz" ||
+			path == "/broker-callback" ||
 			path == "/api/v1/auth/login" ||
 			path == "/api/v1/auth/register" {
 			next.ServeHTTP(w, r)

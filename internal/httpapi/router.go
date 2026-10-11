@@ -26,6 +26,7 @@ type routerConfig struct {
 	squareOffSvc      SquareOffService
 	rebalanceSvc      RebalanceService
 	followerRegistrar FollowerRegistrar
+	brokerEvicter     BrokerEvicter
 	staticFS          fs.FS
 }
 
@@ -81,6 +82,18 @@ func WithRebalanceService(svc RebalanceService) Option {
 	}
 }
 
+// BrokerEvicter evicts cached brokers on credential mutations or deletions.
+type BrokerEvicter interface {
+	Evict(accountID uuid.UUID)
+}
+
+// WithBrokerEvicter configures cache invalidation for broker instances.
+func WithBrokerEvicter(evicter BrokerEvicter) Option {
+	return func(c *routerConfig) {
+		c.brokerEvicter = evicter
+	}
+}
+
 // WithFollowerRegistrar configures dynamic follower worker pool registration.
 func WithFollowerRegistrar(fr FollowerRegistrar) Option {
 	return func(c *routerConfig) {
@@ -113,7 +126,12 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 		squareOffSvc:      cfg.squareOffSvc,
 		rebalanceSvc:      cfg.rebalanceSvc,
 		followerRegistrar: cfg.followerRegistrar,
+		brokerEvicter:     cfg.brokerEvicter,
 	}
+
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
 
 	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", h.postLogin)
@@ -227,6 +245,7 @@ type handlers struct {
 	squareOffSvc      SquareOffService
 	rebalanceSvc      RebalanceService
 	followerRegistrar FollowerRegistrar
+	brokerEvicter     BrokerEvicter
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
