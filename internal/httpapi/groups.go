@@ -51,6 +51,8 @@ type groupFollowerResponse struct {
 	AvailableCash        *decimal.Decimal           `json:"availableCash,omitempty"`
 	AvailableMargin      *decimal.Decimal           `json:"availableMargin,omitempty"`
 	MtmBreakdown         map[string]decimal.Decimal `json:"mtmBreakdown,omitempty"`
+	MarginBreakdown      *domain.SegmentBreakdown   `json:"marginBreakdown,omitempty"`
+	CashBreakdown        *domain.SegmentBreakdown   `json:"cashBreakdown,omitempty"`
 }
 
 type groupDetailResponse struct {
@@ -68,6 +70,8 @@ type groupDetailResponse struct {
 	MasterAvailableCash        *decimal.Decimal           `json:"masterAvailableCash,omitempty"`
 	MasterAvailableMargin      *decimal.Decimal           `json:"masterAvailableMargin,omitempty"`
 	MasterMtmBreakdown         map[string]decimal.Decimal `json:"masterMtmBreakdown,omitempty"`
+	MasterMarginBreakdown      *domain.SegmentBreakdown   `json:"masterMarginBreakdown,omitempty"`
+	MasterCashBreakdown        *domain.SegmentBreakdown   `json:"masterCashBreakdown,omitempty"`
 	Followers                  []groupFollowerResponse    `json:"followers"`
 }
 
@@ -179,6 +183,8 @@ func (h *handlers) getGroupDetail(w http.ResponseWriter, r *http.Request) {
 			AvailableCash:        f.AvailableCash,
 			AvailableMargin:      f.AvailableMargin,
 			MtmBreakdown:         f.MtmBreakdown,
+			MarginBreakdown:      f.MarginBreakdown,
+			CashBreakdown:        f.CashBreakdown,
 		}
 	}
 	writeJSON(w, http.StatusOK, groupDetailResponse{
@@ -196,6 +202,8 @@ func (h *handlers) getGroupDetail(w http.ResponseWriter, r *http.Request) {
 		MasterAvailableCash:        detail.MasterAvailableCash,
 		MasterAvailableMargin:      detail.MasterAvailableMargin,
 		MasterMtmBreakdown:         detail.MasterMtmBreakdown,
+		MasterMarginBreakdown:      detail.MasterMarginBreakdown,
+		MasterCashBreakdown:        detail.MasterCashBreakdown,
 		Followers:                  followers,
 	})
 }
