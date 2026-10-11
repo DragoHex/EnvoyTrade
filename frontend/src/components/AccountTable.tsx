@@ -1,6 +1,6 @@
 import { Index, createSignal } from 'solid-js'
 import { AccountRow } from './AccountRow'
-import type { ActionType, GroupFollower } from '../api'
+import type { ActionType, GroupFollower, SegmentBreakdown } from '../api'
 
 export function AccountTable(props: {
   master: {
@@ -19,6 +19,8 @@ export function AccountTable(props: {
     groupId?: string
     groupName?: string
     mtmBreakdown?: Record<string, number | string>
+    marginBreakdown?: SegmentBreakdown | Record<string, number | string>
+    cashBreakdown?: SegmentBreakdown | Record<string, number | string>
   }
   followers: GroupFollower[]
   hasImbalance?: boolean
@@ -86,6 +88,8 @@ export function AccountTable(props: {
             availableCash: props.master.availableCash,
             availableMargin: props.master.availableMargin,
             mtmBreakdown: props.master.mtmBreakdown,
+            marginBreakdown: props.master.marginBreakdown,
+            cashBreakdown: props.master.cashBreakdown,
           }}
           isMaster
           hasImbalance={props.hasImbalance}

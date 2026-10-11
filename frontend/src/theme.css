@@ -2509,7 +2509,9 @@ nav a.user-badge-link.active:hover,
   position: relative;
 }
 
-.col-mtm-wrap {
+.col-mtm-wrap,
+.col-cash-wrap,
+.col-margin-wrap {
   display: inline-flex;
   align-items: center;
   gap: 4px;
