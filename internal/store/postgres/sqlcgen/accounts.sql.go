@@ -15,7 +15,7 @@ import (
 
 const accountAuthInfo = `-- name: AccountAuthInfo :one
 SELECT id, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret, access_token, token_expires_at, auth_status, auth_error
-FROM accounts WHERE id = $1
+FROM accounts WHERE id = $1 AND deleted_at IS NULL
 `
 
 type AccountAuthInfoRow struct {
@@ -55,8 +55,42 @@ func (q *Queries) AccountAuthInfo(ctx context.Context, id uuid.UUID) (AccountAut
 	return i, err
 }
 
+const accountByBrokerAndUserIDAny = `-- name: AccountByBrokerAndUserIDAny :one
+SELECT id, user_id, role, broker, broker_user_id, deleted_at
+FROM accounts
+WHERE broker = $1 AND broker_user_id = $2
+`
+
+type AccountByBrokerAndUserIDAnyParams struct {
+	Broker       string
+	BrokerUserID string
+}
+
+type AccountByBrokerAndUserIDAnyRow struct {
+	ID           uuid.UUID
+	UserID       *uuid.UUID
+	Role         string
+	Broker       string
+	BrokerUserID string
+	DeletedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) AccountByBrokerAndUserIDAny(ctx context.Context, arg AccountByBrokerAndUserIDAnyParams) (AccountByBrokerAndUserIDAnyRow, error) {
+	row := q.db.QueryRow(ctx, accountByBrokerAndUserIDAny, arg.Broker, arg.BrokerUserID)
+	var i AccountByBrokerAndUserIDAnyRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Role,
+		&i.Broker,
+		&i.BrokerUserID,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const accountByBrokerUserID = `-- name: AccountByBrokerUserID :one
-SELECT id, role, api_secret FROM accounts WHERE broker_user_id = $1
+SELECT id, role, api_secret FROM accounts WHERE broker_user_id = $1 AND deleted_at IS NULL
 `
 
 type AccountByBrokerUserIDRow struct {
@@ -73,7 +107,7 @@ func (q *Queries) AccountByBrokerUserID(ctx context.Context, brokerUserID string
 }
 
 const accountRole = `-- name: AccountRole :one
-SELECT role FROM accounts WHERE id = $1
+SELECT role FROM accounts WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) AccountRole(ctx context.Context, id uuid.UUID) (string, error) {
@@ -92,7 +126,8 @@ SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret
 FROM accounts a
 LEFT JOIN follow_links f ON f.follower_id = a.id
 LEFT JOIN groups g ON (g.id = f.group_id OR (a.role = 'master' AND g.master_id = a.id))
-WHERE ($1::uuid[] IS NULL OR a.id = ANY($1::uuid[]))
+WHERE a.deleted_at IS NULL
+  AND ($1::uuid[] IS NULL OR a.id = ANY($1::uuid[]))
   AND ($2::uuid IS NULL OR a.user_id = $2::uuid)
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC
 `
@@ -160,6 +195,33 @@ func (q *Queries) Accounts(ctx context.Context, arg AccountsParams) ([]AccountsR
 		return nil, err
 	}
 	return items, nil
+}
+
+const clearAccountHoldings = `-- name: ClearAccountHoldings :exec
+DELETE FROM account_holdings WHERE account_id = $1
+`
+
+func (q *Queries) ClearAccountHoldings(ctx context.Context, accountID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearAccountHoldings, accountID)
+	return err
+}
+
+const clearAccountMargins = `-- name: ClearAccountMargins :exec
+DELETE FROM account_margins WHERE account_id = $1
+`
+
+func (q *Queries) ClearAccountMargins(ctx context.Context, accountID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearAccountMargins, accountID)
+	return err
+}
+
+const clearAccountPositions = `-- name: ClearAccountPositions :exec
+DELETE FROM account_positions WHERE account_id = $1
+`
+
+func (q *Queries) ClearAccountPositions(ctx context.Context, accountID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearAccountPositions, accountID)
+	return err
 }
 
 const createAccount = `-- name: CreateAccount :exec
@@ -242,7 +304,7 @@ func (q *Queries) DeleteAccount(ctx context.Context, id uuid.UUID) (int64, error
 }
 
 const masterActive = `-- name: MasterActive :one
-SELECT active FROM accounts WHERE id = $1 AND role = 'master'
+SELECT active FROM accounts WHERE id = $1 AND role = 'master' AND deleted_at IS NULL
 `
 
 func (q *Queries) MasterActive(ctx context.Context, id uuid.UUID) (bool, error) {
@@ -250,6 +312,52 @@ func (q *Queries) MasterActive(ctx context.Context, id uuid.UUID) (bool, error) 
 	var active bool
 	err := row.Scan(&active)
 	return active, err
+}
+
+const reactivateAccountWithCredentials = `-- name: ReactivateAccountWithCredentials :one
+UPDATE accounts
+SET deleted_at = NULL,
+    name = $2,
+    role = $3,
+    api_key = $4,
+    api_secret = $5,
+    ip_address = $6,
+    encrypted_password = $7,
+    encrypted_totp_secret = $8,
+    active = true,
+    status = 'active',
+    auth_status = 'unauthenticated',
+    auth_error = '',
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NOT NULL
+RETURNING id
+`
+
+type ReactivateAccountWithCredentialsParams struct {
+	ID                  uuid.UUID
+	Name                string
+	Role                string
+	ApiKey              string
+	ApiSecret           string
+	IpAddress           string
+	EncryptedPassword   string
+	EncryptedTotpSecret string
+}
+
+func (q *Queries) ReactivateAccountWithCredentials(ctx context.Context, arg ReactivateAccountWithCredentialsParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, reactivateAccountWithCredentials,
+		arg.ID,
+		arg.Name,
+		arg.Role,
+		arg.ApiKey,
+		arg.ApiSecret,
+		arg.IpAddress,
+		arg.EncryptedPassword,
+		arg.EncryptedTotpSecret,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setAccountAPIKey = `-- name: SetAccountAPIKey :execrows
@@ -396,6 +504,23 @@ type SetAccountStatusParams struct {
 
 func (q *Queries) SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setAccountStatus, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteAccount = `-- name: SoftDeleteAccount :execrows
+UPDATE accounts
+SET deleted_at = now(),
+    ip_address = '',
+    active = false,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteAccount(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteAccount, id)
 	if err != nil {
 		return 0, err
 	}

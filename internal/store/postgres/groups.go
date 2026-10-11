@@ -396,10 +396,18 @@ func (s *Store) GroupByMasterID(ctx context.Context, masterID uuid.UUID) (domain
 }
 
 // SetFollowLinkEnabled toggles a follower's enabled flag — the Dashboard's
-// "Copy" toggle. Returns domain.ErrNotFound if followerID has no
-// follow_link row.
+// "Copy" toggle. If enabled is true, it also automatically activates the account
+// (active = true) so daily login, sync, and trade placement are active. Returns
+// domain.ErrNotFound if followerID has no follow_link row.
 func (s *Store) SetFollowLinkEnabled(ctx context.Context, followerID uuid.UUID, enabled bool) error {
-	rowsAffected, err := s.queries.SetFollowLinkEnabled(ctx, sqlcgen.SetFollowLinkEnabledParams{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+	rowsAffected, err := qtx.SetFollowLinkEnabled(ctx, sqlcgen.SetFollowLinkEnabledParams{
 		FollowerID: followerID,
 		Enabled:    enabled,
 	})
@@ -409,7 +417,18 @@ func (s *Store) SetFollowLinkEnabled(ctx context.Context, followerID uuid.UUID, 
 	if rowsAffected == 0 {
 		return domain.ErrNotFound
 	}
-	return nil
+
+	if enabled {
+		_, err = qtx.SetAccountActive(ctx, sqlcgen.SetAccountActiveParams{
+			ID:     followerID,
+			Active: true,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 // ResolveMasterID finds the master account associated with an account:
@@ -432,11 +451,19 @@ func (s *Store) ResolveMasterID(ctx context.Context, id uuid.UUID) (uuid.UUID, e
 	return masterID, err
 }
 
-// SetAccountActive toggles a master account's active flag — the
-// Dashboard's "Stop Master" / "Start Master" toggle. Returns
-// domain.ErrNotFound if id has no accounts row.
+// SetAccountActive toggles an account's active flag.
+// If active is false, it also automatically disables copy on any follow_link
+// so the follower cannot receive copy trades while inactive.
+// Returns domain.ErrNotFound if id has no accounts row.
 func (s *Store) SetAccountActive(ctx context.Context, id uuid.UUID, active bool) error {
-	rowsAffected, err := s.queries.SetAccountActive(ctx, sqlcgen.SetAccountActiveParams{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+	rowsAffected, err := qtx.SetAccountActive(ctx, sqlcgen.SetAccountActiveParams{
 		ID:     id,
 		Active: active,
 	})
@@ -446,7 +473,15 @@ func (s *Store) SetAccountActive(ctx context.Context, id uuid.UUID, active bool)
 	if rowsAffected == 0 {
 		return domain.ErrNotFound
 	}
-	return nil
+
+	if !active {
+		_, _ = qtx.SetFollowLinkEnabled(ctx, sqlcgen.SetFollowLinkEnabledParams{
+			FollowerID: id,
+			Enabled:    false,
+		})
+	}
+
+	return tx.Commit(ctx)
 }
 
 // MasterActive reports whether the given master account is currently

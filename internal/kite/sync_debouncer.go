@@ -54,6 +54,14 @@ func (d *DebouncedSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 }
 
 func (d *DebouncedSyncer) run(accountID uuid.UUID) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.mu.Lock()
+			delete(d.active, accountID)
+			delete(d.pending, accountID)
+			d.mu.Unlock()
+		}
+	}()
 	for {
 		_ = d.inner.SyncAccountPortfolio(context.Background(), accountID)
 

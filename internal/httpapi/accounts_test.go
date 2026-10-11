@@ -63,6 +63,142 @@ func TestPatchAccount_ActiveFalse_TogglesMasterActive(t *testing.T) {
 	}
 }
 
+func TestPatchAccount_Follower_ActiveFalse_DisablesCopyLinkAndReturnsBoth(t *testing.T) {
+	follower := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{follower: "follower"},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"active": false})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setActiveArgs) != 1 || store.setActiveArgs[0].Active != false {
+		t.Fatalf("SetAccountActive not called with false: %+v", store.setActiveArgs)
+	}
+	if len(store.setEnabledArgs) != 1 || store.setEnabledArgs[0].Enabled != false {
+		t.Fatalf("SetFollowLinkEnabled not called with false: %+v", store.setEnabledArgs)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["active"] != false {
+		t.Errorf("resp[active] = %v, want false", resp["active"])
+	}
+	if resp["enabled"] != false {
+		t.Errorf("resp[enabled] = %v, want false", resp["enabled"])
+	}
+}
+
+func TestPatchAccount_Follower_ActiveTrue_KeepsEnabledUntouched(t *testing.T) {
+	follower := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{follower: "follower"},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"active": true})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setActiveArgs) != 1 || store.setActiveArgs[0].Active != true {
+		t.Fatalf("SetAccountActive not called with true: %+v", store.setActiveArgs)
+	}
+	if len(store.setEnabledArgs) != 0 {
+		t.Fatalf("SetFollowLinkEnabled should NOT be called when activating, got: %+v", store.setEnabledArgs)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["active"] != true {
+		t.Errorf("resp[active] = %v, want true", resp["active"])
+	}
+	if _, ok := resp["enabled"]; ok {
+		t.Errorf("resp[enabled] should not be present in response when only active is patched, got %v", resp["enabled"])
+	}
+}
+
+func TestPatchAccount_Follower_EnabledTrue_ActivatesAccountAndReturnsBoth(t *testing.T) {
+	follower := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{follower: "follower"},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"enabled": true})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setEnabledArgs) != 1 || store.setEnabledArgs[0].Enabled != true {
+		t.Fatalf("SetFollowLinkEnabled not called with true: %+v", store.setEnabledArgs)
+	}
+	if len(store.setActiveArgs) != 1 || store.setActiveArgs[0].Active != true {
+		t.Fatalf("SetAccountActive not called with true when enabling copy: %+v", store.setActiveArgs)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["enabled"] != true {
+		t.Errorf("resp[enabled] = %v, want true", resp["enabled"])
+	}
+	if resp["active"] != true {
+		t.Errorf("resp[active] = %v, want true", resp["active"])
+	}
+}
+
+func TestPatchAccount_Follower_EnabledFalse_LeavesAccountActiveUntouched(t *testing.T) {
+	follower := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{follower: "follower"},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{"enabled": false})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+follower.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.setEnabledArgs) != 1 || store.setEnabledArgs[0].Enabled != false {
+		t.Fatalf("SetFollowLinkEnabled not called with false: %+v", store.setEnabledArgs)
+	}
+	if len(store.setActiveArgs) != 0 {
+		t.Fatalf("SetAccountActive should NOT be called when disabling copy, got: %+v", store.setActiveArgs)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["enabled"] != false {
+		t.Errorf("resp[enabled] = %v, want false", resp["enabled"])
+	}
+	if _, ok := resp["active"]; ok {
+		t.Errorf("resp[active] should not be present in response when only enabled is patched to false, got %v", resp["active"])
+	}
+}
+
 func TestPatchAccount_UnknownAccount_Returns404(t *testing.T) {
 	store := &stubStore{setEnabledErr: domain.ErrNotFound}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
@@ -668,6 +804,34 @@ func TestPostAccount_DuplicateBrokerAccountID_Returns409(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestPostAccount_ReactivatesExistingAccount_ReturnsOriginalUUID(t *testing.T) {
+	origID := uuid.New()
+	store := &stubStore{
+		createAccountWithCredentialsID: origID,
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"role":            "master",
+		"broker":          "kite",
+		"brokerAccountId": "ZX1234",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if resp["id"] != origID.String() {
+		t.Errorf("resp[id] = %v, want %v", resp["id"], origID)
 	}
 }
 

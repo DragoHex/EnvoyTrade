@@ -12,6 +12,7 @@ import {
   fetchAvailableProxyIPs,
   squareOffGroup,
   squareOffAccount,
+  getGroupRebalanceDiff,
 } from './api'
 
 describe('api client', () => {
@@ -129,7 +130,7 @@ describe('api client', () => {
     expect(init.credentials).toBe('include')
   })
 
-  it('triggers onUnauthorized on 401 response', async () => {
+  it('triggers onUnauthorized on 401 response from session auth endpoints', async () => {
     const unauthorizedCallback = vi.fn()
     setOnUnauthorized(unauthorizedCallback)
 
@@ -142,6 +143,21 @@ describe('api client', () => {
 
     await expect(getMe()).rejects.toThrow('unauthenticated')
     expect(unauthorizedCallback).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT trigger onUnauthorized when broker-level operations return 401 (e.g. rebalance diff broker token expiration)', async () => {
+    const unauthorizedCallback = vi.fn()
+    setOnUnauthorized(unauthorizedCallback)
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'fetch follower ACTFLOW01 positions: auth expired (testbroker get positions: KiteError [403 TokenException]: Invalid or missing token)' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await expect(getGroupRebalanceDiff('g-123')).rejects.toThrow('auth expired')
+    expect(unauthorizedCallback).not.toHaveBeenCalled()
   })
 
   it('updateProfile sends PUT /api/v1/user/profile and returns user', async () => {

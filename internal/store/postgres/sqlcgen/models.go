@@ -28,6 +28,7 @@ type Account struct {
 	TokenExpiresAt      pgtype.Timestamptz
 	AuthStatus          string
 	AuthError           string
+	DeletedAt           pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
 }
@@ -54,6 +55,8 @@ type AccountMargin struct {
 	Status          string
 	AvailableCash   decimal.Decimal
 	AvailableMargin decimal.Decimal
+	ProductMtm      []byte
+	MarginBreakdown []byte
 	UpdatedAt       pgtype.Timestamptz
 }
 

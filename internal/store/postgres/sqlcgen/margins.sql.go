@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 )
 
@@ -18,9 +19,21 @@ FROM account_margins
 WHERE account_id = $1
 `
 
-func (q *Queries) GetAccountMargins(ctx context.Context, accountID uuid.UUID) (AccountMargin, error) {
+type GetAccountMarginsRow struct {
+	AccountID       uuid.UUID
+	NetQty          int32
+	TotalMtm        decimal.Decimal
+	RealizedPnl     decimal.Decimal
+	AccountValue    decimal.Decimal
+	Status          string
+	AvailableCash   decimal.Decimal
+	AvailableMargin decimal.Decimal
+	UpdatedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) GetAccountMargins(ctx context.Context, accountID uuid.UUID) (GetAccountMarginsRow, error) {
 	row := q.db.QueryRow(ctx, getAccountMargins, accountID)
-	var i AccountMargin
+	var i GetAccountMarginsRow
 	err := row.Scan(
 		&i.AccountID,
 		&i.NetQty,

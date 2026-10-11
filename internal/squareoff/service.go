@@ -313,8 +313,16 @@ func (s *Service) SquareOffGroup(ctx context.Context, groupID uuid.UUID, symbols
 			followerID := f.AccountID
 			wg.Add(1)
 			go func(fID uuid.UUID) {
-
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						s.log().Error("squareoff: follower square off panicked", "follower_id", fID, "panic", r)
+						mu.Lock()
+						result.Errors = append(result.Errors, fmt.Sprintf("follower %s panicked: %v", fID, r))
+						result.Status = "partial"
+						mu.Unlock()
+					}
+				}()
 				fResult, fErr := s.SquareOffAccount(ctx, fID, symbols)
 				mu.Lock()
 				defer mu.Unlock()

@@ -7,7 +7,7 @@ SELECT g.id, g.name, g.master_id,
        a.active,
        COUNT(f.follower_id)::int AS follower_count
 FROM groups g
-JOIN accounts a ON a.id = g.master_id
+JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 LEFT JOIN follow_links f ON f.group_id = g.id
 WHERE sqlc.narg('user_id')::uuid IS NULL OR g.user_id = sqlc.narg('user_id')::uuid
 GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active
@@ -19,7 +19,7 @@ SELECT g.id, g.name, g.master_id,
        a.name AS master_name,
        a.active AS master_active
 FROM groups g
-JOIN accounts a ON a.id = g.master_id
+JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 WHERE (g.id = $1 OR g.master_id = $1)
   AND (sqlc.narg('user_id')::uuid IS NULL OR g.user_id = sqlc.narg('user_id')::uuid)
 LIMIT 1;
@@ -27,7 +27,7 @@ LIMIT 1;
 -- name: GroupFollowerRows :many
 SELECT a.id, a.name, a.broker_user_id, f.enabled, a.status
 FROM follow_links f
-JOIN accounts a ON a.id = f.follower_id
+JOIN accounts a ON a.id = f.follower_id AND a.deleted_at IS NULL
 WHERE f.group_id = $1
 ORDER BY LOWER(COALESCE(NULLIF(a.name, ''), a.broker_user_id)) ASC, a.id ASC;
 
@@ -43,6 +43,15 @@ UPDATE groups SET master_id = $2, updated_at = now() WHERE id = $1;
 
 -- name: DeleteGroup :execrows
 DELETE FROM groups WHERE id = $1;
+
+-- name: DeleteGroupByMasterID :execrows
+DELETE FROM groups WHERE master_id = $1;
+
+-- name: CountFollowersByMasterID :one
+SELECT COUNT(f.follower_id)::int
+FROM groups g
+JOIN follow_links f ON f.group_id = g.id
+WHERE g.master_id = $1;
 
 -- name: GroupByID :one
 SELECT id, name, master_id, created_at, updated_at FROM groups WHERE id = $1;

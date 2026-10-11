@@ -49,8 +49,9 @@ type stubStore struct {
 	accountRoles   map[uuid.UUID]string // AccountRole returns domain.ErrNotFound if id absent
 	accountRoleErr error
 
-	createAccountErr  error
-	createAccountArgs []createAccountCall
+	createAccountErr               error
+	createAccountWithCredentialsID uuid.UUID
+	createAccountArgs              []createAccountCall
 
 	createFollowLinkErr  error
 	createFollowLinkArgs []domain.FollowLink
@@ -257,9 +258,15 @@ func (s *stubStore) CreateAccount(_ context.Context, id uuid.UUID, name, role, b
 	return s.createAccountErr
 }
 
-func (s *stubStore) CreateAccountWithCredentials(_ context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret string) error {
+func (s *stubStore) CreateAccountWithCredentials(_ context.Context, id uuid.UUID, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret string) (uuid.UUID, error) {
 	s.createAccountArgs = append(s.createAccountArgs, createAccountCall{id, name, role, broker, brokerUserID, apiKey, apiSecret, ipAddress, encPassword, encTotpSecret})
-	return s.createAccountErr
+	if s.createAccountErr != nil {
+		return uuid.Nil, s.createAccountErr
+	}
+	if s.createAccountWithCredentialsID != uuid.Nil {
+		return s.createAccountWithCredentialsID, nil
+	}
+	return id, nil
 }
 
 func (s *stubStore) SetAccountEncryptedCredentials(_ context.Context, id uuid.UUID, encPassword, encTotpSecret string) error {
