@@ -69,6 +69,7 @@ ON CONFLICT (id) DO UPDATE SET
   auth_status    = EXCLUDED.auth_status,
   active         = EXCLUDED.active,
   name           = EXCLUDED.name,
+  deleted_at     = NULL,
   created_at     = EXCLUDED.created_at,
   updated_at     = EXCLUDED.updated_at;
 
