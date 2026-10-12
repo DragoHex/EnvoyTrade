@@ -23,9 +23,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"envoytrade/frontend"
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
@@ -41,7 +43,6 @@ import (
 	"envoytrade/internal/store/postgres"
 	"envoytrade/internal/testbroker"
 	"envoytrade/internal/ticker"
-	"envoytrade/frontend"
 	"envoytrade/internal/worker"
 
 	"github.com/google/uuid"
@@ -130,6 +131,8 @@ func run(logger *slog.Logger) error {
 		addr = "8080"
 	}
 
+	logProcessLimits(logger)
+
 	logger.Info("starting server",
 		"port", addr,
 		"database", maskDatabaseURL(dbURL),
@@ -176,12 +179,17 @@ func run(logger *slog.Logger) error {
 		registry: brokerRegistry,
 		syncer:   rawSyncer,
 	}
+	accountPool := broker.NewAccountPool(brokerResolver)
+	evicter := &compoundEvicter{
+		pool:        accountPool,
+		kiteClients: globalKiteClients,
+	}
 
 	workerPool := worker.NewPool()
 	workerPool.Logger = logger.With("component", "worker_pool")
 	workerPool.Syncer = syncer
 	defer workerPool.Shutdown()
-	followersRegistered, err := registerFollowers(ctx, store, workerPool, brokerResolver, logger)
+	followersRegistered, err := registerFollowers(ctx, store, workerPool, accountPool, logger)
 	if err != nil {
 		return fmt.Errorf("register followers: %w", err)
 	}
@@ -189,16 +197,42 @@ func run(logger *slog.Logger) error {
 
 	followerRegistrar := &workerFollowerRegistrar{
 		pool:     workerPool,
-		resolver: brokerResolver,
+		resolver: accountPool,
 		store:    store,
 		logger:   logger.With("component", "follower_registrar"),
 	}
 
-	squareOffSvc := squareoff.NewService(store, brokerResolver, syncer, logger.With("component", "squareoff"))
-	rebalanceSvc := rebalance.NewService(store, brokerResolver, syncer, logger.With("component", "rebalance"))
+	squareOffSvc := squareoff.NewService(store, accountPool, syncer, logger.With("component", "squareoff"))
+	rebalanceSvc := rebalance.NewService(store, accountPool, syncer, logger.With("component", "rebalance"))
 
 	eng := engine.New(store, workerPool)
 	eng.Logger = logger.With("component", "engine")
+
+	// Daily lot size cache cleanup at 01:00:00 IST
+	go func() {
+		istLocation, locErr := time.LoadLocation("Asia/Kolkata")
+		if locErr != nil {
+			logger.Warn("could not load Asia/Kolkata timezone, fallback to UTC+5:30 fixed zone", "error", locErr)
+			istLocation = time.FixedZone("IST", 5*3600+1800)
+		}
+		for {
+			now := time.Now().In(istLocation)
+			nextRun := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, istLocation)
+			if !now.Before(nextRun) {
+				nextRun = nextRun.Add(24 * time.Hour)
+			}
+			waitDur := time.Until(nextRun)
+			timer := time.NewTimer(waitDur)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+				eng.ClearLotSizeCache()
+				logger.Info("daily lot size cache cleared at 01:00:00 IST")
+			}
+		}
+	}()
 
 	// Queues for incoming signals & status updates
 	masterFillQueue := memchan.New[domain.MasterFill](1024)
@@ -286,6 +320,7 @@ func run(logger *slog.Logger) error {
 
 	// Auto-restart master ticker or refresh follower worker on headless token refresh
 	rawSyncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+		evicter.Evict(accountID)
 		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
 	}
 
@@ -319,7 +354,7 @@ func run(logger *slog.Logger) error {
 				logger.Error("periodic portfolio syncer panicked", "panic", r)
 			}
 		}()
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -348,6 +383,7 @@ func run(logger *slog.Logger) error {
 		httpapi.WithSquareOffService(squareOffSvc),
 		httpapi.WithRebalanceService(rebalanceSvc),
 		httpapi.WithFollowerRegistrar(followerRegistrar),
+		httpapi.WithBrokerEvicter(evicter),
 	)
 
 	if frontend.HasEmbeddedUI() {
@@ -459,7 +495,7 @@ func (r *serverBrokerResolver) ResolveBroker(ctx context.Context, accountID uuid
 
 // registerFollowers registers every existing follower account with the
 // worker pool so Rebalance can dispatch to it.
-func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, resolver *serverBrokerResolver, logger *slog.Logger) (int, error) {
+func registerFollowers(ctx context.Context, store *postgres.Store, pool *worker.Pool, resolver followerBrokerResolver, logger *slog.Logger) (int, error) {
 	groups, err := store.Groups(ctx)
 	if err != nil {
 		return 0, err
@@ -593,6 +629,67 @@ func kiteClientForAccount(ctx context.Context, store *postgres.Store, authInfo d
 	return kc, nil
 }
 
+type kiteClientPool struct {
+	mu      sync.RWMutex
+	clients map[uuid.UUID]*kiteconnect.Client
+}
+
+var globalKiteClients = &kiteClientPool{
+	clients: make(map[uuid.UUID]*kiteconnect.Client),
+}
+
+func (p *kiteClientPool) Evict(id uuid.UUID) {
+	p.mu.Lock()
+	delete(p.clients, id)
+	p.mu.Unlock()
+}
+
+func (p *kiteClientPool) GetOrCreate(ctx context.Context, store *postgres.Store, id uuid.UUID, authInfo domain.AccountAuthInfo) (*kiteconnect.Client, error) {
+	p.mu.RLock()
+	kc, ok := p.clients[id]
+	p.mu.RUnlock()
+	if ok && kc != nil {
+		return kc, nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if kc, ok = p.clients[id]; ok && kc != nil {
+		return kc, nil
+	}
+
+	fresh, err := kiteClientForAccount(ctx, store, authInfo)
+	if err != nil || fresh == nil {
+		return nil, err
+	}
+	p.clients[id] = fresh
+	return fresh, nil
+}
+
+type compoundEvicter struct {
+	pool        *broker.AccountPool
+	kiteClients *kiteClientPool
+}
+
+func (e *compoundEvicter) Evict(id uuid.UUID) {
+	if e.pool != nil {
+		e.pool.Evict(id)
+	}
+	if e.kiteClients != nil {
+		e.kiteClients.Evict(id)
+	}
+}
+
+func logProcessLimits(logger *slog.Logger) {
+	var rlimit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit); err == nil {
+		logger.Info("process file descriptor limits",
+			"cur_nofile", rlimit.Cur,
+			"max_nofile", rlimit.Max,
+		)
+	}
+}
+
 type serverMasterReader struct {
 	store *postgres.Store
 }
@@ -602,7 +699,7 @@ func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.
 	if err != nil {
 		return nil, err
 	}
-	kc, err := kiteClientForAccount(ctx, r.store, authInfo)
+	kc, err := globalKiteClients.GetOrCreate(ctx, r.store, masterID, authInfo)
 	if err != nil || kc == nil {
 		return nil, err
 	}
@@ -618,7 +715,7 @@ func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, foll
 	if err != nil {
 		return nil, err
 	}
-	kc, err := kiteClientForAccount(ctx, r.store, authInfo)
+	kc, err := globalKiteClients.GetOrCreate(ctx, r.store, followerID, authInfo)
 	if err != nil || kc == nil {
 		return nil, err
 	}
@@ -630,14 +727,12 @@ func (r *serverFollowerReader) GetFollowerOrders(ctx context.Context, followerID
 	if err != nil {
 		return nil, err
 	}
-	kc, err := kiteClientForAccount(ctx, r.store, authInfo)
+	kc, err := globalKiteClients.GetOrCreate(ctx, r.store, followerID, authInfo)
 	if err != nil || kc == nil {
 		return nil, err
 	}
 	return kc.GetOrders()
 }
-
-
 
 // setupLogger initializes structured slog output to a file (default: /var/log/envoytrade/app.log)
 // or falls back to stdout if unwritable.

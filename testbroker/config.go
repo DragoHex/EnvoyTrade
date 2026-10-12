@@ -81,6 +81,9 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.ExecutionMode == "" {
 		cfg.ExecutionMode = "instant"
 	}
+	if envPB := os.Getenv("POSTBACK_URL"); envPB != "" {
+		cfg.PostbackURL = envPB
+	}
 
 	// Build token index for auth lookups
 	cfg.tokenIndex = make(map[string]string, len(cfg.Users))

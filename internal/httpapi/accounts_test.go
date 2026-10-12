@@ -1106,3 +1106,103 @@ func TestPatchAccount_WithAccessToken_UpdatesTokenAndRegistersFollower(t *testin
 	}
 }
 
+type stubBrokerEvicter struct {
+	evicted []uuid.UUID
+}
+
+func (s *stubBrokerEvicter) Evict(id uuid.UUID) {
+	s.evicted = append(s.evicted, id)
+}
+
+func TestPatchAccount_CredentialsUpdate_EvictsBroker(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{accID: "follower"}}
+	evicter := &stubBrokerEvicter{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithBrokerEvicter(evicter))
+
+	body, _ := json.Marshal(map[string]any{
+		"accessToken": "new_token",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+accID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(evicter.evicted) != 1 || evicter.evicted[0] != accID {
+		t.Errorf("expected evicter called with %v, got %v", accID, evicter.evicted)
+	}
+}
+
+func TestDeleteAccount_EvictsBroker(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{}
+	evicter := &stubBrokerEvicter{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithBrokerEvicter(evicter))
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/accounts/"+accID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if len(evicter.evicted) != 1 || evicter.evicted[0] != accID {
+		t.Errorf("expected evicter called with %v, got %v", accID, evicter.evicted)
+	}
+}
+
+func TestPatchAccount_Deactivate_EvictsBrokerAndUnregistersFollower(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{accID: "follower"}}
+	evicter := &stubBrokerEvicter{}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{},
+		httpapi.WithBrokerEvicter(evicter),
+		httpapi.WithFollowerRegistrar(registrar),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"active": false,
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+accID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(evicter.evicted) != 1 || evicter.evicted[0] != accID {
+		t.Errorf("expected evicter called with %v, got %v", accID, evicter.evicted)
+	}
+	if len(registrar.unregistered) != 1 || registrar.unregistered[0] != accID {
+		t.Errorf("expected registrar.unregistered called with %v, got %v", accID, registrar.unregistered)
+	}
+}
+
+func TestPatchAccount_Reactivate_RegistersFollower(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{accountRoles: map[uuid.UUID]string{accID: "follower"}}
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{},
+		httpapi.WithFollowerRegistrar(registrar),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"active": true,
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+accID.String(), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(registrar.registered) != 1 || registrar.registered[0] != accID {
+		t.Errorf("expected registrar.registered called with %v, got %v", accID, registrar.registered)
+	}
+}
+
+
+

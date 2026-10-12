@@ -445,24 +445,31 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		if writePatchStoreError(w, h.store.SetAccountActive(r.Context(), id, *req.Active)) {
 			return
 		}
-		if h.tickerMgr != nil {
-			role, _ := h.store.AccountRole(r.Context(), id)
-			if role == "master" {
-				if *req.Active {
-					_ = h.tickerMgr.StartMaster(r.Context(), id)
-				} else {
-					_ = h.tickerMgr.StopMaster(id)
-				}
+		role, _ := h.store.AccountRole(r.Context(), id)
+		if h.tickerMgr != nil && role == "master" {
+			if *req.Active {
+				_ = h.tickerMgr.StartMaster(r.Context(), id)
+			} else {
+				_ = h.tickerMgr.StopMaster(id)
 			}
 		}
 		resp["active"] = *req.Active
 		if !*req.Active {
-			role, _ := h.store.AccountRole(r.Context(), id)
 			if role == "follower" {
 				if writePatchStoreError(w, h.store.SetFollowLinkEnabled(r.Context(), id, false)) {
 					return
 				}
 				resp["enabled"] = false
+				if h.followerRegistrar != nil {
+					h.followerRegistrar.UnregisterFollower(id)
+				}
+			}
+			if h.brokerEvicter != nil {
+				h.brokerEvicter.Evict(id)
+			}
+		} else {
+			if role == "follower" && h.followerRegistrar != nil {
+				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 			}
 		}
 		updated = true
@@ -477,6 +484,9 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			resp["active"] = true
+			if h.followerRegistrar != nil {
+				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+			}
 		}
 		updated = true
 	}
@@ -676,6 +686,12 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		updated = true
 	}
 
+	if req.IP != nil || req.ApiKey != nil || req.ApiSecret != nil || req.Password != nil || req.TotpSecret != nil || req.AccessToken != nil {
+		if h.brokerEvicter != nil {
+			h.brokerEvicter.Evict(id)
+		}
+	}
+
 	if !updated {
 		writeError(w, http.StatusBadRequest, "\"name\", \"enabled\", \"active\", \"cloneFactor\", \"maxQtyPerOrder\", \"status\", \"ip\", \"apiKey\", \"apiSecret\", \"accessToken\", \"password\", or \"totpSecret\" is required")
 		return
@@ -758,6 +774,9 @@ func (h *handlers) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to delete account")
 	default:
+		if h.brokerEvicter != nil {
+			h.brokerEvicter.Evict(id)
+		}
 		if h.tickerMgr != nil {
 			_ = h.tickerMgr.StopMaster(id)
 		}

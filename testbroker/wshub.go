@@ -13,10 +13,16 @@ type wsMessage struct {
 	Data interface{} `json:"data"`
 }
 
+// clientConn wraps a websocket connection with a write mutex to ensure safe concurrent broadcasts.
+type clientConn struct {
+	conn    *websocket.Conn
+	writeMu sync.Mutex
+}
+
 // WSHub manages WebSocket connections and broadcasts per user.
 type WSHub struct {
 	mu       sync.RWMutex
-	clients  map[string]map[*websocket.Conn]struct{} // userID -> set of connections
+	clients  map[string]map[*clientConn]struct{} // userID -> set of connections
 	upgrader websocket.Upgrader
 	cfg      *Config
 }
@@ -24,7 +30,7 @@ type WSHub struct {
 // NewWSHub creates a new WebSocket hub.
 func NewWSHub(cfg *Config) *WSHub {
 	return &WSHub{
-		clients: make(map[string]map[*websocket.Conn]struct{}),
+		clients: make(map[string]map[*clientConn]struct{}),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -53,11 +59,12 @@ func (h *WSHub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.register(userID, conn)
+	c := &clientConn{conn: conn}
+	h.register(userID, c)
 
 	// Keep reading until connection closes
 	go func() {
-		defer h.unregister(userID, conn)
+		defer h.unregister(userID, c)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				break
@@ -66,25 +73,25 @@ func (h *WSHub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-func (h *WSHub) register(userID string, conn *websocket.Conn) {
+func (h *WSHub) register(userID string, c *clientConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.clients[userID] == nil {
-		h.clients[userID] = make(map[*websocket.Conn]struct{})
+		h.clients[userID] = make(map[*clientConn]struct{})
 	}
-	h.clients[userID][conn] = struct{}{}
+	h.clients[userID][c] = struct{}{}
 }
 
-func (h *WSHub) unregister(userID string, conn *websocket.Conn) {
+func (h *WSHub) unregister(userID string, c *clientConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if conns, ok := h.clients[userID]; ok {
-		delete(conns, conn)
+		delete(conns, c)
 		if len(conns) == 0 {
 			delete(h.clients, userID)
 		}
 	}
-	conn.Close()
+	_ = c.conn.Close()
 }
 
 // Broadcast sends an order update to all clients connected as the order's UserID.
@@ -97,9 +104,9 @@ func (h *WSHub) Broadcast(o *Order) {
 	}
 	
 	// Copy the connections to avoid holding the lock during write
-	targets := make([]*websocket.Conn, 0, len(conns))
-	for conn := range conns {
-		targets = append(targets, conn)
+	targets := make([]*clientConn, 0, len(conns))
+	for c := range conns {
+		targets = append(targets, c)
 	}
 	h.mu.RUnlock()
 
@@ -108,11 +115,13 @@ func (h *WSHub) Broadcast(o *Order) {
 		Data: o,
 	}
 
-	for _, conn := range targets {
-		err := conn.WriteJSON(msg)
+	for _, c := range targets {
+		c.writeMu.Lock()
+		err := c.conn.WriteJSON(msg)
+		c.writeMu.Unlock()
 		if err != nil {
 			log.Printf("WS write error for user %s: %v", o.UserID, err)
-			h.unregister(o.UserID, conn)
+			h.unregister(o.UserID, c)
 		}
 	}
 }

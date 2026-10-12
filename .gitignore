@@ -19,6 +19,10 @@ secrets.json
 *.log
 scratch/
 artifacts/
+bin/
+/server
+reports/
 testbroker/bin/
 backups/
 *.sql.gz
+

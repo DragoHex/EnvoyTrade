@@ -138,6 +138,9 @@ func NewHarness(t *testing.T) *Harness {
 	h.DB = pool
 	h.cleanupFuncs = append(h.cleanupFuncs, pool.Close)
 
+	// Ensure clean database state before each test suite
+	h.ResetDB(ctx)
+
 	// Admin SDK client for testbroker
 	h.AdminSDK = sdk.New("admin")
 	h.AdminSDK.SetBaseURI(tbURL)
@@ -195,6 +198,9 @@ func (h *Harness) ensureServicesRunning() {
 		tbLog, _ := os.OpenFile("/tmp/envoy-e2e-tb.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		tbCmd.Stdout = tbLog
 		tbCmd.Stderr = tbLog
+		tbCmd.Env = append(os.Environ(),
+			"POSTBACK_URL="+h.EnvoyURL+"/broker-callback",
+		)
 		if err := tbCmd.Start(); err != nil {
 			h.t.Fatalf("failed to start testbroker: %v", err)
 		}
@@ -244,7 +250,28 @@ func (h *Harness) ensureServicesRunning() {
 			}
 		})
 		waitForURL(h.t, h.EnvoyURL+"/healthz", 20*time.Second)
-		h.t.Log("EnvoyTrade server subprocess is ready")
+	}
+}
+
+// ResetDB flushes and re-seeds the database for deterministic test execution.
+func (h *Harness) ResetDB(ctx context.Context) {
+	rootDir, err := findRepoRoot()
+	if err != nil {
+		h.t.Fatalf("find repo root: %v", err)
+	}
+	flushSQL, err := os.ReadFile(filepath.Join(rootDir, "scripts", "flush_data.sql"))
+	if err != nil {
+		h.t.Fatalf("read flush_data.sql: %v", err)
+	}
+	if _, err := h.DB.Exec(ctx, string(flushSQL)); err != nil {
+		h.t.Fatalf("exec flush_data.sql: %v", err)
+	}
+	seedSQL, err := os.ReadFile(filepath.Join(rootDir, "scripts", "seed_test_data.sql"))
+	if err != nil {
+		h.t.Fatalf("read seed_test_data.sql: %v", err)
+	}
+	if _, err := h.DB.Exec(ctx, string(seedSQL)); err != nil {
+		h.t.Fatalf("exec seed_test_data.sql: %v", err)
 	}
 }
 

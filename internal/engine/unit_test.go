@@ -72,6 +72,29 @@ func (m *mockEngineStore) InsertFollowerOrder(ctx context.Context, o domain.Foll
 	return o.ID, nil
 }
 
+func (m *mockEngineStore) InsertFollowerOrdersBatch(ctx context.Context, orders []domain.FollowerOrder) (map[string]int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := make(map[string]int64, len(orders))
+	for _, o := range orders {
+		isDup := false
+		for _, prev := range m.insertedOrders {
+			if prev.IdempotencyTag == o.IdempotencyTag {
+				isDup = true
+				break
+			}
+		}
+		if isDup {
+			continue
+		}
+		m.nextOrderID++
+		o.ID = m.nextOrderID
+		m.insertedOrders = append(m.insertedOrders, o)
+		res[o.IdempotencyTag] = o.ID
+	}
+	return res, nil
+}
+
 func (m *mockEngineStore) SetMasterFillDispatchState(ctx context.Context, id int64, state domain.DispatchState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -431,5 +454,139 @@ func TestEngine_LimitOrder_ResolvesPriceFromRawPayloadWhenZero(t *testing.T) {
 	}
 	if job.TriggerPrice != 24.5 {
 		t.Errorf("expected job.TriggerPrice = 24.5 from RawPayload, got %v", job.TriggerPrice)
+	}
+}
+
+func TestHandleMasterFill_BatchDispatchAllFollowers(t *testing.T) {
+	store := newMockEngineStore()
+	disp := newMockDispatcher()
+	eng := engine.New(store, disp)
+
+	masterID := uuid.New()
+	f1 := uuid.New()
+	f2 := uuid.New()
+	f3 := uuid.New()
+
+	store.lotSizes["NSE:RELIANCE"] = 1
+	store.followLinks = []domain.FollowLink{
+		{
+			FollowerID:     f1,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromInt(1),
+			MaxQtyPerOrder: 0,
+			Enabled:        true,
+		},
+		{
+			FollowerID:     f2,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromFloat(2.0),
+			MaxQtyPerOrder: 0,
+			Enabled:        true,
+		},
+		{
+			FollowerID:     f3,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromFloat(0.5),
+			MaxQtyPerOrder: 40,
+			Enabled:        true,
+		},
+	}
+
+	fill := domain.MasterFill{
+		ID:              501,
+		MasterID:        masterID,
+		Exchange:        "NSE",
+		Tradingsymbol:   "RELIANCE",
+		FilledQuantity:  100,
+		TransactionType: "BUY",
+		Product:         "CNC",
+		OrderType:       "LIMIT",
+		Price:           decimal.NewFromInt(2500),
+		Status:          "COMPLETE",
+		OrderTimestamp:  time.Now(),
+	}
+
+	if err := eng.HandleMasterFill(context.Background(), fill); err != nil {
+		t.Fatalf("HandleMasterFill failed: %v", err)
+	}
+
+	if len(disp.dispatched) != 3 {
+		t.Fatalf("expected 3 jobs dispatched, got %d", len(disp.dispatched))
+	}
+
+	jobMap := make(map[uuid.UUID]domain.Job)
+	for _, j := range disp.dispatched {
+		jobMap[j.FollowerID] = j
+	}
+
+	if jobMap[f1].Quantity != 100 {
+		t.Errorf("f1 qty = %d, want 100", jobMap[f1].Quantity)
+	}
+	if jobMap[f2].Quantity != 200 {
+		t.Errorf("f2 qty = %d, want 200", jobMap[f2].Quantity)
+	}
+	if jobMap[f3].Quantity != 40 {
+		t.Errorf("f3 qty = %d, want 40 (capped from 50)", jobMap[f3].Quantity)
+	}
+}
+
+func TestEngine_LotSizeCacheHitAndClear(t *testing.T) {
+	store := newMockEngineStore()
+	disp := newMockDispatcher()
+	eng := engine.New(store, disp)
+
+	masterID := uuid.New()
+	f1 := uuid.New()
+	store.lotSizes["NFO:NIFTY26OCTFUT"] = 75
+	store.followLinks = []domain.FollowLink{
+		{
+			FollowerID:     f1,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromFloat(2.0),
+			MaxQtyPerOrder: 0,
+			Enabled:        true,
+		},
+	}
+
+	fill1 := domain.MasterFill{
+		ID:              601,
+		MasterID:        masterID,
+		Exchange:        "NFO",
+		Tradingsymbol:   "NIFTY26OCTFUT",
+		FilledQuantity:  75,
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Status:          "COMPLETE",
+		OrderTimestamp:  time.Now(),
+	}
+
+	// First fill: should query store.InstrumentLotSize once
+	if err := eng.HandleMasterFill(context.Background(), fill1); err != nil {
+		t.Fatalf("fill1 failed: %v", err)
+	}
+	if store.instrumentLookupCalls != 1 {
+		t.Fatalf("expected 1 instrument lookup call, got %d", store.instrumentLookupCalls)
+	}
+
+	// Second fill with same symbol: should hit cache, instrumentLookupCalls remains 1!
+	fill2 := fill1
+	fill2.ID = 602
+	if err := eng.HandleMasterFill(context.Background(), fill2); err != nil {
+		t.Fatalf("fill2 failed: %v", err)
+	}
+	if store.instrumentLookupCalls != 1 {
+		t.Errorf("expected instrumentLookupCalls to remain 1 (cache hit), got %d", store.instrumentLookupCalls)
+	}
+
+	// Clear cache: next fill should query store again (instrumentLookupCalls becomes 2)
+	eng.ClearLotSizeCache()
+	fill3 := fill1
+	fill3.ID = 603
+	if err := eng.HandleMasterFill(context.Background(), fill3); err != nil {
+		t.Fatalf("fill3 failed: %v", err)
+	}
+	if store.instrumentLookupCalls != 2 {
+		t.Errorf("expected instrumentLookupCalls to be 2 after cache clear, got %d", store.instrumentLookupCalls)
 	}
 }

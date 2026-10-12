@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"envoytrade/internal/domain"
 
@@ -26,6 +27,7 @@ type Store interface {
 	EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]domain.FollowLink, error)
 	InstrumentLotSize(ctx context.Context, exchange, tradingsymbol string) (int, error)
 	InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error)
+	InsertFollowerOrdersBatch(ctx context.Context, orders []domain.FollowerOrder) (map[string]int64, error)
 	SetMasterFillDispatchState(ctx context.Context, id int64, state domain.DispatchState) error
 	UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error
 }
@@ -40,14 +42,41 @@ type Dispatcher interface {
 
 // Engine fans a master fill out to every enabled follower.
 type Engine struct {
-	store      Store
-	dispatcher Dispatcher
-	Logger     *slog.Logger
+	store        Store
+	dispatcher   Dispatcher
+	Logger       *slog.Logger
+	lotSizeCache sync.Map
 }
 
 // New wires an Engine to its store and dispatcher.
 func New(store Store, dispatcher Dispatcher) *Engine {
 	return &Engine{store: store, dispatcher: dispatcher}
+}
+
+// ClearLotSizeCache clears the in-memory instrument lot size cache.
+func (e *Engine) ClearLotSizeCache() {
+	e.lotSizeCache.Range(func(key, _ any) bool {
+		e.lotSizeCache.Delete(key)
+		return true
+	})
+	e.log().Info("engine: lot size cache cleared")
+}
+
+func (e *Engine) resolveLotSize(ctx context.Context, exchange, symbol string) (int, error) {
+	key := exchange + ":" + symbol
+	if val, ok := e.lotSizeCache.Load(key); ok {
+		return val.(int), nil
+	}
+	lotSize, err := e.store.InstrumentLotSize(ctx, exchange, symbol)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			e.lotSizeCache.Store(key, 0)
+			return 0, nil
+		}
+		return 0, err
+	}
+	e.lotSizeCache.Store(key, lotSize)
+	return lotSize, nil
 }
 
 func (e *Engine) log() *slog.Logger {
@@ -108,101 +137,160 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 	if err != nil {
 		return fmt.Errorf("load follow links: %w", err)
 	}
+	if len(links) == 0 {
+		return e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDispatched)
+	}
 
+	// 1. Resolve master execution prices ONCE before processing followers
+	price, triggerPrice := resolveExecutionPrices(fill)
+
+	// 2. Resolve lot size ONCE via cached resolver (only if scaled ratios exist)
+	one := decimal.NewFromInt(1)
+	hasScaledRatios := false
 	for _, link := range links {
-		if err := e.fanOutToFollower(ctx, fill, link); err != nil {
-			return fmt.Errorf("fan out to follower %s: %w", link.FollowerID, err)
+		if !link.CloneFactor.Equal(one) {
+			hasScaledRatios = true
+			break
 		}
+	}
+
+	var lotSize int
+	if hasScaledRatios {
+		var err error
+		lotSize, err = e.resolveLotSize(ctx, fill.Exchange, fill.Tradingsymbol)
+		if err != nil {
+			return fmt.Errorf("lookup instrument lot size: %w", err)
+		}
+	}
+
+	// 3. Pre-size all follower orders in memory
+	type candidateJob struct {
+		followerID uuid.UUID
+		tag        string
+		qty        int
+		reason     domain.SizingReason
+	}
+	ordersToInsert := make([]domain.FollowerOrder, len(links))
+	candidates := make([]candidateJob, len(links))
+
+	for i, link := range links {
+		var (
+			qty    int
+			reason domain.SizingReason
+		)
+		if link.CloneFactor.Equal(one) {
+			qty = fill.FilledQuantity
+			if link.MaxQtyPerOrder > 0 && qty > link.MaxQtyPerOrder {
+				qty = link.MaxQtyPerOrder
+				reason = domain.ReasonCapped
+			} else {
+				reason = domain.ReasonOK
+			}
+		} else {
+			qty, reason = domain.SizeOrder(fill.FilledQuantity, link.CloneFactor, lotSize, link.MaxQtyPerOrder)
+		}
+
+		tag := domain.IdempotencyTag(fill.ID, link.FollowerID)
+		candidates[i] = candidateJob{
+			followerID: link.FollowerID,
+			tag:        tag,
+			qty:        qty,
+			reason:     reason,
+		}
+
+		ordersToInsert[i] = domain.FollowerOrder{
+			MasterFillID:    fill.ID,
+			FollowerID:      link.FollowerID,
+			IdempotencyTag:  tag,
+			IntendedQty:     qty,
+			LotSize:         lotSize,
+			SizingReason:    reason,
+			Origin:          "copy_trade",
+			Tradingsymbol:   fill.Tradingsymbol,
+			Exchange:        fill.Exchange,
+			Product:         fill.Product,
+			TransactionType: fill.TransactionType,
+			OrderType:       fill.OrderType,
+		}
+	}
+
+	// 4. Single Bulk SQL Insert (Atomic DB preparation)
+	insertedMap, err := e.store.InsertFollowerOrdersBatch(ctx, ordersToInsert)
+	if err != nil {
+		return fmt.Errorf("bulk insert follower orders: %w", err)
+	}
+
+	// 5. In-Memory Dispatch Loop
+	for _, c := range candidates {
+		orderID, ok := insertedMap[c.tag]
+		if !ok {
+			// Already fanned out for this (fill, follower) pair — a
+			// redelivery, not a new signal. Skip silently.
+			e.log().Debug("engine: duplicate follower order, skipping redelivery",
+				"follower_id", c.followerID,
+				"fill_id", fill.ID,
+			)
+			continue
+		}
+
+		if c.qty == 0 {
+			// Below one lot (or a bad instrument/ratio): visible on the
+			// follower_order row, but there is nothing to place.
+			e.log().Info("engine: zero quantity follower order, skipping dispatch",
+				"follower_id", c.followerID,
+				"order_id", orderID,
+				"reason", c.reason,
+			)
+			if err := e.store.UpdateFollowerOrderFailed(ctx, orderID, "SKIPPED", c.reason.String()); err != nil {
+				e.log().Warn("engine: failed to mark zero-qty follower order as skipped",
+					"order_id", orderID,
+					"error", err,
+				)
+			}
+			continue
+		}
+
+		job := domain.Job{
+			FollowerOrderID: orderID,
+			FollowerID:      c.followerID,
+			MasterFillID:    fill.ID,
+			IdempotencyTag:  c.tag,
+			Exchange:        fill.Exchange,
+			Tradingsymbol:   fill.Tradingsymbol,
+			TransactionType: fill.TransactionType,
+			Product:         fill.Product,
+			OrderType:       fill.OrderType,
+			Quantity:        c.qty,
+			Price:           price,
+			TriggerPrice:    triggerPrice,
+		}
+
+		if !e.dispatcher.Dispatch(c.followerID, job) {
+			e.log().Error("engine: follower worker channel full, dead-lettered",
+				"follower_id", c.followerID,
+				"order_id", orderID,
+			)
+			if err := e.store.UpdateFollowerOrderFailed(ctx, orderID, domain.TerminalDeadLettered,
+				"worker channel full: fan-out could not hand off in time"); err != nil {
+				e.log().Warn("engine: failed to mark dead-lettered follower order",
+					"order_id", orderID,
+					"error", err,
+				)
+			}
+			continue
+		}
+
+		e.log().Info("engine: follower order dispatched",
+			"follower_id", c.followerID,
+			"order_id", orderID,
+			"qty", c.qty,
+		)
 	}
 
 	return e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDispatched)
 }
 
-func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, link domain.FollowLink) error {
-	var (
-		qty     int
-		reason  domain.SizingReason
-		lotSize int
-	)
-
-	one := decimal.NewFromInt(1)
-	if link.CloneFactor.Equal(one) {
-		// Fast-path (main flow): 1:1 clone factor forwards master quantity directly.
-		// Bypasses local DB instrument validation and calculation.
-		qty = fill.FilledQuantity
-		if link.MaxQtyPerOrder > 0 && qty > link.MaxQtyPerOrder {
-			qty = link.MaxQtyPerOrder
-			reason = domain.ReasonCapped
-		} else {
-			reason = domain.ReasonOK
-		}
-	} else {
-		// Scaled ratio path (clone factor != 1): requires exchange lot size to round down to integer lot multiples.
-		var err error
-		lotSize, err = e.store.InstrumentLotSize(ctx, fill.Exchange, fill.Tradingsymbol)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			return fmt.Errorf("lookup instrument lot size: %w", err)
-		}
-		qty, reason = domain.SizeOrder(fill.FilledQuantity, link.CloneFactor, lotSize, link.MaxQtyPerOrder)
-	}
-
-	tag := domain.IdempotencyTag(fill.ID, link.FollowerID)
-
-	e.log().Debug("engine: sized follower order",
-		"master_id", fill.MasterID,
-		"follower_id", link.FollowerID,
-		"intended_qty", qty,
-		"lot_size", lotSize,
-		"sizing_reason", reason,
-		"fast_path", link.CloneFactor.Equal(one),
-	)
-
-	orderID, err := e.store.InsertFollowerOrder(ctx, domain.FollowerOrder{
-		MasterFillID:    fill.ID,
-		FollowerID:      link.FollowerID,
-		IdempotencyTag:  tag,
-		IntendedQty:     qty,
-		LotSize:         lotSize,
-		SizingReason:    reason,
-		Origin:          "copy_trade",
-		Tradingsymbol:   fill.Tradingsymbol,
-		Exchange:        fill.Exchange,
-		Product:         fill.Product,
-		TransactionType: fill.TransactionType,
-		OrderType:       fill.OrderType,
-	})
-	if errors.Is(err, domain.ErrDuplicate) {
-		// Already fanned out for this (fill, follower) pair — a
-		// redelivery, not a new signal. The original pass already
-		// dispatched (or will, via the outbox drainer); doing it again
-		// here would risk a second live order.
-		e.log().Debug("engine: duplicate follower order, skipping redelivery",
-			"follower_id", link.FollowerID,
-			"fill_id", fill.ID,
-		)
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	if qty == 0 {
-		// Below one lot (or a bad instrument/ratio): visible on the
-		// follower_order row, but there is nothing to place.
-		e.log().Info("engine: zero quantity follower order, skipping dispatch",
-			"follower_id", link.FollowerID,
-			"order_id", orderID,
-			"reason", reason,
-		)
-		if err := e.store.UpdateFollowerOrderFailed(ctx, orderID, "SKIPPED", reason.String()); err != nil {
-			e.log().Warn("engine: failed to mark zero-qty follower order as skipped",
-				"order_id", orderID,
-				"error", err,
-			)
-		}
-		return nil
-	}
-
+func resolveExecutionPrices(fill domain.MasterFill) (float64, float64) {
 	price, _ := fill.Price.Float64()
 	triggerPrice, _ := fill.TriggerPrice.Float64()
 
@@ -226,34 +314,5 @@ func (e *Engine) fanOutToFollower(ctx context.Context, fill domain.MasterFill, l
 	if fill.OrderType == "LIMIT" && price <= 0 {
 		price, _ = fill.AveragePrice.Float64()
 	}
-
-	job := domain.Job{
-		FollowerOrderID: orderID,
-		FollowerID:      link.FollowerID,
-		MasterFillID:    fill.ID,
-		IdempotencyTag:  tag,
-		Exchange:        fill.Exchange,
-		Tradingsymbol:   fill.Tradingsymbol,
-		TransactionType: fill.TransactionType,
-		Product:         fill.Product,
-		OrderType:       fill.OrderType,
-		Quantity:        qty,
-		Price:           price,
-		TriggerPrice:    triggerPrice,
-	}
-	if !e.dispatcher.Dispatch(link.FollowerID, job) {
-		e.log().Error("engine: follower worker channel full, dead-lettered",
-			"follower_id", link.FollowerID,
-			"order_id", orderID,
-		)
-		return e.store.UpdateFollowerOrderFailed(ctx, orderID, domain.TerminalDeadLettered,
-			"worker channel full: fan-out could not hand off in time")
-	}
-
-	e.log().Info("engine: follower order dispatched",
-		"follower_id", link.FollowerID,
-		"order_id", orderID,
-		"qty", qty,
-	)
-	return nil
+	return price, triggerPrice
 }
