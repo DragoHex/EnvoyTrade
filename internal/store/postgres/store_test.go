@@ -209,6 +209,197 @@ func TestInsertFollowerOrder_DuplicateTagAndDuplicatePairAreRejected(t *testing.
 	// exercised implicitly above since the tag is derived from the pair.
 }
 
+func TestInsertFollowerOrdersBatch_AtomicityAndConflictHandling(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+	f3 := seedAccount(t, s, "follower")
+
+	fillID, err := s.InsertMasterFill(ctx, domain.MasterFill{
+		MasterID: master, BrokerOrderID: "B1", Exchange: "NSE", Tradingsymbol: "RELIANCE",
+		InstrumentToken: 1, TransactionType: "BUY", Product: "CNC", OrderType: "MARKET",
+		FilledQuantity: 100, AveragePrice: decimal.NewFromInt(2500), Status: "COMPLETE",
+		OrderTimestamp: time.Now(), RawPayload: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+
+	orders := []domain.FollowerOrder{
+		{
+			MasterFillID:    fillID,
+			FollowerID:      f1,
+			IdempotencyTag:  domain.IdempotencyTag(fillID, f1),
+			IntendedQty:     100,
+			LotSize:         1,
+			SizingReason:    domain.ReasonOK,
+			Origin:          "copy_trade",
+			Tradingsymbol:   "RELIANCE",
+			Exchange:        "NSE",
+			Product:         "CNC",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+		},
+		{
+			MasterFillID:    fillID,
+			FollowerID:      f2,
+			IdempotencyTag:  domain.IdempotencyTag(fillID, f2),
+			IntendedQty:     200,
+			LotSize:         1,
+			SizingReason:    domain.ReasonOK,
+			Origin:          "copy_trade",
+			Tradingsymbol:   "RELIANCE",
+			Exchange:        "NSE",
+			Product:         "CNC",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+		},
+		{
+			MasterFillID:    fillID,
+			FollowerID:      f3,
+			IdempotencyTag:  domain.IdempotencyTag(fillID, f3),
+			IntendedQty:     50,
+			LotSize:         1,
+			SizingReason:    domain.ReasonCapped,
+			Origin:          "copy_trade",
+			Tradingsymbol:   "RELIANCE",
+			Exchange:        "NSE",
+			Product:         "CNC",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+		},
+	}
+
+	// First batch insert: all 3 should be inserted
+	res, err := s.InsertFollowerOrdersBatch(ctx, orders)
+	if err != nil {
+		t.Fatalf("InsertFollowerOrdersBatch: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("expected 3 inserted orders, got %d", len(res))
+	}
+	for _, o := range orders {
+		id, ok := res[o.IdempotencyTag]
+		if !ok || id <= 0 {
+			t.Errorf("missing or invalid id for tag %s", o.IdempotencyTag)
+		}
+	}
+
+	// Second batch insert (redelivery of identical tags): ON CONFLICT DO NOTHING -> returns empty map
+	res2, err := s.InsertFollowerOrdersBatch(ctx, orders)
+	if err != nil {
+		t.Fatalf("InsertFollowerOrdersBatch second run: %v", err)
+	}
+	if len(res2) != 0 {
+		t.Fatalf("expected 0 inserted orders on duplicate redelivery, got %d", len(res2))
+	}
+
+	// Edge case 1: Empty slice should return empty map immediately with nil error
+	emptyRes, err := s.InsertFollowerOrdersBatch(ctx, nil)
+	if err != nil {
+		t.Fatalf("InsertFollowerOrdersBatch(nil): %v", err)
+	}
+	if len(emptyRes) != 0 {
+		t.Fatalf("expected 0 entries for empty orders slice, got %d", len(emptyRes))
+	}
+
+	// Edge case 2: Partial overlap (1 existing tag + 1 new tag)
+	f4 := uuid.New()
+	if err := s.CreateAccount(ctx, f4, "Follower 4", "follower", "kite", "FOLLOW04", "k4", "s4", "127.0.0.4"); err != nil {
+		t.Fatalf("create follower 4: %v", err)
+	}
+	mixedOrders := []domain.FollowerOrder{
+		orders[0], // existing tag: should be skipped
+		{
+			MasterFillID:    fillID,
+			FollowerID:      f4,
+			IdempotencyTag:  domain.IdempotencyTag(fillID, f4),
+			IntendedQty:     30,
+			LotSize:         1,
+			SizingReason:    domain.ReasonOK,
+			Origin:          "copy_trade",
+			Tradingsymbol:   "RELIANCE",
+			Exchange:        "NSE",
+			Product:         "CNC",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+		},
+	}
+	mixedRes, err := s.InsertFollowerOrdersBatch(ctx, mixedOrders)
+	if err != nil {
+		t.Fatalf("InsertFollowerOrdersBatch partial overlap: %v", err)
+	}
+	if len(mixedRes) != 1 {
+		t.Fatalf("expected 1 newly inserted order, got %d", len(mixedRes))
+	}
+	if _, ok := mixedRes[domain.IdempotencyTag(fillID, f4)]; !ok {
+		t.Fatalf("expected new follower 4 order to be inserted")
+	}
+
+	// Edge case 3: Foreign key violation (non-existent follower UUID) should fail and rollback atomically
+	badFollowerID := uuid.New()
+	badOrders := []domain.FollowerOrder{
+		{
+			MasterFillID:    fillID,
+			FollowerID:      badFollowerID,
+			IdempotencyTag:  domain.IdempotencyTag(fillID, badFollowerID),
+			IntendedQty:     10,
+			LotSize:         1,
+			SizingReason:    domain.ReasonOK,
+			Tradingsymbol:   "RELIANCE",
+			Exchange:        "NSE",
+			Product:         "CNC",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+		},
+	}
+	_, err = s.InsertFollowerOrdersBatch(ctx, badOrders)
+	if err == nil {
+		t.Fatalf("expected foreign key error for non-existent follower, got nil")
+	}
+}
+
+func TestStore_OrderTx_SynchronousCommitIsOff(t *testing.T) {
+	ctx := context.Background()
+	store, pool := newTestStoreWithPool(t)
+
+	// Baseline: pool level synchronous_commit should default to 'on'
+	var defaultSyncCommit string
+	if err := pool.QueryRow(ctx, "SHOW synchronous_commit").Scan(&defaultSyncCommit); err != nil {
+		t.Fatalf("query default synchronous_commit: %v", err)
+	}
+	if defaultSyncCommit != "on" {
+		t.Errorf("default pool synchronous_commit = %s, want 'on'", defaultSyncCommit)
+	}
+
+	// Order tx should set synchronous_commit to 'off' within transaction
+	tx, err := store.BeginOrderTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginOrderTx: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var txSyncCommit string
+	if err := tx.QueryRow(ctx, "SHOW synchronous_commit").Scan(&txSyncCommit); err != nil {
+		t.Fatalf("query tx synchronous_commit: %v", err)
+	}
+	if txSyncCommit != "off" {
+		t.Errorf("order tx synchronous_commit = %s, want 'off'", txSyncCommit)
+	}
+
+	// After rollback/commit, pool level remains 'on'
+	_ = tx.Rollback(ctx)
+	var afterSyncCommit string
+	if err := pool.QueryRow(ctx, "SHOW synchronous_commit").Scan(&afterSyncCommit); err != nil {
+		t.Fatalf("query after synchronous_commit: %v", err)
+	}
+	if afterSyncCommit != "on" {
+		t.Errorf("after tx synchronous_commit = %s, want 'on'", afterSyncCommit)
+	}
+}
+
 func TestOrderEvents_RetrievedInInsertionOrder(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

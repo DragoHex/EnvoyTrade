@@ -299,11 +299,34 @@ func (s *Store) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]d
 	return links, nil
 }
 
+// BeginOrderTx starts a database transaction configured with
+// SET LOCAL synchronous_commit = 'off'. This allows high-throughput order writes
+// to return immediately upon RAM WAL buffer write (~0.2ms) rather than waiting
+// for full disk fsync (2-5ms). Standard connection pool synchronous_commit remains 'on'.
+func (s *Store) BeginOrderTx(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin order tx: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL synchronous_commit = 'off'"); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, fmt.Errorf("set local synchronous_commit off: %w", err)
+	}
+	return tx, nil
+}
+
 // InsertMasterFill persists a master fill. A duplicate WS redelivery
 // collides on the unique (master_id, broker_order_id, filled_quantity,
 // status) index and returns domain.ErrDuplicate rather than a new row.
+// Executes in an order transaction with synchronous_commit = off.
 func (s *Store) InsertMasterFill(ctx context.Context, f domain.MasterFill) (int64, error) {
-	id, err := s.queries.InsertMasterFill(ctx, sqlcgen.InsertMasterFillParams{
+	tx, err := s.BeginOrderTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	id, err := s.queries.WithTx(tx).InsertMasterFill(ctx, sqlcgen.InsertMasterFillParams{
 		MasterID:        f.MasterID,
 		BrokerOrderID:   f.BrokerOrderID,
 		Exchange:        f.Exchange,
@@ -322,7 +345,13 @@ func (s *Store) InsertMasterFill(ctx context.Context, f domain.MasterFill) (int6
 	if isUniqueViolation(err) {
 		return 0, domain.ErrDuplicate
 	}
-	return id, err
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit master fill: %w", err)
+	}
+	return id, nil
 }
 
 // MasterFillExists checks if a master fill already exists in the database.
@@ -348,7 +377,14 @@ func (s *Store) SetMasterFillDispatchState(ctx context.Context, id int64, state 
 // InsertFollowerOrder persists one follower_order row, created before
 // any broker call is attempted. A duplicate idempotency_tag or a
 // duplicate (master_fill_id, follower_id) pair returns domain.ErrDuplicate.
+// Executes in an order transaction with synchronous_commit = off.
 func (s *Store) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error) {
+	tx, err := s.BeginOrderTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var masterFillID *int64
 	if o.MasterFillID != 0 {
 		masterFillID = &o.MasterFillID
@@ -357,7 +393,7 @@ func (s *Store) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder)
 	if origin == "" {
 		origin = "copy_trade"
 	}
-	id, err := s.queries.InsertFollowerOrder(ctx, sqlcgen.InsertFollowerOrderParams{
+	id, err := s.queries.WithTx(tx).InsertFollowerOrder(ctx, sqlcgen.InsertFollowerOrderParams{
 		MasterFillID:    masterFillID,
 		FollowerID:      o.FollowerID,
 		IdempotencyTag:  o.IdempotencyTag,
@@ -374,12 +410,117 @@ func (s *Store) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder)
 	if isUniqueViolation(err) {
 		return 0, domain.ErrDuplicate
 	}
-	return id, err
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit follower order: %w", err)
+	}
+	return id, nil
 }
+
+// InsertFollowerOrdersBatch persists multiple follower_order rows in a single
+// atomic parameterized PostgreSQL UNNEST query. A duplicate idempotency_tag is
+// skipped via ON CONFLICT (idempotency_tag) DO NOTHING.
+// Executes in an order transaction with synchronous_commit = off.
+// Returns a map of [idempotency_tag]orderID for every newly inserted order.
+func (s *Store) InsertFollowerOrdersBatch(ctx context.Context, orders []domain.FollowerOrder) (map[string]int64, error) {
+	if len(orders) == 0 {
+		return make(map[string]int64), nil
+	}
+
+	tx, err := s.BeginOrderTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	masterFillIDs := make([]int64, len(orders))
+	followerIDs := make([]uuid.UUID, len(orders))
+	tags := make([]string, len(orders))
+	intendedQtys := make([]int32, len(orders))
+	lotSizes := make([]int32, len(orders))
+	sizingReasons := make([]int16, len(orders))
+	origins := make([]string, len(orders))
+	tradingsymbols := make([]string, len(orders))
+	exchanges := make([]string, len(orders))
+	products := make([]string, len(orders))
+	transactionTypes := make([]string, len(orders))
+	orderTypes := make([]string, len(orders))
+
+	for i, o := range orders {
+		masterFillIDs[i] = o.MasterFillID
+		followerIDs[i] = o.FollowerID
+		tags[i] = o.IdempotencyTag
+		intendedQtys[i] = int32(o.IntendedQty)
+		lotSizes[i] = int32(o.LotSize)
+		sizingReasons[i] = int16(o.SizingReason)
+		orig := o.Origin
+		if orig == "" {
+			orig = "copy_trade"
+		}
+		origins[i] = orig
+		tradingsymbols[i] = o.Tradingsymbol
+		exchanges[i] = o.Exchange
+		products[i] = o.Product
+		transactionTypes[i] = o.TransactionType
+		orderTypes[i] = o.OrderType
+	}
+
+	const batchQuery = `
+INSERT INTO follower_orders (
+    master_fill_id, follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
+    origin, tradingsymbol, exchange, product, transaction_type, order_type
+)
+SELECT * FROM UNNEST(
+    $1::bigint[], $2::uuid[], $3::text[], $4::integer[], $5::integer[], $6::smallint[],
+    $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[]
+)
+ON CONFLICT (idempotency_tag) DO NOTHING
+RETURNING id, idempotency_tag;
+`
+
+	rows, err := tx.Query(ctx, batchQuery,
+		masterFillIDs, followerIDs, tags, intendedQtys, lotSizes, sizingReasons,
+		origins, tradingsymbols, exchanges, products, transactionTypes, orderTypes,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("execute follower orders batch insert: %w", err)
+	}
+	defer rows.Close()
+
+	res := make(map[string]int64, len(orders))
+	for rows.Next() {
+		var id int64
+		var tag string
+		if err := rows.Scan(&id, &tag); err != nil {
+			return nil, fmt.Errorf("scan follower orders batch result: %w", err)
+		}
+		res[tag] = id
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate follower orders batch result: %w", err)
+	}
+	rows.Close()
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit follower orders batch: %w", err)
+	}
+
+	return res, nil
+}
+
 
 // InsertDirectFollowerOrder persists an external/manual or dashboard-initiated follower order,
 // using a deterministic tag or unique constraint on (follower_id, broker_order_id) to ensure idempotency.
+// Executes in an order transaction with synchronous_commit = off.
 func (s *Store) InsertDirectFollowerOrder(ctx context.Context, upd domain.OrderUpdate) (int64, error) {
+	tx, err := s.BeginOrderTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	tag := upd.Tag
 	if tag == "" {
 		tag = "ext-" + upd.BrokerOrderID
@@ -404,7 +545,7 @@ func (s *Store) InsertDirectFollowerOrder(ctx context.Context, upd domain.OrderU
 	}
 	placedQty := int32(qty)
 
-	id, err := s.queries.InsertDirectFollowerOrder(ctx, sqlcgen.InsertDirectFollowerOrderParams{
+	id, err := s.queries.WithTx(tx).InsertDirectFollowerOrder(ctx, sqlcgen.InsertDirectFollowerOrderParams{
 		FollowerID:      upd.FollowerID,
 		BrokerOrderID:   brokerOrderID,
 		IdempotencyTag:  tag,
@@ -424,6 +565,12 @@ func (s *Store) InsertDirectFollowerOrder(ctx context.Context, upd domain.OrderU
 	})
 	if isUniqueViolation(err) {
 		return 0, domain.ErrDuplicate
+	}
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit direct follower order: %w", err)
 	}
 	return id, err
 }
@@ -544,10 +691,11 @@ func (s *Store) StashPendingOrderUpdate(ctx context.Context, brokerOrderID, stat
 // UpdateFollowerOrderPlaced records a successful broker placement.
 // If an early postback was stashed in pending_order_updates, it is consumed in the
 // exact same transaction, applying terminal status and appending the audit event in 0ms.
+// Executes in an order transaction with synchronous_commit = off.
 func (s *Store) UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.BeginOrderTx(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return fmt.Errorf("begin order tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -635,8 +783,15 @@ func (s *Store) UpdateFollowerOrderFailed(ctx context.Context, id int64, termina
 // id). Returns the updated row's id and domain.ErrNotFound if no
 // follower_order has this broker_order_id yet (the postback can race the
 // worker's own UpdateFollowerOrderPlaced write).
+// Executes in an order transaction with synchronous_commit = off.
 func (s *Store) UpdateFollowerOrderStatus(ctx context.Context, brokerOrderID string, status string, filledQty int, averagePrice decimal.Decimal) (int64, error) {
-	id, err := s.queries.UpdateFollowerOrderStatus(ctx, sqlcgen.UpdateFollowerOrderStatusParams{
+	tx, err := s.BeginOrderTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	id, err := s.queries.WithTx(tx).UpdateFollowerOrderStatus(ctx, sqlcgen.UpdateFollowerOrderStatusParams{
 		BrokerOrderID:  &brokerOrderID,
 		TerminalStatus: &status,
 		FilledQty:      int32(filledQty),
@@ -645,19 +800,38 @@ func (s *Store) UpdateFollowerOrderStatus(ctx context.Context, brokerOrderID str
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, domain.ErrNotFound
 	}
-	return id, err
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit update follower order status: %w", err)
+	}
+	return id, nil
 }
 
 // AppendOrderEvent writes one immutable transition-log row — the SEBI
 // audit trail (PLAN.md §2).
+// Executes in an order transaction with synchronous_commit = off.
 func (s *Store) AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error {
-	return s.queries.AppendOrderEvent(ctx, sqlcgen.AppendOrderEventParams{
+	tx, err := s.BeginOrderTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := s.queries.WithTx(tx).AppendOrderEvent(ctx, sqlcgen.AppendOrderEventParams{
 		FollowerOrderID: ev.FollowerOrderID,
 		MasterFillID:    ev.MasterFillID,
 		AccountID:       ev.AccountID,
 		EventType:       ev.EventType,
 		Payload:         ev.Payload,
-	})
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit order event: %w", err)
+	}
+	return nil
 }
 
 // OrderEventsByFollowerOrder returns every event for a follower_order, in
