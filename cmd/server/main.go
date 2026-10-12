@@ -208,6 +208,32 @@ func run(logger *slog.Logger) error {
 	eng := engine.New(store, workerPool)
 	eng.Logger = logger.With("component", "engine")
 
+	// Daily lot size cache cleanup at 01:00:00 IST
+	go func() {
+		istLocation, locErr := time.LoadLocation("Asia/Kolkata")
+		if locErr != nil {
+			logger.Warn("could not load Asia/Kolkata timezone, fallback to UTC+5:30 fixed zone", "error", locErr)
+			istLocation = time.FixedZone("IST", 5*3600+1800)
+		}
+		for {
+			now := time.Now().In(istLocation)
+			nextRun := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, istLocation)
+			if !now.Before(nextRun) {
+				nextRun = nextRun.Add(24 * time.Hour)
+			}
+			waitDur := time.Until(nextRun)
+			timer := time.NewTimer(waitDur)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+				eng.ClearLotSizeCache()
+				logger.Info("daily lot size cache cleared at 01:00:00 IST")
+			}
+		}
+	}()
+
 	// Queues for incoming signals & status updates
 	masterFillQueue := memchan.New[domain.MasterFill](1024)
 	orderUpdateQueue := memchan.New[domain.OrderUpdate](1024)
