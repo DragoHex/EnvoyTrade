@@ -1,6 +1,17 @@
 /* Palette source of truth: AGENTS.md "UI color palette" — don't re-derive.
    Attribute selectors, not :root[...] — data-theme is set on ThemeProvider's
    wrapper div, not <html>, and :root only ever matches <html>. */
+:root {
+  --color-primary: #2e1065;
+  --color-accent: #7c3aed;
+  --color-border: #ede9fe;
+  --color-text: #1e1b4b;
+  --color-text-secondary: #6b7280;
+  --color-bg: #ffffff;
+  --color-surface: #fbfaff;
+  --color-logo-secondary: #1e1b4b;
+}
+
 [data-theme='light'] {
   --color-primary: #2e1065;
   --color-accent: #7c3aed;
@@ -11,7 +22,7 @@
   --color-surface: #fbfaff;
   --color-logo-secondary: #1e1b4b;
 }
-:root,
+
 [data-theme='dark'] {
   --color-primary: #241242;
   --color-accent: #a855f7;
@@ -507,7 +518,7 @@ tr[data-testid='master-row'] td {
 }
 .confirm-modal-confirm {
   background: var(--color-accent);
-  color: #04140f;
+  color: #ffffff;
   border-color: var(--color-accent);
   font-weight: 600;
 }
@@ -570,11 +581,11 @@ tr[data-testid='master-row'] td {
 }
 
 [data-theme='dark'] .tab-group {
-  background: #14161f;
-  border-color: #2a2c38;
+  background: var(--color-surface);
+  border-color: var(--color-border);
 }
 [data-theme='dark'] .tab-btn {
-  color: #a0a5b8;
+  color: var(--color-text-secondary);
 }
 [data-theme='dark'] .tab-btn:hover {
   color: #ffffff;
@@ -582,7 +593,7 @@ tr[data-testid='master-row'] td {
 }
 [data-theme='dark'] .tab-btn[aria-pressed='true'],
 [data-theme='dark'] .tab-btn.active {
-  background: #2b3042;
+  background: var(--color-primary);
   color: #ffffff;
   font-weight: 600;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
@@ -593,7 +604,7 @@ tr[data-testid='master-row'] td {
   align-items: center;
   gap: 0.4rem;
   background: var(--color-accent);
-  color: #04140f;
+  color: #ffffff;
   border: 1px solid var(--color-accent);
   border-radius: 6px;
   padding: 0.45rem 1rem;
@@ -858,7 +869,7 @@ tr[data-testid='master-row'] td {
 }
 .drawer-btn-save {
   background: var(--color-accent);
-  color: #04140f;
+  color: #ffffff;
   border: 1px solid var(--color-accent);
   font-weight: 600;
 }
@@ -2248,7 +2259,7 @@ nav a.user-badge-link.active:hover,
   cursor: not-allowed;
 }
 [data-theme='dark'] .follower-accordion-item.disabled-follower-item {
-  background: #151720;
+  background: var(--color-surface);
 }
 .follower-accordion-item.disabled-follower-item .follower-accordion-header {
   cursor: not-allowed;
@@ -2257,7 +2268,7 @@ nav a.user-badge-link.active:hover,
   background: #e4e5e9;
 }
 [data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-accordion-header:hover {
-  background: #1a1c26;
+  background: var(--color-primary);
 }
 .follower-accordion-item.disabled-follower-item .follower-name {
   color: #8c8f9f !important;
@@ -2299,9 +2310,9 @@ nav a.user-badge-link.active:hover,
 }
 [data-theme='dark'] .follower-accordion-item.disabled-follower-item .product-badge,
 [data-theme='dark'] .follower-accordion-item.disabled-follower-item .action-badge {
-  background: #252836 !important;
-  color: #8a8fa3 !important;
-  border-color: #373b4e !important;
+  background: var(--color-surface) !important;
+  color: var(--color-text-secondary) !important;
+  border-color: var(--color-border) !important;
 }
 .disabled-count-note {
   font-size: 0.75rem;
@@ -2346,9 +2357,9 @@ nav a.user-badge-link.active:hover,
 [data-theme='dark'] .follower-accordion-item.disabled-follower-item .follower-drift-badge span,
 [data-theme='dark'] .follower-drift-badge.disabled-drift-badge span,
 [data-theme='dark'] .follower-drift-badge span.pill-disabled {
-  background: #252836 !important;
-  color: #8a8fa3 !important;
-  border: 1px solid #373b4e !important;
+  background: var(--color-surface) !important;
+  color: var(--color-text-secondary) !important;
+  border: 1px solid var(--color-border) !important;
 }
 .accordion-expand-btn {
   background: none;
@@ -2413,12 +2424,12 @@ nav a.user-badge-link.active:hover,
   text-transform: uppercase;
 }
 .action-badge.action-buy {
-  background: rgba(4, 180, 136, 0.15);
-  color: #048261;
+  background: rgba(124, 58, 237, 0.15);
+  color: var(--color-accent);
 }
 [data-theme='dark'] .action-badge.action-buy {
-  background: rgba(6, 216, 150, 0.2);
-  color: #06d896;
+  background: rgba(168, 85, 247, 0.2);
+  color: var(--color-accent);
 }
 .action-badge.action-sell {
   background: rgba(229, 72, 77, 0.15);
@@ -2447,7 +2458,7 @@ nav a.user-badge-link.active:hover,
   flex-shrink: 0 !important;
 }
 [data-theme='dark'] .rebalance-confirm-btn {
-  color: #0f1117 !important;
+  color: #ffffff !important;
 }
 .rebalance-confirm-btn:hover:not(:disabled) {
   filter: brightness(1.1);
