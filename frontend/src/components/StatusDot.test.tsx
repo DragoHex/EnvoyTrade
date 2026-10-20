@@ -7,14 +7,14 @@ describe('StatusDot', () => {
     render(() => <StatusDot status="ok" />)
     const dot = screen.getByTestId('status-dot')
     expect(dot).toHaveAttribute('data-status', 'ok')
-    expect(dot.style.background).toBe('var(--color-accent)')
+    expect(dot.style.background).toBe('var(--color-status-ok, #10b981)')
   })
 
   it('renders green dot when status is "active"', () => {
     render(() => <StatusDot status="active" />)
     const dot = screen.getByTestId('status-dot')
     expect(dot).toHaveAttribute('data-status', 'active')
-    expect(dot.style.background).toBe('var(--color-accent)')
+    expect(dot.style.background).toBe('var(--color-status-ok, #10b981)')
   })
 
   it('renders yellow dot when status is "warning"', () => {

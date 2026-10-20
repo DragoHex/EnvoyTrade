@@ -4,6 +4,7 @@
 :root {
   --color-primary: #2e1065;
   --color-accent: #7c3aed;
+  --color-status-ok: #10b981;
   --color-border: #ede9fe;
   --color-text: #1e1b4b;
   --color-text-secondary: #6b7280;
@@ -15,6 +16,7 @@
 [data-theme='light'] {
   --color-primary: #2e1065;
   --color-accent: #7c3aed;
+  --color-status-ok: #10b981;
   --color-border: #ede9fe;
   --color-text: #1e1b4b;
   --color-text-secondary: #6b7280;
@@ -26,6 +28,7 @@
 [data-theme='dark'] {
   --color-primary: #241242;
   --color-accent: #a855f7;
+  --color-status-ok: #10b981;
   --color-border: #2e1f4a;
   --color-text: #f1f5f9;
   --color-text-secondary: #a78bfa;
@@ -1384,13 +1387,13 @@ tr[data-testid='master-row'] td {
   color: var(--color-accent);
 }
 
-/* Hobbit (Follower): maintains light-mode theme; green tint on hover */
+/* Hobbit (Follower): maintains light-mode theme; violet tint on hover */
 .role-icon-hobbit {
   transition: filter 0.15s ease;
 }
 
 .role-icon-wrap:hover .role-icon-hobbit {
-  filter: url(#hobbit-green-hover);
+  filter: url(#hobbit-hover);
 }
 
 /* User name badge link in top navigation */

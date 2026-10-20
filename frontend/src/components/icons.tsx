@@ -214,11 +214,18 @@ export function HobbitIcon(props: { size?: number; class?: string }) {
       aria-hidden="true"
     >
       <defs>
+        <filter id="hobbit-hover" color-interpolation-filters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="linear" slope="0.341" intercept="0.659" />
+            <feFuncG type="linear" slope="0.667" intercept="0.333" />
+            <feFuncB type="linear" slope="0.031" intercept="0.969" />
+          </feComponentTransfer>
+        </filter>
         <filter id="hobbit-green-hover" color-interpolation-filters="sRGB">
           <feComponentTransfer>
-            <feFuncR type="linear" slope="0.984" intercept="0.016" />
-            <feFuncG type="linear" slope="0.294" intercept="0.706" />
-            <feFuncB type="linear" slope="0.467" intercept="0.533" />
+            <feFuncR type="linear" slope="0.341" intercept="0.659" />
+            <feFuncG type="linear" slope="0.667" intercept="0.333" />
+            <feFuncB type="linear" slope="0.031" intercept="0.969" />
           </feComponentTransfer>
         </filter>
       </defs>

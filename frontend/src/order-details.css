@@ -156,8 +156,8 @@ tr.row-expanded {
 }
 
 .status-dot-online {
-  background-color: var(--color-accent);
-  box-shadow: 0 0 6px var(--color-accent);
+  background-color: var(--color-status-ok, #10b981);
+  box-shadow: 0 0 6px var(--color-status-ok, #10b981);
 }
 
 .status-dot-offline {
