@@ -26,8 +26,8 @@ export interface EnvoyLogoProps {
  */
 export function EnvoyLogo(props: EnvoyLogoProps) {
   const size = () => props.size ?? 24
-  const accent = () => props.accentColor ?? 'var(--color-accent, #06d896)'
-  const secondary = () => props.secondaryColor ?? 'currentColor'
+  const accent = () => props.accentColor ?? 'var(--color-accent, #a855f7)'
+  const secondary = () => props.secondaryColor ?? 'var(--color-logo-secondary, #ffffff)'
 
   return (
     <svg

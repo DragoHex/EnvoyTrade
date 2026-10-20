@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
   <style>
-    .master-stroke { stroke: #04b488; }
-    .master-fill { fill: #04b488; }
-    .follower-stroke { stroke: #1a1c24; }
-    .follower-fill { fill: #1a1c24; }
+    .master-stroke { stroke: #7c3aed; }
+    .master-fill { fill: #7c3aed; }
+    .follower-stroke { stroke: #1e1b4b; }
+    .follower-fill { fill: #1e1b4b; }
 
     @media (prefers-color-scheme: dark) {
-      .master-stroke { stroke: #06d896; }
-      .master-fill { fill: #06d896; }
-      .follower-stroke { stroke: #f0f0f2; }
-      .follower-fill { fill: #f0f0f2; }
+      .master-stroke { stroke: #a855f7; }
+      .master-fill { fill: #a855f7; }
+      .follower-stroke { stroke: #ffffff; }
+      .follower-fill { fill: #ffffff; }
     }
   </style>
 
-  <!-- Master Trajectory (Emerald Accent - Lead Signal) -->
+  <!-- Master Trajectory (Violet Accent - Lead Signal) -->
   <path
     class="master-stroke"
     d="M 8 21.5 C 8 12.5, 15 5.5, 25 5.5 C 31.5 5.5, 36.5 8.5, 39.5 12"

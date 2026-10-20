@@ -21,20 +21,20 @@ CSS custom properties, e.g.:
 
 ```css
 :root[data-theme="light"] {
-  --color-primary: #44475b;
-  --color-accent: #04b488;
-  --color-border: #f0f0f2;
-  --color-text: #44475b;
+  --color-primary: #2e1065;
+  --color-accent: #7c3aed;
+  --color-border: #ede9fe;
+  --color-text: #1e1b4b;
   --color-bg: #ffffff;
-  --color-surface: #f5f5f7;
+  --color-surface: #fbfaff;
 }
 :root[data-theme="dark"] {
-  --color-primary: #1a1c24;
-  --color-accent: #06d896;
-  --color-border: #2a2c34;
-  --color-text: #f0f0f2;
-  --color-bg: #0f1117;
-  --color-surface: #1a1c24;
+  --color-primary: #241242;
+  --color-accent: #a855f7;
+  --color-border: #2e1f4a;
+  --color-text: #f1f5f9;
+  --color-bg: #0c0714;
+  --color-surface: #170f26;
 }
 ```
 

@@ -197,7 +197,7 @@ export function LoginPage() {
               'margin-top': '0.5rem',
               padding: '0.75rem 1rem',
               background: 'var(--color-accent)',
-              color: '#04140f',
+              color: '#ffffff',
               border: 'none',
               'border-radius': '6px',
               'font-size': '0.95rem',

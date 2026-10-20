@@ -2,22 +2,25 @@
    Attribute selectors, not :root[...] — data-theme is set on ThemeProvider's
    wrapper div, not <html>, and :root only ever matches <html>. */
 [data-theme='light'] {
-  --color-primary: #44475b;
-  --color-accent: #04b488;
-  --color-border: #f0f0f2;
-  --color-text: #44475b;
-  --color-text-secondary: #71768e;
+  --color-primary: #2e1065;
+  --color-accent: #7c3aed;
+  --color-border: #ede9fe;
+  --color-text: #1e1b4b;
+  --color-text-secondary: #6b7280;
   --color-bg: #ffffff;
-  --color-surface: #f5f5f7;
+  --color-surface: #fbfaff;
+  --color-logo-secondary: #1e1b4b;
 }
+:root,
 [data-theme='dark'] {
-  --color-primary: #1a1c24;
-  --color-accent: #06d896;
-  --color-border: #2a2c34;
-  --color-text: #f0f0f2;
-  --color-text-secondary: #9da3ae;
-  --color-bg: #0f1117;
-  --color-surface: #1a1c24;
+  --color-primary: #241242;
+  --color-accent: #a855f7;
+  --color-border: #2e1f4a;
+  --color-text: #f1f5f9;
+  --color-text-secondary: #a78bfa;
+  --color-bg: #0c0714;
+  --color-surface: #170f26;
+  --color-logo-secondary: #ffffff;
 }
 
 html {
@@ -1809,28 +1812,28 @@ nav a.user-badge-link.active:hover,
   border-color: rgba(245, 166, 35, 0.5) transparent transparent transparent;
 }
 
-/* 3. Accent (Rebalance) - Green/Teal */
+/* 3. Accent (Rebalance) - Violet */
 .info-tooltip-trigger.tooltip-accent {
-  color: #048261;
+  color: #7c3aed;
 }
 [data-theme='dark'] .info-tooltip-trigger.tooltip-accent {
-  color: #06d896;
+  color: #a855f7;
 }
 .info-tooltip-trigger.tooltip-accent:hover::after {
-  background: #e6fcf5;
-  color: #087f5b;
-  border: 1px solid rgba(4, 180, 136, 0.4);
+  background: #f5f3ff;
+  color: #6d28d9;
+  border: 1px solid rgba(124, 58, 237, 0.4);
 }
 [data-theme='dark'] .info-tooltip-trigger.tooltip-accent:hover::after {
-  background: #10241e;
-  color: #38d9a9;
-  border: 1px solid rgba(6, 216, 150, 0.5);
+  background: #1e1b4b;
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.5);
 }
 .info-tooltip-trigger.tooltip-accent:hover::before {
-  border-color: rgba(4, 180, 136, 0.4) transparent transparent transparent;
+  border-color: rgba(124, 58, 237, 0.4) transparent transparent transparent;
 }
 [data-theme='dark'] .info-tooltip-trigger.tooltip-accent:hover::before {
-  border-color: rgba(6, 216, 150, 0.5) transparent transparent transparent;
+  border-color: rgba(168, 85, 247, 0.5) transparent transparent transparent;
 }
 .square-off-warning {
   border-radius: 8px;
@@ -1928,10 +1931,10 @@ nav a.user-badge-link.active:hover,
   color: var(--color-text);
 }
 .square-off-table tr.selected-row {
-  background: rgba(4, 180, 136, 0.08);
+  background: rgba(124, 58, 237, 0.08);
 }
 [data-theme='dark'] .square-off-table tr.selected-row {
-  background: rgba(6, 216, 150, 0.1);
+  background: rgba(168, 85, 247, 0.1);
 }
 .square-off-table tr:hover {
   background: var(--color-surface);
@@ -2014,14 +2017,14 @@ nav a.user-badge-link.active:hover,
   padding: 0.65rem 0.85rem;
   font-size: 0.825rem;
   line-height: 1.45;
-  border: 1px solid rgba(4, 180, 136, 0.35);
-  background: rgba(4, 180, 136, 0.08);
-  color: #048261;
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  background: rgba(124, 58, 237, 0.08);
+  color: #6d28d9;
 }
 [data-theme='dark'] .rebalance-info {
-  border-color: rgba(6, 216, 150, 0.4);
-  background: rgba(6, 216, 150, 0.12);
-  color: #06d896;
+  border-color: rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
 }
 .rebalance-error-banner {
   background: rgba(229, 72, 77, 0.12);
@@ -2058,7 +2061,7 @@ nav a.user-badge-link.active:hover,
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: rgba(4, 180, 136, 0.15);
+  background: rgba(124, 58, 237, 0.15);
   color: var(--color-accent);
   display: flex;
   align-items: center;
@@ -2232,10 +2235,10 @@ nav a.user-badge-link.active:hover,
   background: var(--color-surface);
 }
 .follower-accordion-item.selected-accordion {
-  background: rgba(4, 180, 136, 0.04);
+  background: rgba(124, 58, 237, 0.04);
 }
 [data-theme='dark'] .follower-accordion-item.selected-accordion {
-  background: rgba(6, 216, 150, 0.05);
+  background: rgba(168, 85, 247, 0.05);
 }
 .follower-accordion-item.disabled-follower-item {
   background: #ebecef;
@@ -2487,12 +2490,12 @@ nav a.user-badge-link.active:hover,
   border-radius: 4px;
 }
 .receipt-status-badge.status-completed {
-  background: rgba(4, 180, 136, 0.15);
-  color: #048261;
+  background: rgba(124, 58, 237, 0.15);
+  color: #6d28d9;
 }
 [data-theme='dark'] .receipt-status-badge.status-completed {
-  background: rgba(6, 216, 150, 0.2);
-  color: #06d896;
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
 }
 .receipt-summary-text {
   font-size: 0.85rem;

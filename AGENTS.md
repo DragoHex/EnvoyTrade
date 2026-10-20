@@ -155,9 +155,9 @@ Source of truth for `docs/plans/UI-PLAN.md` — reuse for any future UI work, do
 
 | Role | Light | Dark | Hex meaning |
 |---|---|---|---|
-| Primary/Brand | `#44475b` | `#1a1c24` | Dark slate |
-| Accent (Action) | `#04b488` | `#06d896` | Teal/Green |
-| Border/Divider | `#f0f0f2` | `#2a2c34` | Light gray / Charcoal |
-| Text Primary | `#44475b` | `#f0f0f2` | Slate / Off-white |
-| Background | `#ffffff` | `#0f1117` | White / Near-black |
-| Surface | `#f5f5f7` | `#1a1c24` | Light gray / Dark gray |
+| Primary/Brand | `#2e1065` | `#241242` | Deep violet / Imperial Violet |
+| Accent (Action) | `#7c3aed` | `#a855f7` | Violet / Vibrant Purple |
+| Border/Divider | `#ede9fe` | `#2e1f4a` | Soft violet / Deep violet border |
+| Text Primary | `#1e1b4b` | `#f1f5f9` | Violet-950 / Slate 100 |
+| Background | `#ffffff` | `#0c0714` | White / Deep violet-black |
+| Surface | `#fbfaff` | `#170f26` | Off-white violet / Violet surface |
