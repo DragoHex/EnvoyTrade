@@ -1327,7 +1327,8 @@ tr[data-testid='master-row'] td {
   width: 100%;
 }
 
-.role-cell-centered {
+.role-cell-centered,
+.auth-status-cell-centered {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1377,6 +1378,25 @@ tr[data-testid='master-row'] td {
 
 .role-icon-wrap:hover .role-icon-hobbit {
   filter: url(#hobbit-green-hover);
+}
+
+/* Auth Status Icon: subtle micro-scale on hover */
+.auth-status-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.auth-status-icon-wrap:hover {
+  transform: scale(1.15);
+}
+
+.auth-status-icon-svg {
+  display: block;
+  overflow: visible;
 }
 
 /* User name badge link in top navigation */

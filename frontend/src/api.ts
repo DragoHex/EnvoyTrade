@@ -7,6 +7,7 @@ export interface User {
   username: string
   name: string
   role: string
+  active?: boolean
   phone?: string
   address?: string
   gstNumber?: string
@@ -574,6 +575,7 @@ export interface ProxyIP {
   ipType: 'ipv4' | 'ipv6'
   host: string
   port: number
+  whitelistedBrokers?: string
   validFrom: string
   validUntil: string
   plan: string
@@ -595,4 +597,334 @@ export function fetchAvailableProxyIPs(accountId?: string): Promise<AvailablePro
   const qs = accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''
   return apiFetch(`${BASE}/proxy-ips/available${qs}`).then((r) => json(r))
 }
+
+// Admin Portal API types and client functions
+
+export interface KillSwitchStatus {
+  engaged: boolean
+  engagedAt?: string
+  engagedBy?: string
+  reason?: string
+}
+
+export interface TickerStatus {
+  masterId: string
+  active: boolean
+}
+
+export interface QueueStatus {
+  masterFillDepth: number
+  masterFillCap: number
+  orderUpdateDepth: number
+  orderUpdateCap: number
+}
+
+export interface DBPoolStatus {
+  acquiredConns: number
+  idleConns: number
+  totalConns: number
+  maxConns: number
+}
+
+export interface SystemResources {
+  cpuPercent: number
+  heapAllocMb: number
+  sysMemoryMb: number
+  goroutineCount: number
+  gcCycles: number
+}
+
+export interface PipelineStatus {
+  killSwitch: KillSwitchStatus
+  masterTickers: TickerStatus[]
+  queues: QueueStatus
+  workerCount: number
+  dbPool: DBPoolStatus
+  systemResources?: SystemResources
+}
+
+export type ExpiryStatus = 'active' | 'expiring_soon' | 'expired'
+
+export interface AdminProxyIP extends ProxyIP {
+  daysRemaining: number
+  expiryStatus: ExpiryStatus
+  username?: string
+  createdAt?: string
+}
+
+export interface ProxyIPStats {
+  totalCount: number
+  assignedCount: number
+  availableCount: number
+  ipv4Count: number
+  ipv6Count: number
+  expiringSoonCount: number
+  expiredCount: number
+  assignedExpiring: number
+}
+
+export interface AdminProxyIPsResponse {
+  ips: AdminProxyIP[]
+  stats: ProxyIPStats
+}
+
+export interface BulkUploadResult {
+  total: number
+  inserted: number
+  updated: number
+  errors: string[]
+}
+
+export interface ProxyTestResult {
+  ipAddress: string
+  success: boolean
+  latencyMs: number
+  egressIp?: string
+  error?: string
+}
+
+export interface UserSummary {
+  id: string
+  email: string
+  username: string
+  name: string
+  role: string
+  active: boolean
+  phone?: string
+  accountCount: number
+  sessionCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminUsersResponse {
+  users: UserSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface Session {
+  id: number
+  tokenHash: string
+  userId: string
+  ipAddress?: string
+  userAgent?: string
+  expiresAt: string
+  createdAt: string
+  lastSeenAt: string
+}
+
+// Telemetry & KillSwitch
+export function getAdminServiceStatus(): Promise<PipelineStatus> {
+  return apiFetch(`${BASE}/admin/status`).then((r) => json(r))
+}
+
+export function postAdminKillSwitch(
+  engaged: boolean,
+  reason: string,
+): Promise<{ status: string; killSwitch: KillSwitchStatus }> {
+  return apiFetch(`${BASE}/admin/killswitch`, {
+    method: 'POST',
+    body: JSON.stringify({ engaged, reason }),
+  }).then((r) => json(r))
+}
+
+// Admin Proxy IPs
+export function getAdminProxyIPs(status?: string, type?: string): Promise<AdminProxyIPsResponse> {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (type) params.set('type', type)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return apiFetch(`${BASE}/admin/proxy-ips${qs}`).then((r) => json(r))
+}
+
+export function postAdminProxyIPsBulk(items: any[]): Promise<BulkUploadResult> {
+  return apiFetch(`${BASE}/admin/proxy-ips/bulk`, {
+    method: 'POST',
+    body: JSON.stringify(items),
+  }).then((r) => json(r))
+}
+
+export function postAdminProxyIP(item: any): Promise<{ status: string; ip: AdminProxyIP }> {
+  return apiFetch(`${BASE}/admin/proxy-ips`, {
+    method: 'POST',
+    body: JSON.stringify(item),
+  }).then((r) => json(r))
+}
+
+export function patchAdminProxyIP(
+  ip: string,
+  update: { validUntil?: string; password?: string; plan?: string },
+): Promise<{ status: string }> {
+  return apiFetch(`${BASE}/admin/proxy-ips/${encodeURIComponent(ip)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  }).then((r) => json(r))
+}
+
+export function putAdminProxyIP(ip: string, item: any): Promise<{ status: string; ip?: AdminProxyIP }> {
+  return apiFetch(`${BASE}/admin/proxy-ips/${encodeURIComponent(ip)}`, {
+    method: 'PUT',
+    body: JSON.stringify(item),
+  }).then((r) => json(r))
+}
+
+export function deleteAdminProxyIP(ip: string): Promise<{ status: string }> {
+  return apiFetch(`${BASE}/admin/proxy-ips/${encodeURIComponent(ip)}`, {
+    method: 'DELETE',
+  }).then((r) => json(r))
+}
+
+export function testAdminProxyIP(ip: string): Promise<ProxyTestResult> {
+  return apiFetch(`${BASE}/admin/proxy-ips/${encodeURIComponent(ip)}/test`, {
+    method: 'POST',
+  }).then((r) => json(r))
+}
+
+// Admin Users
+export function getAdminUsers(limit = 20, offset = 0): Promise<AdminUsersResponse> {
+  return apiFetch(`${BASE}/admin/users?limit=${limit}&offset=${offset}`).then((r) => json(r))
+}
+
+export function postAdminUser(user: {
+  email: string
+  username: string
+  name?: string
+  password: string
+  role?: string
+}): Promise<{ status: string; userId: string }> {
+  return apiFetch(`${BASE}/admin/users`, {
+    method: 'POST',
+    body: JSON.stringify(user),
+  }).then((r) => json(r))
+}
+
+export function patchAdminUser(
+  id: string,
+  update: { role?: string; active?: boolean },
+): Promise<{ status: string }> {
+  return apiFetch(`${BASE}/admin/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  }).then((r) => json(r))
+}
+
+export function getAdminUserSessions(id: string): Promise<{ sessions: Session[] }> {
+  return apiFetch(`${BASE}/admin/users/${id}/sessions`).then((r) => json(r))
+}
+
+export function deleteAdminUserSessions(
+  id: string,
+): Promise<{ status: string; revokedCount: number }> {
+  return apiFetch(`${BASE}/admin/users/${id}/sessions`, {
+    method: 'DELETE',
+  }).then((r) => json(r))
+}
+
+export function getKillSwitchStatus(): Promise<KillSwitchStatus> {
+  return apiFetch(`${BASE}/killswitch`).then((r) => json(r))
+}
+
+export function getAdminUserAccounts(
+  id: string,
+): Promise<{ user: User; accounts: Account[] }> {
+  return apiFetch(`${BASE}/admin/users/${id}/accounts`).then((r) => json(r))
+}
+
+// Operational Monitoring Types & Functions
+export interface AttentionAccount {
+  id: string
+  name: string
+  brokerAccountId: string
+  role: string
+  authStatus: string
+  authError: string
+  tokenExpiresAt?: string
+}
+
+export interface BrokerReadinessSummary {
+  masterReady: boolean
+  totalFollowers: number
+  followersReady: number
+  attentionAccounts: AttentionAccount[]
+}
+
+export interface OrderIssue {
+  id: number
+  createdAt: string
+  followerName: string
+  brokerAccountId: string
+  tradingsymbol: string
+  exchange: string
+  intendedQty: number
+  placedQty: number
+  sizingReason: string
+  terminalStatus: string
+  lastError: string
+}
+
+export interface ExecutionEvent {
+  timestamp: string
+  tradingsymbol: string
+  exchange: string
+  transactionType: string
+  masterQty: number
+  price: number
+  followersCount: number
+  skippedCount: number
+  latencyMs: number
+}
+
+export interface BulkProxyTestSummary {
+  totalTested: number
+  successCount: number
+  failureCount: number
+  avgLatencyMs: number
+  results: ProxyTestResult[]
+}
+
+export function getAdminBrokerReadiness(): Promise<BrokerReadinessSummary> {
+  return apiFetch(`${BASE}/admin/broker-readiness`).then((r) => json(r))
+}
+
+export interface AdminOrderIssuesResponse {
+  issues: OrderIssue[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export function getAdminOrderIssues(limit = 50, offset = 0): Promise<AdminOrderIssuesResponse> {
+  return apiFetch(`${BASE}/admin/order-issues?limit=${limit}&offset=${offset}`)
+    .then((r) => json<any>(r))
+    .then((data) => {
+      if (Array.isArray(data)) {
+        return {
+          issues: data,
+          total: data.length,
+          limit,
+          offset,
+        }
+      }
+      return {
+        issues: Array.isArray(data?.issues) ? data.issues : [],
+        total: typeof data?.total === 'number' ? data.total : (Array.isArray(data?.issues) ? data.issues.length : 0),
+        limit: typeof data?.limit === 'number' ? data.limit : limit,
+        offset: typeof data?.offset === 'number' ? data.offset : offset,
+      }
+    })
+}
+
+export function getAdminExecutionFeed(): Promise<ExecutionEvent[]> {
+  return apiFetch(`${BASE}/admin/execution-feed`).then((r) => json(r))
+}
+
+export function testAllAdminProxyIPs(): Promise<BulkProxyTestSummary> {
+  return apiFetch(`${BASE}/admin/proxy-ips/test-all`, {
+    method: 'POST',
+  }).then((r) => json(r))
+}
+
+
 

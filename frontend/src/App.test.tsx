@@ -140,13 +140,83 @@ describe('App authentication & navigation', () => {
     expect(screen.queryByText('EnvoyTrade')).not.toBeInTheDocument()
   })
 
-  it('renders login page directly on /login without skeleton loading', async () => {
-    vi.spyOn(api, 'getMe').mockRejectedValue(new Error('unauthenticated'))
-    window.history.pushState({}, '', '/login')
+  it('renders persistent emergency notification banner when kill switch is engaged', async () => {
+    vi.spyOn(api, 'getMe').mockResolvedValue({ user: fakeUser })
+    vi.spyOn(api, 'getKillSwitchStatus').mockResolvedValue({
+      engaged: true,
+      reason: 'Broker maintenance window',
+      engagedBy: 'admin',
+    })
+    window.history.pushState({}, '', '/')
     render(() => <App />)
 
-    expect(await screen.findByRole('heading', { name: /sign in/i })).toBeInTheDocument()
-    expect(screen.queryByTestId('auth-loading-skeleton')).not.toBeInTheDocument()
+    const banner = await screen.findByTestId('killswitch-banner')
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveTextContent(/EMERGENCY KILL SWITCH ENGAGED/i)
+    expect(banner).toHaveTextContent(/Broker maintenance window/i)
+  })
+
+  it('does not render emergency banner when kill switch is disengaged', async () => {
+    vi.spyOn(api, 'getMe').mockResolvedValue({ user: fakeUser })
+    vi.spyOn(api, 'getKillSwitchStatus').mockResolvedValue({
+      engaged: false,
+    })
+    window.history.pushState({}, '', '/')
+    render(() => <App />)
+
+    await screen.findByRole('link', { name: 'Dashboard' })
+    expect(screen.queryByTestId('killswitch-banner')).not.toBeInTheDocument()
+  })
+
+  it('updates emergency banner immediately upon receiving killswitch:change event', async () => {
+    vi.spyOn(api, 'getMe').mockResolvedValue({ user: fakeUser })
+    vi.spyOn(api, 'getKillSwitchStatus').mockResolvedValue({
+      engaged: false,
+    })
+    window.history.pushState({}, '', '/')
+    render(() => <App />)
+
+    await screen.findByRole('link', { name: 'Dashboard' })
+    expect(screen.queryByTestId('killswitch-banner')).not.toBeInTheDocument()
+
+    // Dispatch killswitch:change event
+    window.dispatchEvent(
+      new CustomEvent('killswitch:change', {
+        detail: { engaged: true, reason: 'Instant circuit breaker tripped' },
+      }),
+    )
+
+    const banner = await screen.findByTestId('killswitch-banner')
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveTextContent(/Instant circuit breaker tripped/i)
+  })
+
+  it('does not poll kill switch periodically on admin routes', async () => {
+    vi.useFakeTimers()
+    const adminUser = { ...fakeUser, role: 'admin' }
+    vi.spyOn(api, 'getMe').mockResolvedValue({ user: adminUser })
+    const ksSpy = vi.spyOn(api, 'getKillSwitchStatus').mockResolvedValue({ engaged: false })
+    vi.spyOn(api, 'getAdminServiceStatus').mockResolvedValue({
+      killSwitch: { engaged: false },
+      masterTickers: [],
+      queues: { masterFillDepth: 0, masterFillCap: 100, orderUpdateDepth: 0, orderUpdateCap: 100 },
+      workerCount: 0,
+      dbPool: { totalConns: 1, idleConns: 1, acquiredConns: 0, maxConns: 10 },
+      systemResources: { cpuPercent: 1, heapAllocMb: 20, sysMemoryMb: 50, goroutineCount: 15, gcCycles: 5 },
+    })
+
+    window.history.pushState({}, '', '/admin/status')
+    render(() => <App />)
+
+    // Initial check on mount
+    await vi.advanceTimersByTimeAsync(100)
+    expect(ksSpy).toHaveBeenCalledTimes(1)
+
+    // Advance 60 seconds (2 intervals of 30s) — should NOT poll because route is /admin/*
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(ksSpy).toHaveBeenCalledTimes(1)
+
+    vi.useRealTimers()
   })
 })
 

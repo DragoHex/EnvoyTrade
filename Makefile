@@ -29,7 +29,7 @@ db-up:
 	@$(CONTAINER_CMD) start $(DB_CONTAINER) 2>/dev/null || $(CONTAINER_CMD) run -d --name $(DB_CONTAINER) \
 		-e POSTGRES_DB=envoytrade -e POSTGRES_USER=envoytrade -e POSTGRES_PASSWORD=envoytrade \
 		-p 5434:5432 -v $(DB_VOLUME):/var/lib/postgresql/data \
-		-v $(PWD)/packaging/postgres/envoytrade-postgres.conf:/etc/postgresql/postgresql.conf:ro \
+		-v $(CURDIR)/packaging/postgres/envoytrade-postgres.conf:/etc/postgresql/postgresql.conf:ro \
 		postgres:16-alpine -c config_file=/etc/postgresql/postgresql.conf
 	@echo "Waiting for PostgreSQL to be ready..."
 	@for i in $$(seq 1 30); do \
@@ -125,7 +125,7 @@ backend-up: db-up check-log-dir check-encryption-key
 		echo "Backend is already running on port $(PORT) (PID: $$(lsof -ti :$(PORT) | tr '\n' ' '))"; \
 	else \
 		echo "Starting backend server on port $(PORT)..."; \
-		DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" nohup go run ./cmd/server > $(BACKEND_LOG) 2>&1 & \
+		DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" nohup go run $(CURDIR)/cmd/server > $(BACKEND_LOG) 2>&1 & \
 		for i in $$(seq 1 30); do \
 			if lsof -ti :$(PORT) >/dev/null 2>&1; then \
 				echo "Backend started (PID: $$(lsof -ti :$(PORT) | tr '\n' ' '))"; \
@@ -159,8 +159,8 @@ frontend-up:
 		echo "Frontend is already running on port $(FRONTEND_PORT) (PID: $$(lsof -ti :$(FRONTEND_PORT) | tr '\n' ' '))"; \
 	else \
 		echo "Starting frontend dev server on port $(FRONTEND_PORT)..."; \
-		if [ ! -f frontend/node_modules/.bin/vite ]; then cd frontend && pnpm install; fi; \
-		python3 -c 'import subprocess; subprocess.Popen(["./node_modules/.bin/vite"], cwd="frontend", start_new_session=True, stdin=subprocess.DEVNULL, stdout=open("$(FRONTEND_LOG)", "w"), stderr=subprocess.STDOUT)'; \
+		if [ ! -f $(CURDIR)/frontend/node_modules/.bin/vite ]; then cd $(CURDIR)/frontend && pnpm install; fi; \
+		python3 -c 'import subprocess; subprocess.Popen(["./node_modules/.bin/vite", "--force"], cwd="$(CURDIR)/frontend", start_new_session=True, stdin=subprocess.DEVNULL, stdout=open("$(FRONTEND_LOG)", "w"), stderr=subprocess.STDOUT)'; \
 		for i in $$(seq 1 30); do \
 			if lsof -ti :$(FRONTEND_PORT) >/dev/null 2>&1; then \
 				echo "Frontend started (PID: $$(lsof -ti :$(FRONTEND_PORT) | tr '\n' ' '))"; \
@@ -257,19 +257,19 @@ all-down: down-all
 down-everything: down-all
 
 build-backend:
-	go build ./...
+	cd $(CURDIR) && go build ./...
 
 build-frontend:
-	cd frontend && pnpm build
+	cd $(CURDIR)/frontend && pnpm build
 
 run-backend: check-log-dir check-encryption-key
-	DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" go run ./cmd/server
+	DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" go run $(CURDIR)/cmd/server
 
 run-frontend:
-	cd frontend && pnpm dev
+	cd $(CURDIR)/frontend && pnpm dev
 
 install:
-	cd frontend && pnpm install
+	cd $(CURDIR)/frontend && pnpm install
 
 test:
 	go test ./...

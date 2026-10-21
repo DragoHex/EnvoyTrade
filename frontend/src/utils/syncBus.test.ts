@@ -109,4 +109,69 @@ describe('syncBus utility', () => {
     unreg1()
     unreg2()
   })
+
+  it('pauses polling when document becomes hidden and resumes on visible', async () => {
+    const fn = vi.fn()
+    const unreg = registerSyncSubscriber(fn)
+
+    // Advance one interval while visible
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    // Simulate switching away: document becomes hidden
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'hidden',
+      writable: true,
+      configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    // Advance 10 seconds while hidden — NO subscriber calls should occur
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    // Simulate returning: document becomes visible
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible',
+      writable: true,
+      configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    // Returning to visible triggers an immediate sync tick
+    expect(fn).toHaveBeenCalledTimes(2)
+
+    // Advancing one interval continues polling
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    expect(fn).toHaveBeenCalledTimes(3)
+
+    unreg()
+  })
+
+  it('does not start timer when subscriber is registered while document is hidden', async () => {
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'hidden',
+      writable: true,
+      configurable: true,
+    })
+
+    const fn = vi.fn()
+    const unreg = registerSyncSubscriber(fn)
+
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3)
+    expect(fn).toHaveBeenCalledTimes(0)
+
+    // Become visible
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible',
+      writable: true,
+      configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    unreg()
+  })
 })
+

@@ -13,6 +13,15 @@ import {
   squareOffGroup,
   squareOffAccount,
   getGroupRebalanceDiff,
+  getAdminServiceStatus,
+  postAdminKillSwitch,
+  getAdminProxyIPs,
+  putAdminProxyIP,
+  testAdminProxyIP,
+  getAdminUsers,
+  getKillSwitchStatus,
+  getAdminUserAccounts,
+  getAdminOrderIssues,
 } from './api'
 
 describe('api client', () => {
@@ -295,4 +304,112 @@ describe('api client', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({})
   })
+
+  it('admin status and killswitch APIs send correct requests', async () => {
+    const fakeStatus = {
+      killSwitch: { engaged: false },
+      masterTickers: [],
+      queues: { masterFillDepth: 0, masterFillCap: 1024, orderUpdateDepth: 0, orderUpdateCap: 512 },
+      workerCount: 0,
+      dbPool: { acquiredConns: 0, idleConns: 0, totalConns: 0, maxConns: 20 },
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeStatus), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+
+    const status = await getAdminServiceStatus()
+    expect(status).toEqual(fakeStatus)
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/v1/admin/status')
+
+    const ksResp = { status: 'ok', killSwitch: { engaged: true, reason: 'halt' } }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(ksResp), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const res = await postAdminKillSwitch(true, 'halt')
+    expect(res).toEqual(ksResp)
+    const [ksUrl, ksInit] = (globalThis.fetch as any).mock.calls[1]
+    expect(ksUrl).toBe('/api/v1/admin/killswitch')
+    expect(ksInit.method).toBe('POST')
+    expect(JSON.parse(ksInit.body)).toEqual({ engaged: true, reason: 'halt' })
+  })
+
+  it('admin proxy IP APIs send correct requests', async () => {
+    const fakeList = { ips: [], stats: { totalCount: 0 } }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeList), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const listRes = await getAdminProxyIPs('active', 'ipv4')
+    expect(listRes).toEqual(fakeList)
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/v1/admin/proxy-ips?status=active&type=ipv4')
+
+    // test single IP
+    const testResult = { ipAddress: '10.0.0.1', success: true, latencyMs: 50 }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(testResult), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const probe = await testAdminProxyIP('10.0.0.1')
+    expect(probe).toEqual(testResult)
+    expect((globalThis.fetch as any).mock.calls[1][0]).toBe('/api/v1/admin/proxy-ips/10.0.0.1/test')
+
+    // putAdminProxyIP (single DB call individual IP JSON update)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const putRes = await putAdminProxyIP('10.0.0.1', { ip: '10.0.0.1', host: 'dc1.algoip.in' })
+    expect(putRes).toEqual({ status: 'ok' })
+    expect((globalThis.fetch as any).mock.calls[2][0]).toBe('/api/v1/admin/proxy-ips/10.0.0.1')
+    expect((globalThis.fetch as any).mock.calls[2][1].method).toBe('PUT')
+    expect(JSON.parse((globalThis.fetch as any).mock.calls[2][1].body)).toEqual({ ip: '10.0.0.1', host: 'dc1.algoip.in' })
+  })
+
+  it('admin users APIs send correct requests', async () => {
+    const fakeUsers = { users: [], total: 0, limit: 20, offset: 0 }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeUsers), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const res = await getAdminUsers(20, 0)
+    expect(res).toEqual(fakeUsers)
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/v1/admin/users?limit=20&offset=0')
+  })
+
+  it('getKillSwitchStatus sends GET /api/v1/killswitch', async () => {
+    const fakeStatus = { engaged: true, reason: 'Market breaker' }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeStatus), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const res = await getKillSwitchStatus()
+    expect(res).toEqual(fakeStatus)
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/v1/killswitch')
+  })
+
+  it('getAdminUserAccounts sends GET /api/v1/admin/users/:id/accounts', async () => {
+    const fakeData = { user: { id: 'u1', username: 'testuser' }, accounts: [] }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeData), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const res = await getAdminUserAccounts('u1')
+    expect(res).toEqual(fakeData)
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/v1/admin/users/u1/accounts')
+  })
+
+  it('getAdminOrderIssues handles both object and array responses', async () => {
+    const fakeObj = { issues: [{ id: 1, tradingsymbol: 'INFY' }], total: 1, limit: 50, offset: 0 }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeObj), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const res1 = await getAdminOrderIssues(50, 0)
+    expect(res1.issues).toHaveLength(1)
+    expect(res1.total).toBe(1)
+    expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/v1/admin/order-issues?limit=50&offset=0')
+
+    // Legacy array response
+    const fakeArr = [{ id: 2, tradingsymbol: 'TCS' }]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(fakeArr), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const res2 = await getAdminOrderIssues(50, 0)
+    expect(res2.issues).toHaveLength(1)
+    expect(res2.total).toBe(1)
+  })
 })
+
