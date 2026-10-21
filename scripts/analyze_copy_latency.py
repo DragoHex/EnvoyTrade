@@ -61,7 +61,7 @@ SELECT json_agg(t) FROM (
         ORDER BY id ASC 
         LIMIT 1
     ) oe_resp ON true
-    WHERE fo.created_at >= NOW() - INTERVAL '{days} days'
+    WHERE {where_clause}
     ORDER BY fo.created_at DESC
 ) t;
 """
@@ -97,13 +97,13 @@ def compute_stats(values):
         "max": clean[-1]
     }
 
-def fetch_data(remote_target, pg_conn, days):
-    query = SQL_QUERY_TEMPLATE.format(days=int(days)).strip()
+def fetch_data(remote_target, pg_conn, where_clause, label=""):
+    query = SQL_QUERY_TEMPLATE.format(where_clause=where_clause).strip()
     # Execute safely via SSH with read-only query
     remote_cmd = f"psql '{pg_conn}' -t -A -c \"{query}\""
     cmd = ["ssh", remote_target, remote_cmd]
     print(f"--> Connecting to {remote_target} (Read-Only) ...")
-    print(f"--> Fetching copy-trade records for the last {days} days ...")
+    print(f"--> Fetching copy-trade records for {label} ...")
     
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if res.returncode != 0:
@@ -112,7 +112,7 @@ def fetch_data(remote_target, pg_conn, days):
         
     raw_output = res.stdout.strip()
     if not raw_output or raw_output == "null":
-        print(f"No records found for the last {days} days.")
+        print(f"No records found for {label}.")
         return []
     
     try:
@@ -124,20 +124,55 @@ def fetch_data(remote_target, pg_conn, days):
 
 def main():
     parser = argparse.ArgumentParser(description="EnvoyTrade Copy-Trade Latency Benchmark & Extractor")
-    parser.add_argument("--days", type=int, default=7, help="Number of past days to query (default: 7)")
+    parser.add_argument("--days", type=int, default=None, help="Number of past days to query")
+    parser.add_argument("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--end-date", type=str, default=None, help="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--exclude-date", type=str, default=None, help="Specific date to exclude (YYYY-MM-DD)")
     parser.add_argument("--remote-host", default=REMOTE_DEFAULT, help="SSH remote user@host")
     parser.add_argument("--db-url", default=PG_CONN_DEFAULT, help="Postgres connection string")
     parser.add_argument("--out-dir", default="./reports", help="Output directory for saved files")
+    parser.add_argument("--prefix", default="", help="File prefix (optional)")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    records = fetch_data(args.remote_host, args.db_url, args.days)
+
+    conditions = []
+    if args.start_date:
+        start_ts = args.start_date
+        if len(start_ts) == 10:
+            start_ts += " 00:00:00+05:30"
+        elif "+" not in start_ts and "-" not in start_ts[10:]:
+            start_ts += "+05:30"
+        conditions.append(f"fo.created_at >= '{start_ts}'")
+
+        if args.end_date:
+            end_ts = args.end_date
+            if len(end_ts) == 10:
+                end_ts += " 23:59:59+05:30"
+            elif "+" not in end_ts and "-" not in end_ts[10:]:
+                end_ts += "+05:30"
+            conditions.append(f"fo.created_at <= '{end_ts}'")
+        label = f"range {args.start_date} to {args.end_date or 'NOW'}"
+        tag = args.prefix or f"{args.start_date}_to_{args.end_date or 'now'}"
+    else:
+        days = args.days if args.days is not None else 7
+        conditions.append(f"fo.created_at >= NOW() - INTERVAL '{days} days'")
+        label = f"last {days} days"
+        tag = args.prefix or f"last_{days}d"
+
+    if args.exclude_date:
+        conditions.append(f"DATE(fo.created_at AT TIME ZONE 'Asia/Kolkata') != '{args.exclude_date}'")
+        label += f" (excluding {args.exclude_date})"
+
+    where_clause = " AND ".join(conditions)
+
+    records = fetch_data(args.remote_host, args.db_url, where_clause, label)
     
     print(f"--> Successfully retrieved {len(records)} copy-trade records.")
 
     # 1. Save Raw Data
-    csv_file = os.path.join(args.out_dir, f"copy_trade_latency_last_{args.days}d.csv")
-    json_file = os.path.join(args.out_dir, f"copy_trade_latency_last_{args.days}d.json")
+    csv_file = os.path.join(args.out_dir, f"copy_trade_latency_{tag}.csv")
+    json_file = os.path.join(args.out_dir, f"copy_trade_latency_{tag}.json")
 
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2, default=str)
@@ -170,9 +205,21 @@ def main():
         "Full End-to-End Latency (Master Fill -> Settlement)": compute_stats(total_e2es),
     }
 
+    # Save summary json
+    summary_file = os.path.join(args.out_dir, "latency_metrics_summary.json")
+    summary_payload = {
+        "period": label,
+        "remote_host": args.remote_host,
+        "total_copy_trades": len(records),
+        "metrics": stats
+    }
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump(summary_payload, f, indent=2)
+    print(f"--> Saved metrics summary JSON to: {summary_file}")
+
     # 3. Print Report
     print("\n" + "=" * 94)
-    print(f"             ENVOYTRADE COPY-TRADE LATENCY BENCHMARK REPORT (LAST {args.days} DAYS)")
+    print(f"             ENVOYTRADE COPY-TRADE LATENCY BENCHMARK REPORT ({label.upper()})")
     print(f"             Host: {args.remote_host} | Total Trades: {len(records)}")
     print("=" * 94)
     header = f"{'Latency Metric Stage':<42} | {'Count':<6} | {'Min (ms)':<9} | {'Avg (ms)':<9} | {'P50 (ms)':<9} | {'P90 (ms)':<9} | {'P95 (ms)':<9} | {'P99 (ms)':<9}"

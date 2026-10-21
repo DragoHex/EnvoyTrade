@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"envoytrade/internal/domain"
 
@@ -40,17 +42,57 @@ type Dispatcher interface {
 	Dispatch(followerID uuid.UUID, job domain.Job) bool
 }
 
+// ExecutionRecorder records master fill fan-out events into telemetry or feed.
+type ExecutionRecorder interface {
+	Record(event domain.ExecutionEvent)
+}
+
 // Engine fans a master fill out to every enabled follower.
 type Engine struct {
-	store        Store
-	dispatcher   Dispatcher
-	Logger       *slog.Logger
-	lotSizeCache sync.Map
+	store             Store
+	dispatcher        Dispatcher
+	Logger            *slog.Logger
+	ExecutionRecorder ExecutionRecorder
+	lotSizeCache      sync.Map
+	killSwitch        atomic.Bool
+	killSwitchStatus  atomic.Pointer[domain.KillSwitchStatus]
 }
 
 // New wires an Engine to its store and dispatcher.
 func New(store Store, dispatcher Dispatcher) *Engine {
 	return &Engine{store: store, dispatcher: dispatcher}
+}
+
+// IsKillSwitchEngaged returns whether the emergency fan-out kill switch is active.
+func (e *Engine) IsKillSwitchEngaged() bool {
+	return e.killSwitch.Load()
+}
+
+// KillSwitchStatus returns the current kill switch state.
+func (e *Engine) KillSwitchStatus() domain.KillSwitchStatus {
+	ptr := e.killSwitchStatus.Load()
+	if ptr == nil {
+		return domain.KillSwitchStatus{Engaged: false}
+	}
+	return *ptr
+}
+
+// SetKillSwitch engages or disengages the emergency fan-out kill switch.
+func (e *Engine) SetKillSwitch(engaged bool, reason string, engagedBy string) {
+	e.killSwitch.Store(engaged)
+	now := time.Now().UTC()
+	st := &domain.KillSwitchStatus{
+		Engaged: engaged,
+	}
+	if engaged {
+		st.EngagedAt = &now
+		st.EngagedBy = engagedBy
+		st.Reason = reason
+		e.log().Warn("engine: EMERGENCY KILL SWITCH ENGAGED", "reason", reason, "by", engagedBy)
+	} else {
+		e.log().Info("engine: emergency kill switch disengaged", "by", engagedBy)
+	}
+	e.killSwitchStatus.Store(st)
 }
 
 // ClearLotSizeCache clears the in-memory instrument lot size cache.
@@ -93,12 +135,25 @@ func (e *Engine) log() *slog.Logger {
 // redrive) — duplicate follower_orders are recognized and skipped, not
 // re-dispatched.
 func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) error {
+	startTime := time.Now()
 	e.log().Info("engine: processing master fill",
 		"master_id", fill.MasterID,
 		"broker_order_id", fill.BrokerOrderID,
 		"symbol", fill.Tradingsymbol,
 		"qty", fill.FilledQuantity,
 	)
+
+	if e.IsKillSwitchEngaged() {
+		e.log().Warn("engine: kill switch engaged, dropping master fill fan-out",
+			"master_id", fill.MasterID,
+			"broker_order_id", fill.BrokerOrderID,
+			"symbol", fill.Tradingsymbol,
+		)
+		if fill.ID > 0 {
+			_ = e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDispatched)
+		}
+		return nil
+	}
 
 	if fill.Status != "" && fill.Status != domain.TerminalComplete {
 		e.log().Info("engine: master fill is not complete, skipping fan-out",
@@ -138,6 +193,23 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 		return fmt.Errorf("load follow links: %w", err)
 	}
 	if len(links) == 0 {
+		if e.ExecutionRecorder != nil {
+			execPrice, _ := fill.Price.Float64()
+			if execPrice <= 0 {
+				execPrice, _ = fill.AveragePrice.Float64()
+			}
+			e.ExecutionRecorder.Record(domain.ExecutionEvent{
+				Timestamp:       time.Now().UTC(),
+				Tradingsymbol:   fill.Tradingsymbol,
+				Exchange:        fill.Exchange,
+				TransactionType: fill.TransactionType,
+				MasterQty:       fill.FilledQuantity,
+				Price:           execPrice,
+				FollowersCount:  0,
+				SkippedCount:    0,
+				LatencyMs:       time.Since(startTime).Milliseconds(),
+			})
+		}
 		return e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDispatched)
 	}
 
@@ -221,6 +293,9 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 	}
 
 	// 5. In-Memory Dispatch Loop
+	dispatchedCount := 0
+	skippedCount := 0
+
 	for _, c := range candidates {
 		orderID, ok := insertedMap[c.tag]
 		if !ok {
@@ -236,6 +311,7 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 		if c.qty == 0 {
 			// Below one lot (or a bad instrument/ratio): visible on the
 			// follower_order row, but there is nothing to place.
+			skippedCount++
 			e.log().Info("engine: zero quantity follower order, skipping dispatch",
 				"follower_id", c.followerID,
 				"order_id", orderID,
@@ -280,11 +356,30 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 			continue
 		}
 
+		dispatchedCount++
 		e.log().Info("engine: follower order dispatched",
 			"follower_id", c.followerID,
 			"order_id", orderID,
 			"qty", c.qty,
 		)
+	}
+
+	if e.ExecutionRecorder != nil {
+		execPrice := price
+		if execPrice <= 0 {
+			execPrice, _ = fill.AveragePrice.Float64()
+		}
+		e.ExecutionRecorder.Record(domain.ExecutionEvent{
+			Timestamp:       time.Now().UTC(),
+			Tradingsymbol:   fill.Tradingsymbol,
+			Exchange:        fill.Exchange,
+			TransactionType: fill.TransactionType,
+			MasterQty:       fill.FilledQuantity,
+			Price:           execPrice,
+			FollowersCount:  dispatchedCount,
+			SkippedCount:    skippedCount,
+			LatencyMs:       time.Since(startTime).Milliseconds(),
+		})
 	}
 
 	return e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDispatched)
