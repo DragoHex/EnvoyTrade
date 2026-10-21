@@ -49,17 +49,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
 
 -- 3. Proxy IP Pool & Static Egress Routing
 CREATE TABLE IF NOT EXISTS proxy_ips (
-    ip_address  text PRIMARY KEY,
-    ip_type     text NOT NULL CHECK (ip_type IN ('ipv4', 'ipv6')),
-    host        text NOT NULL,
-    port        integer NOT NULL DEFAULT 443,
-    username    text NOT NULL,
-    password    text NOT NULL,
-    valid_from  timestamptz NOT NULL,
-    valid_until timestamptz NOT NULL,
-    plan        text NOT NULL DEFAULT 'QUARTERLY',
-    created_at  timestamptz NOT NULL DEFAULT now()
+    ip_address          text PRIMARY KEY,
+    ip_type             text NOT NULL CHECK (ip_type IN ('ipv4', 'ipv6')),
+    host                text NOT NULL,
+    port                integer NOT NULL DEFAULT 443,
+    username            text NOT NULL,
+    password            text NOT NULL,
+    whitelisted_brokers text NOT NULL DEFAULT '',
+    valid_from          timestamptz NOT NULL,
+    valid_until         timestamptz NOT NULL,
+    plan                text NOT NULL DEFAULT 'QUARTERLY',
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE proxy_ips ADD COLUMN IF NOT EXISTS whitelisted_brokers text NOT NULL DEFAULT '';
 
 -- 4. Broker Accounts & Groups Tenant Scoping
 CREATE TABLE IF NOT EXISTS accounts (

@@ -6,41 +6,61 @@ BEGIN;
 
 -- 0. Users: Test users for authentication and multi-tenant scoping
 -- Password for both accounts is: password123 (bcrypt cost 12 hash)
-INSERT INTO users (id, email, username, name, password_hash, role, phone, address, gst_number, created_at, updated_at)
+INSERT INTO users (id, email, username, name, password_hash, role, active, phone, address, gst_number, created_at, updated_at)
 VALUES
-  ('a0000000-0000-0000-0000-000000000001', 'trader@envoytrade.com', 'trader', 'Demo Trader', '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'admin', '+919876543210', '123 Dalal Street, Fort, Mumbai, Maharashtra 400001', '27AABCU9603R1ZM', now(), now()),
-  ('a0000000-0000-0000-0000-000000000002', 'bob@envoytrade.com',    'bob',    'Bob Trader',  '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'user',  '+919876543211', '456 MG Road, Bengaluru, Karnataka 560001',          '',                now(), now())
+  ('a0000000-0000-0000-0000-000000000001', 'trader@envoytrade.com', 'trader', 'Demo Trader', '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'admin', true, '+919876543210', '123 Dalal Street, Fort, Mumbai, Maharashtra 400001', '27AABCU9603R1ZM', now(), now()),
+  ('a0000000-0000-0000-0000-000000000002', 'bob@envoytrade.com',    'bob',    'Bob Trader',  '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'user',  true, '+919876543211', '456 MG Road, Bengaluru, Karnataka 560001',          '',                now(), now())
 ON CONFLICT (id) DO UPDATE SET
   email         = EXCLUDED.email,
   username      = EXCLUDED.username,
   name          = EXCLUDED.name,
   password_hash = EXCLUDED.password_hash,
   role          = EXCLUDED.role,
+  active        = EXCLUDED.active,
   phone         = EXCLUDED.phone,
   address       = EXCLUDED.address,
   gst_number    = EXCLUDED.gst_number,
   updated_at    = now();
 
 -- 0.1 Proxy IPs: Static proxy IP pool for broker accounts
-INSERT INTO proxy_ips (ip_address, ip_type, host, port, username, password, valid_from, valid_until, plan)
+INSERT INTO proxy_ips (ip_address, ip_type, host, port, username, password, whitelisted_brokers, valid_from, valid_until, plan)
 VALUES
-  ('148.113.41.41', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u1', 'mock_p1', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.42', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u2', 'mock_p2', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.43', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u3', 'mock_p3', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.44', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u4', 'mock_p4', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.45', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u5', 'mock_p5', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.46', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u6', 'mock_p6', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.47', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u7', 'mock_p7', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.48', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u8', 'mock_p8', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.49', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u9', 'mock_p9', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.50', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u10', 'mock_p10', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY')
+  ('148.113.41.41', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u1', 'mock_p1', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.42', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u2', 'mock_p2', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.43', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u3', 'mock_p3', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.44', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u4', 'mock_p4', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.45', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u5', 'mock_p5', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.46', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u6', 'mock_p6', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.47', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u7', 'mock_p7', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.48', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u8', 'mock_p8', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.49', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u9', 'mock_p9', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.50', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u10', 'mock_p10', 'Zerodha, TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.51', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u11', 'mock_p11', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.52', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u12', 'mock_p12', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.53', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u13', 'mock_p13', 'Zerodha', now() - interval '1 day', now() + interval '30 days', 'MONTHLY'),
+  ('148.113.41.54', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u14', 'mock_p14', 'Zerodha', now() - interval '1 day', now() + interval '30 days', 'MONTHLY'),
+  ('148.113.41.55', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u15', 'mock_p15', 'Zerodha', now() - interval '1 day', now() + interval '3 days',  'MONTHLY'),
+  ('148.113.41.56', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u16', 'mock_p16', 'Zerodha', now() - interval '1 day', now() + interval '2 days',  'MONTHLY'),
+  ('148.113.41.57', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u17', 'mock_p17', 'Zerodha', now() - interval '1 day', now() - interval '3 days',  'MONTHLY'),
+  ('148.113.41.58', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u18', 'mock_p18', 'Zerodha', now() - interval '1 day', now() - interval '10 days', 'MONTHLY'),
+  ('148.113.41.59', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u19', 'mock_p19', 'Zerodha', now() - interval '1 day', now() + interval '180 days', 'HALF_YEARLY'),
+  ('148.113.41.60', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u20', 'mock_p20', 'Zerodha', now() - interval '1 day', now() + interval '365 days', 'ANNUAL'),
+  ('148.113.41.61', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u21', 'mock_p21', 'Zerodha', now() - interval '1 day', now() + interval '365 days', 'ANNUAL'),
+  ('148.113.41.62', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u22', 'mock_p22', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.63', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u23', 'mock_p23', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.64', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u24', 'mock_p24', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.65', 'ipv4', 'dc46-mum-03.algoip.in', 443, 'mock_u25', 'mock_p25', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('2405:201:d001:41::66', 'ipv6', 'dc46-mum-03.algoip.in', 443, 'mock_u26', 'mock_p26', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY')
 ON CONFLICT (ip_address) DO UPDATE SET
-  host        = EXCLUDED.host,
-  port        = EXCLUDED.port,
-  username    = EXCLUDED.username,
-  password    = EXCLUDED.password,
-  valid_from  = EXCLUDED.valid_from,
-  valid_until = EXCLUDED.valid_until;
+  ip_type             = EXCLUDED.ip_type,
+  host                = EXCLUDED.host,
+  port                = EXCLUDED.port,
+  username            = EXCLUDED.username,
+  password            = EXCLUDED.password,
+  whitelisted_brokers = EXCLUDED.whitelisted_brokers,
+  valid_from          = EXCLUDED.valid_from,
+  valid_until         = EXCLUDED.valid_until,
+  plan                = EXCLUDED.plan;
 
 -- 1. Accounts: 2 masters and 8 followers, scoped to primary demo user
 -- MASTER01 has IP assigned; MASTER02 has no IP (to test master without IP behavior)
@@ -181,7 +201,16 @@ VALUES
   ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-004', 'MCX', 'CRUDEOILM21SEP26',     0, 'BUY',  'MIS',  'LIMIT',  10, 9896.0000, 'COMPLETE', '2026-09-11 09:22:34+00', '{}'::jsonb, 'dispatched'),
   ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-005', 'MCX', 'CRUDEOIL21SEP26',      0, 'BUY',  'MIS',  'LIMIT', 100, 9885.0000, 'COMPLETE', '2026-09-11 09:19:01+00', '{}'::jsonb, 'dispatched'),
   ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-006', 'MCX', 'CRUDEOIL17SEP26P8200',  0, 'BUY',  'MIS',  'LIMIT', 100,   23.0000, 'COMPLETE', '2026-09-11 09:17:37+00', '{}'::jsonb, 'dispatched'),
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-007', 'MCX', 'CRUDEOIL17SEP26P8700',  0, 'SELL', 'MIS',  'LIMIT', 100,   53.9000, 'COMPLETE', '2026-09-11 09:17:28+00', '{}'::jsonb, 'dispatched')
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-007', 'MCX', 'CRUDEOIL17SEP26P8700',  0, 'SELL', 'MIS',  'LIMIT', 100,   53.9000, 'COMPLETE', '2026-09-11 09:17:28+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-008', 'MCX', 'CRUDEOIL17SEP26C11000', 0, 'BUY',  'NRML', 'LIMIT', 100,   67.1000, 'COMPLETE', '2026-09-11 09:15:10+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-009', 'MCX', 'CRUDEOIL17SEP26P8400',  0, 'SELL', 'NRML', 'LIMIT', 100,   45.6500, 'COMPLETE', '2026-09-11 09:14:02+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-010', 'MCX', 'CRUDEOIL17SEP26P8500',  0, 'BUY',  'NRML', 'LIMIT', 100,   53.2000, 'COMPLETE', '2026-09-11 09:12:45+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-011', 'MCX', 'CRUDEOIL17SEP26P8600',  0, 'BUY',  'MIS',  'LIMIT', 100,   59.7000, 'COMPLETE', '2026-09-11 09:10:18+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-012', 'NFO', 'NIFTY26OCTFUT',        408065, 'BUY', 'NRML', 'LIMIT',  75, 24500.5000, 'COMPLETE', '2026-09-10 15:20:00+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-013', 'NFO', 'NIFTY26OCTFUT',        408065, 'SELL', 'NRML', 'LIMIT', 75, 24580.2500, 'COMPLETE', '2026-09-10 14:15:30+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-014', 'NSE', 'RELIANCE',              738561, 'BUY',  'MIS',  'LIMIT',  50,  2890.1000, 'COMPLETE', '2026-09-10 11:45:12+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-015', 'NSE', 'RELIANCE',              738561, 'SELL', 'MIS',  'LIMIT',  50,  2912.4000, 'COMPLETE', '2026-09-10 10:30:05+00', '{}'::jsonb, 'dispatched'),
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'ORD-M1-016', 'NSE', 'INFY',                  408065, 'BUY',  'MIS',  'MARKET', 25,  1820.0000, 'COMPLETE', '2026-09-10 09:45:00+00', '{}'::jsonb, 'dispatched')
 ON CONFLICT (master_id, broker_order_id, filled_quantity, status) DO NOTHING;
 
 -- 8. Instruments: Canonical lot sizes and tick sizes for test contracts
@@ -189,6 +218,7 @@ INSERT INTO instruments (instrument_token, exchange, tradingsymbol, lot_size, ti
 VALUES
   (408065, 'NFO', 'NIFTY26OCTFUT',        75,  0.0500, 'NFO-FUT', '2026-10-29', now()),
   (738561, 'NSE', 'RELIANCE',               1,  0.0500, 'NSE-EQ',  NULL,         now()),
+  (408066, 'NSE', 'INFY',                   1,  0.0500, 'NSE-EQ',  NULL,         now()),
   (1001,   'MCX', 'CRUDEOIL17SEP26C10600', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
   (1002,   'MCX', 'CRUDEOIL17SEP26C10700', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
   (1003,   'MCX', 'CRUDEOIL17SEP26C11000', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
@@ -205,5 +235,80 @@ ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET
   segment      = EXCLUDED.segment,
   expiry       = EXCLUDED.expiry,
   refreshed_at = now();
+
+-- 9. Follower order issues & rejections: Seeded issues for Trade Operations audit (exceeds 50/page limit)
+INSERT INTO follower_orders (
+  follower_id, idempotency_tag, intended_qty, lot_size, sizing_reason,
+  placed_qty, broker_order_id, terminal_status, filled_qty, average_price,
+  attempt_count, last_error, origin, tradingsymbol, exchange, product,
+  transaction_type, order_type, created_at, updated_at
+)
+SELECT
+  CASE (s.i % 4)
+    WHEN 0 THEN 'a5183e89-6cb2-4d32-91a2-6dc525570185'::uuid
+    WHEN 1 THEN '5894c29d-7740-4494-9c98-c9d59d1364bc'::uuid
+    WHEN 2 THEN '18dfc57d-0f23-49af-8ccd-1c0edcbe4788'::uuid
+    ELSE 'ef0a6211-e753-42b8-a6eb-9c8d15ad90db'::uuid
+  END AS follower_id,
+  'seed-issue-tag-' || lpad(s.i::text, 3, '0') AS idempotency_tag,
+  CASE (s.i % 3)
+    WHEN 0 THEN 75
+    WHEN 1 THEN 100
+    ELSE 50
+  END AS intended_qty,
+  CASE (s.i % 3)
+    WHEN 0 THEN 75
+    WHEN 1 THEN 100
+    ELSE 25
+  END AS lot_size,
+  CASE (s.i % 5)
+    WHEN 0 THEN 1 -- ReasonBelowOneLot
+    WHEN 1 THEN 2 -- ReasonCapped
+    WHEN 2 THEN 3 -- ReasonBadInstrument
+    ELSE 0        -- ReasonOK
+  END AS sizing_reason,
+  CASE WHEN (s.i % 5) IN (0, 2) THEN 0 ELSE 50 END AS placed_qty,
+  'FO-ORD-' || lpad(s.i::text, 4, '0') AS broker_order_id,
+  CASE (s.i % 4)
+    WHEN 0 THEN 'REJECTED'
+    WHEN 1 THEN 'CANCELLED'
+    WHEN 2 THEN 'REJECTED'
+    ELSE 'CANCELLED'
+  END AS terminal_status,
+  0 AS filled_qty,
+  0.0000 AS average_price,
+  (s.i % 3) + 1 AS attempt_count,
+  CASE (s.i % 6)
+    WHEN 0 THEN 'RMS: Margin insufficient (Required: 145000.00, Available: 42000.00)'
+    WHEN 1 THEN 'Exchange circuit limit reached for symbol'
+    WHEN 2 THEN 'Order cancelled by risk management system'
+    WHEN 3 THEN 'Broker gateway timeout (HTTP 504) after 3 retries'
+    WHEN 4 THEN 'RMS: Order price outside permitted execution band'
+    ELSE 'Account temporarily disabled for derivative segment trading'
+  END AS last_error,
+  'copy_trade' AS origin,
+  CASE (s.i % 4)
+    WHEN 0 THEN 'NIFTY26OCTFUT'
+    WHEN 1 THEN 'CRUDEOIL17SEP26C10600'
+    WHEN 2 THEN 'CRUDEOIL21SEP26'
+    ELSE 'RELIANCE'
+  END AS tradingsymbol,
+  CASE (s.i % 4)
+    WHEN 0 THEN 'NFO'
+    WHEN 1 THEN 'MCX'
+    WHEN 2 THEN 'MCX'
+    ELSE 'NSE'
+  END AS exchange,
+  'MIS' AS product,
+  CASE WHEN (s.i % 2 = 0) THEN 'BUY' ELSE 'SELL' END AS transaction_type,
+  'LIMIT' AS order_type,
+  now() - (s.i || ' minutes')::interval AS created_at,
+  now() - (s.i || ' minutes')::interval AS updated_at
+FROM generate_series(1, 56) AS s(i)
+ON CONFLICT (idempotency_tag) DO UPDATE SET
+  terminal_status = EXCLUDED.terminal_status,
+  sizing_reason   = EXCLUDED.sizing_reason,
+  last_error      = EXCLUDED.last_error,
+  updated_at      = EXCLUDED.updated_at;
 
 COMMIT;

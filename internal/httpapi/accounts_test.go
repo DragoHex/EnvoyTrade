@@ -1204,5 +1204,126 @@ func TestPatchAccount_Reactivate_RegistersFollower(t *testing.T) {
 	}
 }
 
+func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
+	store := &stubStore{
+		proxyIPs: []domain.ProxyIP{
+			{IPAddress: "10.0.0.1", WhitelistedBrokers: "TestBroker"},
+			{IPAddress: "10.0.0.2", WhitelistedBrokers: "Zerodha"},
+			{IPAddress: "10.0.0.3", WhitelistedBrokers: "Zerodha, TestBroker"},
+			{IPAddress: "10.0.0.4", WhitelistedBrokers: ""},
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	// Case 1: Create Kite account with IP whitelisted only for TestBroker -> 400 Bad Request
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "kite",
+			"role":            "follower",
+			"brokerAccountId": "FOLLOWER1",
+			"apiKey":          "k",
+			"apiSecret":       "s",
+			"ip":              "10.0.0.1",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for broker kite on TestBroker IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 2: Create TestBroker account with IP whitelisted only for Zerodha -> 400 Bad Request
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "testbroker",
+			"role":            "follower",
+			"brokerAccountId": "FOLLOWER2",
+			"apiKey":          "k",
+			"apiSecret":       "s",
+			"ip":              "10.0.0.2",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for broker testbroker on Zerodha IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 3: Create Kite account with IP whitelisted for Zerodha -> 201 Created
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "kite",
+			"role":            "follower",
+			"brokerAccountId": "FOLLOWER3",
+			"apiKey":          "k",
+			"apiSecret":       "s",
+			"ip":              "10.0.0.2",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for broker kite on Zerodha IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 4: Create Kite account with IP whitelisted for both Zerodha and TestBroker -> 201 Created
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "kite",
+			"role":            "follower",
+			"brokerAccountId": "FOLLOWER4",
+			"apiKey":          "k",
+			"apiSecret":       "s",
+			"ip":              "10.0.0.3",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for broker kite on multi-broker IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 5: Patch existing Kite account with IP whitelisted only for TestBroker -> 400 Bad Request
+	accID := uuid.New()
+	store.accounts = []domain.Account{
+		{
+			ID:              accID,
+			Broker:          "kite",
+			Role:            "follower",
+			BrokerAccountID: "FOLLOWER_KITE",
+		},
+	}
+	store.accountRoles = map[uuid.UUID]string{accID: "follower"}
+
+	{
+		body, _ := json.Marshal(map[string]any{
+			"ip": "10.0.0.1",
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+accID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 patching kite account with TestBroker IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 6: Patch existing Kite account with IP whitelisted for Zerodha -> 200 OK
+	{
+		body, _ := json.Marshal(map[string]any{
+			"ip": "10.0.0.2",
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+accID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 patching kite account with Zerodha IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+}
+
 
 

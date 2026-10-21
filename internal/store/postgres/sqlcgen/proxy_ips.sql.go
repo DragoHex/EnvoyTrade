@@ -18,6 +18,7 @@ SELECT
     p.ip_type,
     p.host,
     p.port,
+    p.whitelisted_brokers,
     p.valid_from,
     p.valid_until,
     p.plan,
@@ -35,14 +36,15 @@ type AvailableProxyIPsParams struct {
 }
 
 type AvailableProxyIPsRow struct {
-	IpAddress  string
-	IpType     string
-	Host       string
-	Port       int32
-	ValidFrom  pgtype.Timestamptz
-	ValidUntil pgtype.Timestamptz
-	Plan       string
-	CreatedAt  pgtype.Timestamptz
+	IpAddress          string
+	IpType             string
+	Host               string
+	Port               int32
+	WhitelistedBrokers string
+	ValidFrom          pgtype.Timestamptz
+	ValidUntil         pgtype.Timestamptz
+	Plan               string
+	CreatedAt          pgtype.Timestamptz
 }
 
 func (q *Queries) AvailableProxyIPs(ctx context.Context, arg AvailableProxyIPsParams) ([]AvailableProxyIPsRow, error) {
@@ -59,6 +61,7 @@ func (q *Queries) AvailableProxyIPs(ctx context.Context, arg AvailableProxyIPsPa
 			&i.IpType,
 			&i.Host,
 			&i.Port,
+			&i.WhitelistedBrokers,
 			&i.ValidFrom,
 			&i.ValidUntil,
 			&i.Plan,
@@ -80,6 +83,8 @@ SELECT
     p.ip_type,
     p.host,
     p.port,
+    p.username,
+    p.whitelisted_brokers,
     p.valid_from,
     p.valid_until,
     p.plan,
@@ -96,6 +101,8 @@ type ListProxyIPsRow struct {
 	IpType              string
 	Host                string
 	Port                int32
+	Username            string
+	WhitelistedBrokers  string
 	ValidFrom           pgtype.Timestamptz
 	ValidUntil          pgtype.Timestamptz
 	Plan                string
@@ -118,6 +125,8 @@ func (q *Queries) ListProxyIPs(ctx context.Context) ([]ListProxyIPsRow, error) {
 			&i.IpType,
 			&i.Host,
 			&i.Port,
+			&i.Username,
+			&i.WhitelistedBrokers,
 			&i.ValidFrom,
 			&i.ValidUntil,
 			&i.Plan,
@@ -143,6 +152,7 @@ SELECT
     p.port,
     p.username,
     p.password,
+    p.whitelisted_brokers,
     p.valid_from,
     p.valid_until,
     p.plan,
@@ -161,6 +171,7 @@ func (q *Queries) ProxyIPByAddress(ctx context.Context, ipAddress string) (Proxy
 		&i.Port,
 		&i.Username,
 		&i.Password,
+		&i.WhitelistedBrokers,
 		&i.ValidFrom,
 		&i.ValidUntil,
 		&i.Plan,

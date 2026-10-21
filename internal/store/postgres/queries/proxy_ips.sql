@@ -4,6 +4,8 @@ SELECT
     p.ip_type,
     p.host,
     p.port,
+    p.username,
+    p.whitelisted_brokers,
     p.valid_from,
     p.valid_until,
     p.plan,
@@ -20,6 +22,7 @@ SELECT
     p.ip_type,
     p.host,
     p.port,
+    p.whitelisted_brokers,
     p.valid_from,
     p.valid_until,
     p.plan,
@@ -38,9 +41,11 @@ SELECT
     p.port,
     p.username,
     p.password,
+    p.whitelisted_brokers,
     p.valid_from,
     p.valid_until,
     p.plan,
     p.created_at
 FROM proxy_ips p
 WHERE p.ip_address = $1;
+

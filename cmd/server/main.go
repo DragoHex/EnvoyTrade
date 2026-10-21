@@ -41,6 +41,7 @@ import (
 	"envoytrade/internal/recon"
 	"envoytrade/internal/squareoff"
 	"envoytrade/internal/store/postgres"
+	"envoytrade/internal/telemetry"
 	"envoytrade/internal/testbroker"
 	"envoytrade/internal/ticker"
 	"envoytrade/internal/worker"
@@ -207,6 +208,8 @@ func run(logger *slog.Logger) error {
 
 	eng := engine.New(store, workerPool)
 	eng.Logger = logger.With("component", "engine")
+	execFeed := telemetry.NewExecutionFeed(25)
+	eng.ExecutionRecorder = execFeed
 
 	// Daily lot size cache cleanup at 01:00:00 IST
 	go func() {
@@ -374,6 +377,28 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	dbStat := func() domain.DBPoolStatus {
+		st := pool.Stat()
+		return domain.DBPoolStatus{
+			AcquiredConns: st.AcquiredConns(),
+			IdleConns:     st.IdleConns(),
+			TotalConns:    st.TotalConns(),
+			MaxConns:      st.MaxConns(),
+		}
+	}
+	sysSampler := telemetry.NewSystemSampler(3 * time.Second)
+	defer sysSampler.Stop()
+
+	telemetryCollector := telemetry.NewCollector(
+		eng,
+		tickerManager,
+		masterFillQueue,
+		orderUpdateQueue,
+		workerPool,
+		dbStat,
+		sysSampler,
+	)
+
 	var routerOpts []httpapi.Option
 	routerOpts = append(routerOpts,
 		httpapi.WithPostbackHandler(postbackHandler),
@@ -384,6 +409,8 @@ func run(logger *slog.Logger) error {
 		httpapi.WithRebalanceService(rebalanceSvc),
 		httpapi.WithFollowerRegistrar(followerRegistrar),
 		httpapi.WithBrokerEvicter(evicter),
+		httpapi.WithTelemetry(telemetryCollector),
+		httpapi.WithExecutionFeed(execFeed),
 	)
 
 	if frontend.HasEmbeddedUI() {

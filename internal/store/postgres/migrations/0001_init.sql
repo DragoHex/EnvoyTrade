@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
+ALTER TABLE users ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
+CREATE INDEX IF NOT EXISTS idx_users_active ON users (active);
 
 CREATE TABLE IF NOT EXISTS sessions (
     id              bigserial PRIMARY KEY,
@@ -47,17 +49,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
 
 -- 3. Proxy IP Pool & Static Egress Routing
 CREATE TABLE IF NOT EXISTS proxy_ips (
-    ip_address  text PRIMARY KEY,
-    ip_type     text NOT NULL CHECK (ip_type IN ('ipv4', 'ipv6')),
-    host        text NOT NULL,
-    port        integer NOT NULL DEFAULT 443,
-    username    text NOT NULL,
-    password    text NOT NULL,
-    valid_from  timestamptz NOT NULL,
-    valid_until timestamptz NOT NULL,
-    plan        text NOT NULL DEFAULT 'QUARTERLY',
-    created_at  timestamptz NOT NULL DEFAULT now()
+    ip_address          text PRIMARY KEY,
+    ip_type             text NOT NULL CHECK (ip_type IN ('ipv4', 'ipv6')),
+    host                text NOT NULL,
+    port                integer NOT NULL DEFAULT 443,
+    username            text NOT NULL,
+    password            text NOT NULL,
+    whitelisted_brokers text NOT NULL DEFAULT '',
+    valid_from          timestamptz NOT NULL,
+    valid_until         timestamptz NOT NULL,
+    plan                text NOT NULL DEFAULT 'QUARTERLY',
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE proxy_ips ADD COLUMN IF NOT EXISTS whitelisted_brokers text NOT NULL DEFAULT '';
 
 -- 4. Broker Accounts (Masters and Followers)
 CREATE TABLE IF NOT EXISTS accounts (
@@ -170,6 +175,22 @@ CREATE TABLE IF NOT EXISTS follower_orders (
 
 CREATE INDEX IF NOT EXISTS follower_orders_follower_id_idx ON follower_orders (follower_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS follower_orders_follower_broker_order_id_idx ON follower_orders (follower_id, broker_order_id) WHERE broker_order_id IS NOT NULL;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE tablename = 'follower_orders' 
+          AND indexname = 'follower_orders_issues_idx' 
+          AND indexdef NOT LIKE '%last_error%'
+    ) THEN
+        DROP INDEX follower_orders_issues_idx;
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS follower_orders_issues_idx ON follower_orders (created_at DESC, id DESC)
+WHERE terminal_status IN ('REJECTED', 'CANCELLED')
+   OR sizing_reason != 0
+   OR (last_error IS NOT NULL AND last_error != '');
+
 
 -- 8. Audit Event Trail
 CREATE TABLE IF NOT EXISTS order_events (

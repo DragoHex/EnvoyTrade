@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -217,12 +218,17 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if validIP != "" {
-		if _, err := h.store.ProxyIPByAddress(r.Context(), validIP); err != nil {
+		proxyIP, err := h.store.ProxyIPByAddress(r.Context(), validIP)
+		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				writeError(w, http.StatusBadRequest, "IP address is not registered in proxy pool")
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "failed to check proxy IP")
+			return
+		}
+		if !proxyIP.MatchesBroker(broker) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("proxy IP %s is whitelisted for %s, not %s", validIP, proxyIP.WhitelistedBrokers, broker))
 			return
 		}
 	}
@@ -608,13 +614,25 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if validIP != "" {
-			if _, err := h.store.ProxyIPByAddress(r.Context(), validIP); err != nil {
+			proxyIP, err := h.store.ProxyIPByAddress(r.Context(), validIP)
+			if err != nil {
 				if errors.Is(err, domain.ErrNotFound) {
 					writeError(w, http.StatusBadRequest, "IP address is not registered in proxy pool")
 					return
 				}
 				writeError(w, http.StatusInternalServerError, "failed to check proxy IP")
 				return
+			}
+			accs, err := h.store.Accounts(r.Context(), []uuid.UUID{id})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to check account broker")
+				return
+			}
+			if len(accs) > 0 && accs[0].Broker != "" {
+				if !proxyIP.MatchesBroker(accs[0].Broker) {
+					writeError(w, http.StatusBadRequest, fmt.Sprintf("proxy IP %s is whitelisted for %s, not %s", validIP, proxyIP.WhitelistedBrokers, accs[0].Broker))
+					return
+				}
 			}
 		}
 		setErr := h.store.SetAccountIPAddress(r.Context(), id, validIP)
