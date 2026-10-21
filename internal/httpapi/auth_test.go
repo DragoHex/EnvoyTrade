@@ -56,6 +56,7 @@ func (m *memAuthStore) CreateUser(ctx context.Context, id uuid.UUID, email, user
 		Name:         name,
 		PasswordHash: passwordHash,
 		Role:         role,
+		Active:       true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
@@ -478,6 +479,30 @@ func TestAuthLogin(t *testing.T) {
 
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401 for nonexistent user, got %d", rec.Code)
+		}
+	})
+
+	t.Run("suspended user returns 403 Forbidden with proper message", func(t *testing.T) {
+		suspendedID := uuid.New()
+		_ = store.CreateUser(context.Background(), suspendedID, "suspended@example.com", "suspended", "Suspended User", hash, "user")
+		store.memAuthStore.usersByEmail["suspended@example.com"].Active = false
+
+		body := map[string]string{
+			"email":    "suspended@example.com",
+			"password": "CorrectPassword123",
+		}
+		jsonBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(jsonBytes))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for suspended user, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Your account has been suspended") {
+			t.Fatalf("expected suspended error message, got: %s", rec.Body.String())
 		}
 	})
 }

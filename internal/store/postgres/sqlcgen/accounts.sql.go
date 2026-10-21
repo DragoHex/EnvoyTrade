@@ -119,7 +119,7 @@ func (q *Queries) AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 
 const accounts = `-- name: Accounts :many
 SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret, a.active, a.status, a.ip_address,
-       a.auth_status, a.auth_error,
+       a.auth_status, a.auth_error, a.token_expires_at,
        g.id AS group_id, g.name AS group_name, g.master_id,
        f.clone_factor, f.max_qty_per_order,
        COALESCE(f.enabled, true) AS enabled
@@ -150,6 +150,7 @@ type AccountsRow struct {
 	IpAddress      string
 	AuthStatus     string
 	AuthError      string
+	TokenExpiresAt pgtype.Timestamptz
 	GroupID        *uuid.UUID
 	GroupName      *string
 	MasterID       *uuid.UUID
@@ -180,6 +181,7 @@ func (q *Queries) Accounts(ctx context.Context, arg AccountsParams) ([]AccountsR
 			&i.IpAddress,
 			&i.AuthStatus,
 			&i.AuthError,
+			&i.TokenExpiresAt,
 			&i.GroupID,
 			&i.GroupName,
 			&i.MasterID,

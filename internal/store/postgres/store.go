@@ -928,36 +928,74 @@ func (s *Store) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now().UTC()
 	accounts := make([]domain.Account, 0, len(rows))
 	for _, r := range rows {
-		a := domain.Account{
-			ID:              r.ID,
-			Name:            r.Name,
-			Role:            r.Role,
-			Broker:          r.Broker,
-			BrokerAccountID: r.BrokerUserID,
-			ApiKey:          r.ApiKey,
-			ApiSecret:       r.ApiSecret,
-			Active:          r.Active,
-			Status:          statusFromAccountStatus(r.Status),
-			IPAddress:       r.IpAddress,
-			AuthStatus:      r.AuthStatus,
-			AuthError:       r.AuthError,
-			Enabled:         r.Enabled,
-			GroupName:       r.GroupName,
-			GroupID:         r.GroupID,
+		accounts = append(accounts, accountFromRow(r, now))
+	}
+	return accounts, nil
+}
+
+func accountFromRow(r sqlcgen.AccountsRow, now time.Time) domain.Account {
+	authStatus := r.AuthStatus
+	authError := r.AuthError
+
+	// Dynamically evaluate token expiration: if token is expired or not recorded,
+	// an account with status 'authenticated' is actually in error state.
+	if authStatus == "authenticated" && (!r.TokenExpiresAt.Valid || !r.TokenExpiresAt.Time.After(now)) {
+		authStatus = "error"
+		if authError == "" {
+			if r.TokenExpiresAt.Valid {
+				authError = fmt.Sprintf("Token expired at %s", r.TokenExpiresAt.Time.In(domain.IST).Format("15:04 IST"))
+			} else {
+				authError = "Token expired / session inactive"
+			}
 		}
-		if r.Role == "follower" {
-			a.MasterID = r.MasterID
-		}
-		if r.CloneFactor.Valid {
-			a.CloneFactor = &r.CloneFactor.Decimal
-		}
-		if r.MaxQtyPerOrder != nil {
-			maxQty := int(*r.MaxQtyPerOrder)
-			a.MaxQtyPerOrder = &maxQty
-		}
-		accounts = append(accounts, a)
+	}
+
+	a := domain.Account{
+		ID:              r.ID,
+		Name:            r.Name,
+		Role:            r.Role,
+		Broker:          r.Broker,
+		BrokerAccountID: r.BrokerUserID,
+		ApiKey:          r.ApiKey,
+		ApiSecret:       r.ApiSecret,
+		Active:          r.Active,
+		Status:          statusFromAccountStatus(r.Status),
+		IPAddress:       r.IpAddress,
+		AuthStatus:      authStatus,
+		AuthError:       authError,
+		Enabled:         r.Enabled,
+		GroupName:       r.GroupName,
+		GroupID:         r.GroupID,
+	}
+	if r.Role == "follower" {
+		a.MasterID = r.MasterID
+	}
+	if r.CloneFactor.Valid {
+		a.CloneFactor = &r.CloneFactor.Decimal
+	}
+	if r.MaxQtyPerOrder != nil {
+		maxQty := int(*r.MaxQtyPerOrder)
+		a.MaxQtyPerOrder = &maxQty
+	}
+	return a
+}
+
+// AccountsByUserID lists all accounts (master and follower) belonging to a specific user.
+func (s *Store) AccountsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Account, error) {
+	rows, err := s.queries.Accounts(ctx, sqlcgen.AccountsParams{
+		Ids:    nil,
+		UserID: &userID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	accounts := make([]domain.Account, 0, len(rows))
+	for _, r := range rows {
+		accounts = append(accounts, accountFromRow(r, now))
 	}
 	return accounts, nil
 }
@@ -1156,4 +1194,173 @@ func (s *Store) PendingFollowerOrders(ctx context.Context, cutoff time.Time) ([]
 		orders = append(orders, toFollowerOrder(r))
 	}
 	return orders, nil
+}
+
+// BrokerReadiness evaluates live pre-market readiness of all active master and follower accounts.
+func (s *Store) BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSummary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name, broker_user_id, role, auth_status, auth_error, token_expires_at
+		FROM accounts
+		WHERE deleted_at IS NULL AND active = true
+		ORDER BY role ASC, name ASC
+	`)
+	if err != nil {
+		return domain.BrokerReadinessSummary{}, fmt.Errorf("query broker readiness: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	var summary domain.BrokerReadinessSummary
+	summary.AttentionAccounts = make([]domain.AttentionAccount, 0)
+
+	for rows.Next() {
+		var (
+			id             uuid.UUID
+			name           string
+			brokerUserID   string
+			role           string
+			authStatus     string
+			authError      string
+			tokenExpiresAt pgtype.Timestamptz
+		)
+		if err := rows.Scan(&id, &name, &brokerUserID, &role, &authStatus, &authError, &tokenExpiresAt); err != nil {
+			return domain.BrokerReadinessSummary{}, fmt.Errorf("scan broker readiness: %w", err)
+		}
+
+		var expiresAt *time.Time
+		if tokenExpiresAt.Valid {
+			t := tokenExpiresAt.Time.In(domain.IST)
+			expiresAt = &t
+		}
+
+		isReady := authStatus == "authenticated" && tokenExpiresAt.Valid && tokenExpiresAt.Time.After(now)
+
+		if role == "master" {
+			if isReady {
+				summary.MasterReady = true
+			}
+		} else {
+			summary.TotalFollowers++
+			if isReady {
+				summary.FollowersReady++
+			}
+		}
+
+		if !isReady {
+			effectiveAuthStatus := authStatus
+			effectiveAuthError := authError
+
+			if effectiveAuthStatus == "authenticated" {
+				effectiveAuthStatus = "error"
+				if effectiveAuthError == "" {
+					if expiresAt != nil {
+						effectiveAuthError = fmt.Sprintf("Token expired at %s", expiresAt.Format("15:04 IST"))
+					} else {
+						effectiveAuthError = "Token expired / session inactive"
+					}
+				}
+			}
+
+			summary.AttentionAccounts = append(summary.AttentionAccounts, domain.AttentionAccount{
+				ID:              id,
+				Name:            name,
+				BrokerAccountID: brokerUserID,
+				Role:            role,
+				AuthStatus:      effectiveAuthStatus,
+				AuthError:       effectiveAuthError,
+				TokenExpiresAt:  expiresAt,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return domain.BrokerReadinessSummary{}, err
+	}
+
+	return summary, nil
+}
+
+// ListRecentOrderIssues returns recent follower orders that failed, were rejected, or had sizing discrepancies.
+func (s *Store) ListRecentOrderIssues(ctx context.Context, limit, offset int) ([]domain.OrderIssue, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	const countQuery = `
+		SELECT COUNT(*)::int
+		FROM follower_orders fo
+		WHERE fo.terminal_status IN ('REJECTED', 'CANCELLED')
+		   OR fo.sizing_reason != 0
+		   OR (fo.last_error IS NOT NULL AND fo.last_error != '')
+	`
+	var total int
+	if err := s.pool.QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count order issues: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT fo.id, fo.created_at, COALESCE(a.name, ''), COALESCE(a.broker_user_id, ''),
+		       fo.tradingsymbol, fo.exchange, fo.intended_qty, COALESCE(fo.placed_qty, 0),
+		       fo.sizing_reason, COALESCE(fo.terminal_status, ''), COALESCE(fo.last_error, '')
+		FROM follower_orders fo
+		LEFT JOIN accounts a ON fo.follower_id = a.id
+		WHERE fo.terminal_status IN ('REJECTED', 'CANCELLED')
+		   OR fo.sizing_reason != 0
+		   OR (fo.last_error IS NOT NULL AND fo.last_error != '')
+		ORDER BY fo.created_at DESC, fo.id DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query order issues: %w", err)
+	}
+	defer rows.Close()
+
+	var issues []domain.OrderIssue
+	for rows.Next() {
+		var (
+			id              int64
+			createdAt       time.Time
+			followerName    string
+			brokerUserID    string
+			symbol          string
+			exchange        string
+			intendedQty     int
+			placedQty       int
+			sizingReasonInt int
+			terminalStatus  string
+			lastError       string
+		)
+		if err := rows.Scan(
+			&id, &createdAt, &followerName, &brokerUserID,
+			&symbol, &exchange, &intendedQty, &placedQty,
+			&sizingReasonInt, &terminalStatus, &lastError,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan order issue: %w", err)
+		}
+
+		reasonStr := domain.SizingReason(sizingReasonInt).String()
+		issues = append(issues, domain.OrderIssue{
+			ID:              id,
+			CreatedAt:       createdAt.In(domain.IST),
+			FollowerName:    followerName,
+			BrokerAccountID: brokerUserID,
+			Tradingsymbol:   symbol,
+			Exchange:        exchange,
+			IntendedQty:     intendedQty,
+			PlacedQty:       placedQty,
+			SizingReason:    reasonStr,
+			TerminalStatus:  terminalStatus,
+			LastError:       lastError,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return issues, total, nil
 }

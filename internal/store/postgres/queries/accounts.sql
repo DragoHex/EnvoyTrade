@@ -45,7 +45,7 @@ SELECT role FROM accounts WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: Accounts :many
 SELECT a.id, a.name, a.role, a.broker, a.broker_user_id, a.api_key, a.api_secret, a.active, a.status, a.ip_address,
-       a.auth_status, a.auth_error,
+       a.auth_status, a.auth_error, a.token_expires_at,
        g.id AS group_id, g.name AS group_name, g.master_id,
        f.clone_factor, f.max_qty_per_order,
        COALESCE(f.enabled, true) AS enabled

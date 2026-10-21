@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"time"
 
+	"envoytrade/internal/domain"
+
 	"github.com/google/uuid"
 )
 
@@ -27,7 +29,15 @@ type routerConfig struct {
 	rebalanceSvc      RebalanceService
 	followerRegistrar FollowerRegistrar
 	brokerEvicter     BrokerEvicter
+	telemetry         TelemetryCollector
+	proxyTester       ProxyTester
+	executionFeed     ExecutionFeed
 	staticFS          fs.FS
+}
+
+// ExecutionFeed supplies instantaneous master fill execution events.
+type ExecutionFeed interface {
+	Recent() []domain.ExecutionEvent
 }
 
 // FollowerRegistrar dynamically manages follower registration in the worker pool.
@@ -101,12 +111,34 @@ func WithFollowerRegistrar(fr FollowerRegistrar) Option {
 	}
 }
 
+// WithTelemetry configures in-memory pipeline telemetry.
+func WithTelemetry(t TelemetryCollector) Option {
+	return func(c *routerConfig) {
+		c.telemetry = t
+	}
+}
+
+// WithProxyTester configures a custom proxy connectivity tester.
+func WithProxyTester(pt ProxyTester) Option {
+	return func(c *routerConfig) {
+		c.proxyTester = pt
+	}
+}
+
+// WithExecutionFeed configures the in-memory execution event feed.
+func WithExecutionFeed(feed ExecutionFeed) Option {
+	return func(c *routerConfig) {
+		c.executionFeed = feed
+	}
+}
+
 // WithLogger configures structured request logging middleware.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *routerConfig) {
 		c.logger = logger
 	}
 }
+
 
 // NewRouter wires every Dashboard-page route onto a stdlib ServeMux using
 // Go 1.22+ method+path pattern routing. If WithLogger option is supplied,
@@ -127,6 +159,9 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 		rebalanceSvc:      cfg.rebalanceSvc,
 		followerRegistrar: cfg.followerRegistrar,
 		brokerEvicter:     cfg.brokerEvicter,
+		telemetry:         cfg.telemetry,
+		proxyTester:       cfg.proxyTester,
+		executionFeed:     cfg.executionFeed,
 	}
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +196,34 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	mux.HandleFunc("GET /api/v1/accounts/{id}/orders", h.getAccountOrders)
 	mux.HandleFunc("GET /api/v1/proxy-ips", h.getProxyIPs)
 	mux.HandleFunc("GET /api/v1/proxy-ips/available", h.getAvailableProxyIPs)
+	mux.HandleFunc("GET /api/v1/killswitch", h.getKillSwitchStatus)
+
+	// Admin portal endpoints protected by requireAdminMiddleware
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("GET /api/v1/admin/status", h.getAdminServiceStatus)
+	adminMux.HandleFunc("POST /api/v1/admin/killswitch", h.postAdminKillSwitch)
+	adminMux.HandleFunc("GET /api/v1/admin/broker-readiness", h.getAdminBrokerReadiness)
+	adminMux.HandleFunc("GET /api/v1/admin/order-issues", h.getAdminOrderIssues)
+	adminMux.HandleFunc("GET /api/v1/admin/execution-feed", h.getAdminExecutionFeed)
+
+	adminMux.HandleFunc("GET /api/v1/admin/proxy-ips", h.getAdminProxyIPs)
+	adminMux.HandleFunc("POST /api/v1/admin/proxy-ips/bulk", h.postAdminProxyIPsBulk)
+	adminMux.HandleFunc("POST /api/v1/admin/proxy-ips", h.postAdminProxyIP)
+	adminMux.HandleFunc("PUT /api/v1/admin/proxy-ips/{ip}", h.putAdminProxyIP)
+	adminMux.HandleFunc("PATCH /api/v1/admin/proxy-ips/{ip}", h.patchAdminProxyIP)
+	adminMux.HandleFunc("DELETE /api/v1/admin/proxy-ips/{ip}", h.deleteAdminProxyIP)
+	adminMux.HandleFunc("POST /api/v1/admin/proxy-ips/{ip}/test", h.postAdminProxyIPTest)
+	adminMux.HandleFunc("POST /api/v1/admin/proxy-ips/test-all", h.postAdminProxyIPsTestAll)
+
+	adminMux.HandleFunc("GET /api/v1/admin/users", h.getAdminUsers)
+	adminMux.HandleFunc("POST /api/v1/admin/users", h.postAdminUser)
+	adminMux.HandleFunc("PATCH /api/v1/admin/users/{id}", h.patchAdminUser)
+	adminMux.HandleFunc("GET /api/v1/admin/users/{id}/accounts", h.getAdminUserAccounts)
+	adminMux.HandleFunc("GET /api/v1/admin/users/{id}/sessions", h.getAdminUserSessions)
+	adminMux.HandleFunc("DELETE /api/v1/admin/users/{id}/sessions", h.deleteAdminUserSessions)
+
+	mux.Handle("/api/v1/admin/", requireAdminMiddleware(adminMux, store))
+
 
 	if cfg.postbackHandler != nil {
 		mux.Handle("POST /broker-callback", cfg.postbackHandler)
@@ -225,6 +288,12 @@ func loggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 	})
 }
 
+// AdminOperationalStore defines queries for live broker readiness and order exception auditing.
+type AdminOperationalStore interface {
+	BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSummary, error)
+	ListRecentOrderIssues(ctx context.Context, limit, offset int) ([]domain.OrderIssue, int, error)
+}
+
 // Store is everything the handlers need from persistence — the union of
 // GroupsStore/AccountsStore/ActionsStore, kept as one interface since one
 // concrete *postgres.Store always satisfies all three.
@@ -235,6 +304,9 @@ type Store interface {
 	OrdersStore
 	AuthStore
 	ProxyStore
+	AdminProxyStore
+	AdminUserStore
+	AdminOperationalStore
 }
 
 type handlers struct {
@@ -246,6 +318,9 @@ type handlers struct {
 	rebalanceSvc      RebalanceService
 	followerRegistrar FollowerRegistrar
 	brokerEvicter     BrokerEvicter
+	telemetry         TelemetryCollector
+	proxyTester       ProxyTester
+	executionFeed     ExecutionFeed
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

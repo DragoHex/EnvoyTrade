@@ -96,6 +96,35 @@ type stubStore struct {
 	availableIPsErr  error
 	proxyIPByAddr    domain.ProxyIP
 	proxyIPByAddrErr error
+
+	proxyStats        domain.ProxyIPStats
+	proxyStatsErr     error
+	upsertProxyErr    error
+	upsertBatchRes    domain.BulkUploadResult
+	upsertBatchErr    error
+	updateProxyErr      error
+	updateProxyFullErr  error
+	lastUpdatedProxyIP  domain.ProxyIP
+	deleteProxyErr      error
+
+	adminUsers        []domain.UserSummary
+	adminUsersTotal   int
+	adminUsersErr     error
+	createUserErr     error
+	updateUserErr     error
+	userSessions      []domain.Session
+	userSessionsErr   error
+	revokeSessionsN   int64
+	revokeSessionsErr error
+
+	usersByID           map[uuid.UUID]*domain.User
+	accountsByUserID    map[uuid.UUID][]domain.Account
+	accountsByUserIDErr error
+
+	brokerReadiness    domain.BrokerReadinessSummary
+	brokerReadinessErr error
+	orderIssues        []domain.OrderIssue
+	orderIssuesErr     error
 }
 
 type createAccountCall struct {
@@ -353,7 +382,12 @@ func (s *stubStore) GetUserByUsername(_ context.Context, _ string) (*domain.User
 	return nil, domain.ErrNotFound
 }
 
-func (s *stubStore) GetUserByID(_ context.Context, _ uuid.UUID) (*domain.User, error) {
+func (s *stubStore) GetUserByID(_ context.Context, id uuid.UUID) (*domain.User, error) {
+	if s.usersByID != nil {
+		if u, ok := s.usersByID[id]; ok {
+			return u, nil
+		}
+	}
 	return nil, domain.ErrNotFound
 }
 
@@ -419,16 +453,139 @@ func (s *stubStore) ProxyIPByAddress(_ context.Context, ipAddress string) (domai
 	return domain.ProxyIP{IPAddress: ipAddress, Host: "dc46-mum-01.algoip.in", Port: 443}, nil
 }
 
+func (s *stubStore) ProxyIPStats(_ context.Context) (domain.ProxyIPStats, error) {
+	if s.proxyStatsErr != nil {
+		return domain.ProxyIPStats{}, s.proxyStatsErr
+	}
+	return s.proxyStats, nil
+}
+
+func (s *stubStore) UpsertProxyIP(_ context.Context, p domain.ProxyIP) error {
+	if s.upsertProxyErr != nil {
+		return s.upsertProxyErr
+	}
+	s.proxyIPs = append(s.proxyIPs, p)
+	return nil
+}
+
+func (s *stubStore) UpsertProxyIPsBatch(_ context.Context, ips []domain.ProxyIP) (domain.BulkUploadResult, error) {
+	if s.upsertBatchErr != nil {
+		return domain.BulkUploadResult{}, s.upsertBatchErr
+	}
+	s.proxyIPs = append(s.proxyIPs, ips...)
+	if s.upsertBatchRes.Total == 0 {
+		return domain.BulkUploadResult{Total: len(ips), Inserted: len(ips)}, nil
+	}
+	return s.upsertBatchRes, nil
+}
+
+func (s *stubStore) UpdateProxyIP(_ context.Context, ipAddress string, validUntil time.Time, password, plan string) error {
+	if s.updateProxyErr != nil {
+		return s.updateProxyErr
+	}
+	return nil
+}
+
+func (s *stubStore) UpdateProxyIPFull(_ context.Context, p domain.ProxyIP) error {
+	if s.updateProxyFullErr != nil {
+		return s.updateProxyFullErr
+	}
+	s.lastUpdatedProxyIP = p
+	return nil
+}
+
+func (s *stubStore) DeleteProxyIP(_ context.Context, ipAddress string) error {
+	if s.deleteProxyErr != nil {
+		return s.deleteProxyErr
+	}
+	return nil
+}
+
+func (s *stubStore) ListUsers(_ context.Context, limit, offset int) ([]domain.UserSummary, int, error) {
+	if s.adminUsersErr != nil {
+		return nil, 0, s.adminUsersErr
+	}
+	return s.adminUsers, s.adminUsersTotal, nil
+}
+
+
+func (s *stubStore) UpdateUserRoleAndStatus(_ context.Context, userID uuid.UUID, role string, active *bool) error {
+	if s.updateUserErr != nil {
+		return s.updateUserErr
+	}
+	return nil
+}
+
+func (s *stubStore) ListUserSessions(_ context.Context, userID uuid.UUID) ([]domain.Session, error) {
+	if s.userSessionsErr != nil {
+		return nil, s.userSessionsErr
+	}
+	return s.userSessions, nil
+}
+
+func (s *stubStore) RevokeAllUserSessions(_ context.Context, userID uuid.UUID) (int64, error) {
+	if s.revokeSessionsErr != nil {
+		return 0, s.revokeSessionsErr
+	}
+	return s.revokeSessionsN, nil
+}
+
+func (s *stubStore) AccountsByUserID(_ context.Context, userID uuid.UUID) ([]domain.Account, error) {
+	if s.accountsByUserIDErr != nil {
+		return nil, s.accountsByUserIDErr
+	}
+	if s.accountsByUserID != nil {
+		return s.accountsByUserID[userID], nil
+	}
+	return nil, nil
+}
+
+func (s *stubStore) BrokerReadiness(_ context.Context) (domain.BrokerReadinessSummary, error) {
+	if s.brokerReadinessErr != nil {
+		return domain.BrokerReadinessSummary{}, s.brokerReadinessErr
+	}
+	return s.brokerReadiness, nil
+}
+
+func (s *stubStore) ListRecentOrderIssues(_ context.Context, limit, offset int) ([]domain.OrderIssue, int, error) {
+	if s.orderIssuesErr != nil {
+		return nil, 0, s.orderIssuesErr
+	}
+	total := len(s.orderIssues)
+	if offset >= total {
+		return []domain.OrderIssue{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return s.orderIssues[offset:end], total, nil
+}
+
 // stubActionEngine is a hand-written fake satisfying httpapi.Engine.
 type stubActionEngine struct {
-	err   error
-	calls []domain.MasterFill
+	err              error
+	calls            []domain.MasterFill
+	killSwitchStatus domain.KillSwitchStatus
 }
 
 func (e *stubActionEngine) HandleMasterFill(_ context.Context, fill domain.MasterFill) error {
 	e.calls = append(e.calls, fill)
 	return e.err
 }
+
+func (e *stubActionEngine) SetKillSwitch(engaged bool, reason string, engagedBy string) {
+	e.killSwitchStatus = domain.KillSwitchStatus{
+		Engaged:   engaged,
+		Reason:    reason,
+		EngagedBy: engagedBy,
+	}
+}
+
+func (e *stubActionEngine) KillSwitchStatus() domain.KillSwitchStatus {
+	return e.killSwitchStatus
+}
+
 
 type stubFollowerRegistrar struct {
 	registered   []uuid.UUID

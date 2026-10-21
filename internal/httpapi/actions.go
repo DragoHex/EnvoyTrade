@@ -31,6 +31,8 @@ type ActionsStore interface {
 // "rebalance" safe to click more than once (docs/APIs/actions.md).
 type Engine interface {
 	HandleMasterFill(ctx context.Context, fill domain.MasterFill) error
+	SetKillSwitch(engaged bool, reason string, engagedBy string)
+	KillSwitchStatus() domain.KillSwitchStatus
 }
 
 type postActionRequest struct {

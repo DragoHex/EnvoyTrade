@@ -51,6 +51,7 @@ type userResponse struct {
 	Address   string `json:"address"`
 	GSTNumber string `json:"gstNumber"`
 	Role      string `json:"role"`
+	Active    bool   `json:"active"`
 }
 
 func toUserResponse(u *domain.User) userResponse {
@@ -63,6 +64,7 @@ func toUserResponse(u *domain.User) userResponse {
 		Address:   u.Address,
 		GSTNumber: u.GSTNumber,
 		Role:      u.Role,
+		Active:    u.Active,
 	}
 }
 
@@ -138,6 +140,7 @@ func (h *handlers) postRegister(w http.ResponseWriter, r *http.Request) {
 		Username: req.Username,
 		Name:     req.Name,
 		Role:     "user",
+		Active:   true,
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -176,6 +179,11 @@ func (h *handlers) postLogin(w http.ResponseWriter, r *http.Request) {
 
 	if !auth.CheckPassword(req.Password, user.PasswordHash) {
 		writeError(w, http.StatusUnauthorized, "invalid email or password")
+		return
+	}
+
+	if !user.Active {
+		writeError(w, http.StatusForbidden, "Your account has been suspended. Please contact your administrator.")
 		return
 	}
 
@@ -320,6 +328,7 @@ func (h *handlers) putUserProfile(w http.ResponseWriter, r *http.Request) {
 			Address:   req.Address,
 			GSTNumber: req.GSTNumber,
 			Role:      user.Role,
+			Active:    user.Active,
 		}
 	}
 

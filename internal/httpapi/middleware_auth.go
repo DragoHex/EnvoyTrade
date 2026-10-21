@@ -57,6 +57,11 @@ func authMiddleware(next http.Handler, store AuthStore, logger *slog.Logger) htt
 			return
 		}
 
+		if !sessWithUser.User.Active {
+			writeError(w, http.StatusUnauthorized, "account deactivated")
+			return
+		}
+
 		// Rolling session touch if older than 15 minutes
 		if time.Since(sessWithUser.Session.LastSeenAt) > 15*time.Minute {
 			_ = store.TouchSession(r.Context(), tokenHash, time.Now().Add(sessionDuration))
@@ -66,3 +71,23 @@ func authMiddleware(next http.Handler, store AuthStore, logger *slog.Logger) htt
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+func requireAdminMiddleware(next http.Handler, store AuthStore) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if bp, ok := store.(authBypasser); ok && bp.BypassAuth() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, ok := domain.UserFromContext(r.Context())
+		if !ok || user == nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if user.Role != domain.RoleAdmin {
+			writeError(w, http.StatusForbidden, "forbidden: admin privileges required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
