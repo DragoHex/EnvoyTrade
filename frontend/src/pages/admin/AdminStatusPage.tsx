@@ -70,7 +70,7 @@ export function AdminStatusPage() {
 
   return (
     <AdminLayout activeTab="status">
-      <div style={{ 'margin-bottom': '1rem', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
+      <div class="admin-status-header" style={{ 'margin-bottom': '1rem', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
         <div>
           <span style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)' }}>
             {lastUpdated() ? `Last updated: ${lastUpdated()}` : 'Awaiting status...'}

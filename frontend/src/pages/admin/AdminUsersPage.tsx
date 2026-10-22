@@ -99,6 +99,8 @@ export function AdminUsersPage() {
   const [sessionsLoading, setSessionsLoading] = createSignal(false)
   const [revokeSubmitting, setRevokeSubmitting] = createSignal(false)
 
+  const [lastUpdated, setLastUpdated] = createSignal<string>('')
+
   const loadUsers = async (isManual = false) => {
     if (isManual) {
       setRefreshing(true)
@@ -108,6 +110,8 @@ export function AdminUsersPage() {
       const res = await getAdminUsers(limit(), offset())
       setUsers(res.users)
       setTotal(res.total)
+      const now = new Date()
+      setLastUpdated(now.toLocaleTimeString())
     } catch (err: any) {
       setError(err?.message || 'Failed to load platform users')
     } finally {
@@ -251,6 +255,24 @@ export function AdminUsersPage() {
 
   return (
     <AdminLayout activeTab="users">
+      <div class="admin-status-header" style={{ 'margin-bottom': '1rem', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
+        <div>
+          <span style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)' }}>
+            {lastUpdated() ? `Last updated: ${lastUpdated()}` : 'Awaiting users data...'}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="btn-secondary"
+          onClick={() => loadUsers(true)}
+          disabled={refreshing()}
+          style={{ display: 'inline-flex', 'align-items': 'center', gap: '0.4rem' }}
+        >
+          <SyncIcon spinning={refreshing()} />
+          <span>{refreshing() ? 'Refreshing...' : 'Refresh'}</span>
+        </button>
+      </div>
+
       {/* Top Metric Cards */}
       <div class="admin-metrics-grid" style={{ 'margin-bottom': '1.25rem' }}>
         <div class="metric-card">
@@ -282,18 +304,8 @@ export function AdminUsersPage() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div
-        class="admin-filter-bar"
-        style={{
-          display: 'flex',
-          'flex-wrap': 'wrap',
-          'justify-content': 'space-between',
-          gap: '0.75rem',
-          'align-items': 'center',
-          'margin-bottom': '1rem',
-        }}
-      >
-        <div style={{ display: 'flex', gap: '0.5rem', 'align-items': 'center', flex: 1, 'min-width': '280px', 'max-width': '650px' }}>
+      <div class="admin-filter-bar admin-users-filter-bar" style={{ 'margin-bottom': '1rem' }}>
+        <div class="admin-users-filter-inputs">
           <input
             type="search"
             placeholder="Search users by name, username, email..."
@@ -310,56 +322,48 @@ export function AdminUsersPage() {
               'font-size': '0.85rem',
             }}
           />
-          <select
-            aria-label="Filter by role"
-            value={roleFilter()}
-            onChange={(e) => setRoleFilter(e.currentTarget.value as any)}
-            style={{
-              padding: '0.45rem 0.6rem',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              'border-radius': '6px',
-              color: 'var(--color-text)',
-              'font-size': '0.85rem',
-            }}
-          >
-            <option value="all">All Roles</option>
-            <option value="admin">Administrators</option>
-            <option value="user">Traders (User)</option>
-          </select>
-          <select
-            aria-label="Filter by status"
-            value={statusFilter()}
-            onChange={(e) => setStatusFilter(e.currentTarget.value as any)}
-            style={{
-              padding: '0.45rem 0.6rem',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              'border-radius': '6px',
-              color: 'var(--color-text)',
-              'font-size': '0.85rem',
-            }}
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="suspended">Suspended</option>
-          </select>
-          <span style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)', 'white-space': 'nowrap', 'margin-left': '0.25rem' }}>
+          <div class="admin-users-selects">
+            <select
+              aria-label="Filter by role"
+              value={roleFilter()}
+              onChange={(e) => setRoleFilter(e.currentTarget.value as any)}
+              style={{
+                padding: '0.45rem 0.6rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                'border-radius': '6px',
+                color: 'var(--color-text)',
+                'font-size': '0.85rem',
+              }}
+            >
+              <option value="all">All Roles</option>
+              <option value="admin">Administrators</option>
+              <option value="user">Traders (User)</option>
+            </select>
+            <select
+              aria-label="Filter by status"
+              value={statusFilter()}
+              onChange={(e) => setStatusFilter(e.currentTarget.value as any)}
+              style={{
+                padding: '0.45rem 0.6rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                'border-radius': '6px',
+                color: 'var(--color-text)',
+                'font-size': '0.85rem',
+              }}
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
+          <span class="admin-users-count" style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)', 'white-space': 'nowrap' }}>
             Total Users: {total()}
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', 'align-items': 'center' }}>
-          <button
-            type="button"
-            class="btn-secondary"
-            onClick={() => loadUsers(true)}
-            disabled={refreshing()}
-            style={{ display: 'inline-flex', 'align-items': 'center', gap: '0.4rem' }}
-          >
-            <SyncIcon spinning={refreshing()} />
-            <span>{refreshing() ? 'Refreshing...' : 'Refresh'}</span>
-          </button>
+        <div class="admin-users-filter-actions">
           <button
             type="button"
             class="btn-primary"

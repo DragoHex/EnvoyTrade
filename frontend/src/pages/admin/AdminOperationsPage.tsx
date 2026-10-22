@@ -134,7 +134,7 @@ export function AdminOperationsPage() {
 
   return (
     <AdminLayout activeTab="operations">
-      <div style={{ 'margin-bottom': '1.25rem', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
+      <div class="admin-ops-header" style={{ 'margin-bottom': '1.25rem', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
         <div>
           <span style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)' }}>
             {lastUpdated() ? `Last updated: ${lastUpdated()}` : 'Awaiting operations data...'}

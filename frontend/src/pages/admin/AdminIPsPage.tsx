@@ -96,6 +96,8 @@ export function AdminIPsPage() {
   })
   const [addSubmitting, setAddSubmitting] = createSignal(false)
 
+  const [lastUpdated, setLastUpdated] = createSignal<string>('')
+
   const loadData = async (isManual = false) => {
     if (isManual) {
       setRefreshing(true)
@@ -105,6 +107,8 @@ export function AdminIPsPage() {
       const res = await getAdminProxyIPs()
       setAllIps(res.ips || [])
       setStats(res.stats)
+      const now = new Date()
+      setLastUpdated(now.toLocaleTimeString())
     } catch (err: any) {
       setError(err?.message || 'Failed to load proxy IPs')
     } finally {
@@ -490,6 +494,24 @@ export function AdminIPsPage() {
 
   return (
     <AdminLayout activeTab="ips">
+      <div class="admin-status-header" style={{ 'margin-bottom': '1rem', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
+        <div>
+          <span style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)' }}>
+            {lastUpdated() ? `Last updated: ${lastUpdated()}` : 'Awaiting IP data...'}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="btn-secondary"
+          onClick={() => loadData(true)}
+          disabled={refreshing()}
+          style={{ display: 'inline-flex', 'align-items': 'center', gap: '0.4rem' }}
+        >
+          <SyncIcon spinning={refreshing()} />
+          <span>{refreshing() ? 'Refreshing...' : 'Refresh'}</span>
+        </button>
+      </div>
+
       {/* Metric Cards */}
       <Show when={stats()}>
         <div class="admin-metrics-grid">
@@ -568,7 +590,7 @@ export function AdminIPsPage() {
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', 'align-items': 'center' }}>
+        <div class="admin-ips-filter-actions">
           <button
             type="button"
             class="btn-secondary"
@@ -577,16 +599,6 @@ export function AdminIPsPage() {
             style={{ display: 'inline-flex', 'align-items': 'center', gap: '0.4rem' }}
           >
             <span>{testingAll() ? 'Testing Proxies...' : '⚡ Test All Proxies'}</span>
-          </button>
-          <button
-            type="button"
-            class="btn-secondary"
-            onClick={() => loadData(true)}
-            disabled={refreshing()}
-            style={{ display: 'inline-flex', 'align-items': 'center', gap: '0.4rem' }}
-          >
-            <SyncIcon spinning={refreshing()} />
-            <span>{refreshing() ? 'Refreshing...' : 'Refresh'}</span>
           </button>
           <button
             type="button"
@@ -999,7 +1011,7 @@ export function AdminIPsPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '0.85rem', 'margin-bottom': '0.85rem' }}>
+                  <div class="admin-form-grid-2col" style={{ 'margin-bottom': '0.85rem' }}>
                     <div>
                       <label for="edit-ip-user" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Username
@@ -1046,7 +1058,7 @@ export function AdminIPsPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '0.85rem', 'margin-bottom': '0.85rem' }}>
+                  <div class="admin-form-grid-2col" style={{ 'margin-bottom': '0.85rem' }}>
                     <div>
                       <label for="edit-ip-valid-until" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Valid Until
@@ -1096,7 +1108,7 @@ export function AdminIPsPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '0.85rem' }}>
+                  <div class="admin-form-grid-2col">
                     <div>
                       <label for="edit-ip-type" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         IP Type
@@ -1430,7 +1442,7 @@ export function AdminIPsPage() {
                       />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '0.85rem', 'margin-bottom': '0.85rem' }}>
+                  <div class="admin-form-grid-2col" style={{ 'margin-bottom': '0.85rem' }}>
                     <div>
                       <label for="add-ip-user" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Username
@@ -1478,7 +1490,7 @@ export function AdminIPsPage() {
                       />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '0.85rem', 'margin-bottom': '0.85rem' }}>
+                  <div class="admin-form-grid-2col" style={{ 'margin-bottom': '0.85rem' }}>
                     <div>
                       <label for="add-ip-valid-until" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Valid Until
@@ -1527,7 +1539,7 @@ export function AdminIPsPage() {
                       </select>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '0.85rem' }}>
+                  <div class="admin-form-grid-2col">
                     <div>
                       <label for="add-ip-type" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         IP Type
