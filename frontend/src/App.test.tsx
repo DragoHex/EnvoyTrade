@@ -218,5 +218,34 @@ describe('App authentication & navigation', () => {
 
     vi.useRealTimers()
   })
+
+  it('highlights Admin link across all admin sub-tabs for admin users', async () => {
+    const adminUser = { ...fakeUser, role: 'admin' }
+    vi.spyOn(api, 'getMe').mockResolvedValue({ user: adminUser })
+    vi.spyOn(api, 'getAdminServiceStatus').mockResolvedValue({
+      killSwitch: { engaged: false },
+      masterTickers: [],
+      queues: { masterFillDepth: 0, masterFillCap: 100, orderUpdateDepth: 0, orderUpdateCap: 100 },
+      workerCount: 0,
+      dbPool: { totalConns: 1, idleConns: 1, acquiredConns: 0, maxConns: 10 },
+      systemResources: { cpuPercent: 1, heapAllocMb: 20, sysMemoryMb: 50, goroutineCount: 15, gcCycles: 5 },
+    })
+
+    const adminRoutes = ['/admin/status', '/admin/operations', '/admin/ips', '/admin/users']
+    for (const route of adminRoutes) {
+      window.history.pushState({}, '', route)
+      const { unmount } = render(() => <App />)
+
+      const adminLink = await screen.findByRole('link', { name: 'Admin' })
+      const dashboardLink = screen.getByRole('link', { name: 'Dashboard' })
+      const accountsLink = screen.getByRole('link', { name: 'Accounts' })
+
+      expect(adminLink).toHaveClass('active')
+      expect(dashboardLink).not.toHaveClass('active')
+      expect(accountsLink).not.toHaveClass('active')
+
+      unmount()
+    }
+  })
 })
 

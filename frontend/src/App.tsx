@@ -157,7 +157,7 @@ function TopNav(props: { children?: JSX.Element }) {
               <A href="/accounts">Accounts</A>
               <A href="/analytics">Analytics</A>
               <Show when={user()?.role === 'admin'}>
-                <A href="/admin/status">Admin</A>
+                <A href="/admin/status" classList={{ active: isAdminRoute() }}>Admin</A>
               </Show>
             </div>
           </Show>
