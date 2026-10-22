@@ -83,6 +83,18 @@ func (m *Manager) ActiveCount() int {
 	return len(m.tickers)
 }
 
+// ActiveMasterIDs returns the IDs of currently running master tickers.
+func (m *Manager) ActiveMasterIDs() []uuid.UUID {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make([]uuid.UUID, 0, len(m.tickers))
+	for id := range m.tickers {
+		res = append(res, id)
+	}
+	return res
+}
+
+
 // StartMaster starts an isolated WebSocket ticker for masterID based on the account's configured broker.
 // Calling StartMaster on an already running master is a safe idempotent no-op.
 func (m *Manager) StartMaster(ctx context.Context, masterID uuid.UUID) error {

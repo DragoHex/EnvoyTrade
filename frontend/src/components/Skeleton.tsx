@@ -45,3 +45,19 @@ export function TableSkeleton() {
     </section>
   )
 }
+
+export function Skeleton(props: { height?: number; radius?: number }) {
+  return (
+    <div
+      class="skeleton-bar"
+      style={{
+        height: props.height ? `${props.height}px` : '20px',
+        'border-radius': props.radius ? `${props.radius}px` : '4px',
+        width: '100%',
+        margin: '0.5rem 0',
+      }}
+      aria-hidden="true"
+    />
+  )
+}
+

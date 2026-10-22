@@ -2,7 +2,7 @@ import { Show } from 'solid-js'
 import { GandalfIcon, HobbitIcon } from './icons'
 
 export function RoleIcon(props: {
-  role: 'master' | 'follower'
+  role: 'master' | 'follower' | string
   size?: number
   class?: string
 }) {

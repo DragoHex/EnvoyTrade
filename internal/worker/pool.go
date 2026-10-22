@@ -132,6 +132,13 @@ func (p *Pool) Dispatch(followerID uuid.UUID, job domain.Job) bool {
 	}
 }
 
+// Count returns the number of registered worker goroutines.
+func (p *Pool) Count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.workers)
+}
+
 // Shutdown signals every worker goroutine to stop and waits for them to
 // exit. Safe to call more than once.
 func (p *Pool) Shutdown() {

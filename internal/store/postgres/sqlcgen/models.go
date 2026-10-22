@@ -176,16 +176,17 @@ type PendingOrderUpdate struct {
 }
 
 type ProxyIp struct {
-	IpAddress  string
-	IpType     string
-	Host       string
-	Port       int32
-	Username   string
-	Password   string
-	ValidFrom  pgtype.Timestamptz
-	ValidUntil pgtype.Timestamptz
-	Plan       string
-	CreatedAt  pgtype.Timestamptz
+	IpAddress          string
+	IpType             string
+	Host               string
+	Port               int32
+	Username           string
+	Password           string
+	WhitelistedBrokers string
+	ValidFrom          pgtype.Timestamptz
+	ValidUntil         pgtype.Timestamptz
+	Plan               string
+	CreatedAt          pgtype.Timestamptz
 }
 
 type Session struct {
@@ -213,4 +214,5 @@ type User struct {
 	GstNumber    string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	Active       bool
 }

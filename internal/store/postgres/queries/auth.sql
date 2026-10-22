@@ -3,17 +3,17 @@ INSERT INTO users (id, email, username, name, password_hash, role)
 VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: GetUserByEmail :one
-SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, created_at, updated_at
+SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, active, created_at, updated_at
 FROM users
 WHERE LOWER(email) = LOWER($1);
 
 -- name: GetUserByUsername :one
-SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, created_at, updated_at
+SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, active, created_at, updated_at
 FROM users
 WHERE LOWER(username) = LOWER($1);
 
 -- name: GetUserByID :one
-SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, created_at, updated_at
+SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, active, created_at, updated_at
 FROM users
 WHERE id = $1;
 

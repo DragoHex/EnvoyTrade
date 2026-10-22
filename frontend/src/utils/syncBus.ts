@@ -32,8 +32,12 @@ function tick() {
   }
 }
 
+function isDocumentVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible'
+}
+
 function startTimer() {
-  if (timerId === null && subscribers.size > 0) {
+  if (timerId === null && subscribers.size > 0 && isDocumentVisible()) {
     timerId = setInterval(tick, POLL_INTERVAL_MS)
   }
 }
@@ -52,14 +56,22 @@ function initWindowListeners() {
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        triggerSyncNow()
+        if (subscribers.size > 0) {
+          startTimer()
+          triggerSyncNow()
+        }
+      } else {
+        stopTimer()
       }
     })
   }
 
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', () => {
-      triggerSyncNow()
+      if (isDocumentVisible() && subscribers.size > 0) {
+        startTimer()
+        triggerSyncNow()
+      }
     })
   }
 }

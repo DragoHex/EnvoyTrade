@@ -590,3 +590,174 @@ func TestEngine_LotSizeCacheHitAndClear(t *testing.T) {
 		t.Errorf("expected instrumentLookupCalls to be 2 after cache clear, got %d", store.instrumentLookupCalls)
 	}
 }
+
+func TestEngine_KillSwitch(t *testing.T) {
+	store := newMockEngineStore()
+	masterID := uuid.New()
+	followerID := uuid.New()
+	store.followLinks = []domain.FollowLink{
+		{
+			FollowerID:     followerID,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromInt(1),
+			MaxQtyPerOrder: 0,
+			Enabled:        true,
+		},
+	}
+	disp := newMockDispatcher()
+	eng := engine.New(store, disp)
+
+	// Initially not engaged
+	if eng.IsKillSwitchEngaged() {
+		t.Fatal("expected kill switch to be initially disengaged")
+	}
+	st := eng.KillSwitchStatus()
+	if st.Engaged {
+		t.Fatal("expected kill switch status to be false")
+	}
+
+	// Engage kill switch
+	eng.SetKillSwitch(true, "Emergency circuit breaker triggered", "admin@envoytrade.com")
+	if !eng.IsKillSwitchEngaged() {
+		t.Fatal("expected kill switch to be engaged")
+	}
+	st = eng.KillSwitchStatus()
+	if !st.Engaged || st.Reason != "Emergency circuit breaker triggered" || st.EngagedBy != "admin@envoytrade.com" {
+		t.Fatalf("unexpected kill switch status: %+v", st)
+	}
+
+	fill1 := domain.MasterFill{
+		ID:              101,
+		MasterID:        masterID,
+		BrokerOrderID:   "BO-KILL-1",
+		Tradingsymbol:   "RELIANCE",
+		Exchange:        "NSE",
+		TransactionType: "BUY",
+		FilledQuantity:  10,
+		Status:          "COMPLETE",
+		OrderTimestamp:  time.Now(),
+	}
+
+	// Should drop fan-out without dispatching to followers
+	if err := eng.HandleMasterFill(context.Background(), fill1); err != nil {
+		t.Fatalf("HandleMasterFill failed: %v", err)
+	}
+	if len(disp.dispatched) != 0 {
+		t.Fatalf("expected 0 dispatched jobs when kill switch engaged, got %d", len(disp.dispatched))
+	}
+	if len(store.setMasterFillDispatchState) != 1 || store.setMasterFillDispatchState[0] != domain.DispatchDispatched {
+		t.Fatalf("expected master fill 101 to be marked dispatched, got %+v", store.setMasterFillDispatchState)
+	}
+
+	// Disengage kill switch
+	eng.SetKillSwitch(false, "", "admin@envoytrade.com")
+	if eng.IsKillSwitchEngaged() {
+		t.Fatal("expected kill switch to be disengaged")
+	}
+
+	fill2 := domain.MasterFill{
+		ID:              102,
+		MasterID:        masterID,
+		BrokerOrderID:   "BO-KILL-2",
+		Tradingsymbol:   "RELIANCE",
+		Exchange:        "NSE",
+		TransactionType: "BUY",
+		FilledQuantity:  10,
+		Status:          "COMPLETE",
+		OrderTimestamp:  time.Now(),
+	}
+	if err := eng.HandleMasterFill(context.Background(), fill2); err != nil {
+		t.Fatalf("HandleMasterFill failed: %v", err)
+	}
+	if len(disp.dispatched) != 1 {
+		t.Fatalf("expected 1 dispatched job after kill switch disengaged, got %d", len(disp.dispatched))
+	}
+}
+
+type fakeExecutionRecorder struct {
+	mu     sync.Mutex
+	events []domain.ExecutionEvent
+}
+
+func (f *fakeExecutionRecorder) Record(event domain.ExecutionEvent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+}
+
+func TestHandleMasterFill_RecordsExecutionEvent(t *testing.T) {
+	store := newMockEngineStore()
+	disp := newMockDispatcher()
+	eng := engine.New(store, disp)
+
+	rec := &fakeExecutionRecorder{}
+	eng.ExecutionRecorder = rec
+
+	masterID := uuid.New()
+	follower1 := uuid.New()
+	follower2 := uuid.New()
+
+	store.followLinks = []domain.FollowLink{
+		{
+			MasterID:    masterID,
+			FollowerID:  follower1,
+			CloneFactor: decimal.NewFromInt(1),
+			Enabled:     true,
+		},
+		{
+			MasterID:    masterID,
+			FollowerID:  follower2,
+			CloneFactor: decimal.NewFromFloat(0.1), // 10 qty * 0.1 = 1, but lot size is 50 -> 0 qty (skipped)
+			Enabled:     true,
+		},
+	}
+	store.lotSizes["NSE:NIFTY"] = 50
+
+	fill := domain.MasterFill{
+		ID:              999,
+		MasterID:        masterID,
+		BrokerOrderID:   "BO-999",
+		Tradingsymbol:   "NIFTY",
+		Exchange:        "NSE",
+		TransactionType: "BUY",
+		OrderType:       "MARKET",
+		Price:           decimal.NewFromInt(0),
+		AveragePrice:    decimal.NewFromFloat(22500.50),
+		FilledQuantity:  10,
+		Status:          "COMPLETE",
+		OrderTimestamp:  time.Now(),
+	}
+
+	if err := eng.HandleMasterFill(context.Background(), fill); err != nil {
+		t.Fatalf("HandleMasterFill failed: %v", err)
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.events) != 1 {
+		t.Fatalf("expected 1 recorded event, got %d", len(rec.events))
+	}
+
+	ev := rec.events[0]
+	if ev.Tradingsymbol != "NIFTY" || ev.Exchange != "NSE" || ev.TransactionType != "BUY" {
+		t.Errorf("unexpected event symbol/exchange: %+v", ev)
+	}
+	if ev.MasterQty != 10 {
+		t.Errorf("expected masterQty 10, got %d", ev.MasterQty)
+	}
+	if ev.Price != 22500.50 {
+		t.Errorf("expected price 22500.50, got %f", ev.Price)
+	}
+	if ev.FollowersCount != 1 {
+		t.Errorf("expected followersCount 1, got %d", ev.FollowersCount)
+	}
+	if ev.SkippedCount != 1 {
+		t.Errorf("expected skippedCount 1, got %d", ev.SkippedCount)
+	}
+	if ev.LatencyMs < 0 {
+		t.Errorf("expected latencyMs >= 0, got %d", ev.LatencyMs)
+	}
+}
+
+
+

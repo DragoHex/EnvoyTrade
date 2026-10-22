@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/mail"
 	"os"
@@ -18,8 +19,10 @@ import (
 )
 
 const (
-	sessionCookieName = "envoytrade_session"
-	sessionDuration   = 24 * time.Hour
+	sessionCookieName  = "envoytrade_session"
+	sessionDuration    = 3 * 24 * time.Hour // 3 days sliding idle timeout
+	maxSessionDuration = 7 * 24 * time.Hour // 7 days hard absolute ceiling
+	sessionTouchWindow = 1 * time.Hour      // database touch throttle
 )
 
 var (
@@ -51,6 +54,7 @@ type userResponse struct {
 	Address   string `json:"address"`
 	GSTNumber string `json:"gstNumber"`
 	Role      string `json:"role"`
+	Active    bool   `json:"active"`
 }
 
 func toUserResponse(u *domain.User) userResponse {
@@ -63,6 +67,7 @@ func toUserResponse(u *domain.User) userResponse {
 		Address:   u.Address,
 		GSTNumber: u.GSTNumber,
 		Role:      u.Role,
+		Active:    u.Active,
 	}
 }
 
@@ -125,12 +130,12 @@ func (h *handlers) postRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(sessionDuration)
-	if err := h.store.CreateSession(r.Context(), tokenHash, userID, r.RemoteAddr, r.UserAgent(), expiresAt); err != nil {
+	if err := h.store.CreateSession(r.Context(), tokenHash, userID, clientIP(r), r.UserAgent(), expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save session")
 		return
 	}
 
-	setSessionCookie(w, r, plainToken, sessionDuration)
+	setSessionCookie(w, r, plainToken, maxSessionDuration)
 
 	createdUser := &domain.User{
 		ID:       userID,
@@ -138,6 +143,7 @@ func (h *handlers) postRegister(w http.ResponseWriter, r *http.Request) {
 		Username: req.Username,
 		Name:     req.Name,
 		Role:     "user",
+		Active:   true,
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -179,6 +185,11 @@ func (h *handlers) postLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !user.Active {
+		writeError(w, http.StatusForbidden, "Your account has been suspended. Please contact your administrator.")
+		return
+	}
+
 	plainToken, tokenHash, err := auth.GenerateSessionToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate session")
@@ -186,12 +197,12 @@ func (h *handlers) postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(sessionDuration)
-	if err := h.store.CreateSession(r.Context(), tokenHash, user.ID, r.RemoteAddr, r.UserAgent(), expiresAt); err != nil {
+	if err := h.store.CreateSession(r.Context(), tokenHash, user.ID, clientIP(r), r.UserAgent(), expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save session")
 		return
 	}
 
-	setSessionCookie(w, r, plainToken, sessionDuration)
+	setSessionCookie(w, r, plainToken, maxSessionDuration)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":  toUserResponse(user),
@@ -320,6 +331,7 @@ func (h *handlers) putUserProfile(w http.ResponseWriter, r *http.Request) {
 			Address:   req.Address,
 			GSTNumber: req.GSTNumber,
 			Role:      user.Role,
+			Active:    user.Active,
 		}
 	}
 
@@ -430,3 +442,23 @@ func extractToken(r *http.Request) string {
 	}
 	return ""
 }
+
+// clientIP extracts a clean client IP from proxy headers or remote address, stripping any ephemeral port.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		ip := strings.TrimSpace(parts[0])
+		if ip != "" {
+			return ip
+		}
+	}
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+

@@ -170,7 +170,7 @@ func (q *Queries) GetSessionWithUser(ctx context.Context, tokenHash string) (Get
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, created_at, updated_at
+SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, active, created_at, updated_at
 FROM users
 WHERE LOWER(email) = LOWER($1)
 `
@@ -187,6 +187,7 @@ type GetUserByEmailRow struct {
 	TotpSecret   *string
 	TotpEnabled  bool
 	Role         string
+	Active       bool
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -206,6 +207,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (GetUserByEm
 		&i.TotpSecret,
 		&i.TotpEnabled,
 		&i.Role,
+		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -213,7 +215,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (GetUserByEm
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, created_at, updated_at
+SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, active, created_at, updated_at
 FROM users
 WHERE id = $1
 `
@@ -230,6 +232,7 @@ type GetUserByIDRow struct {
 	TotpSecret   *string
 	TotpEnabled  bool
 	Role         string
+	Active       bool
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -249,6 +252,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.TotpSecret,
 		&i.TotpEnabled,
 		&i.Role,
+		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -256,7 +260,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, created_at, updated_at
+SELECT id, email, username, name, phone, address, gst_number, password_hash, totp_secret, totp_enabled, role, active, created_at, updated_at
 FROM users
 WHERE LOWER(username) = LOWER($1)
 `
@@ -273,6 +277,7 @@ type GetUserByUsernameRow struct {
 	TotpSecret   *string
 	TotpEnabled  bool
 	Role         string
+	Active       bool
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -292,6 +297,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, lower string) (GetUserB
 		&i.TotpSecret,
 		&i.TotpEnabled,
 		&i.Role,
+		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

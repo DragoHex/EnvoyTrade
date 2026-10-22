@@ -51,3 +51,14 @@ func (q *Queue[T]) Consume(ctx context.Context, fn func(context.Context, T) erro
 		}
 	}
 }
+
+// Len returns the number of items currently in the queue buffer.
+func (q *Queue[T]) Len() int {
+	return len(q.ch)
+}
+
+// Cap returns the total buffer capacity.
+func (q *Queue[T]) Cap() int {
+	return cap(q.ch)
+}
+
