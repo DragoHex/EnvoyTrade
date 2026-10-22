@@ -584,10 +584,15 @@ func TestAdminUsersCRUDAndSessions(t *testing.T) {
 	}
 
 	// 6. GET /api/v1/admin/users/{id}/sessions
+	testIP := "192.168.1.50"
+	testUA := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
 	store.userSessions = []domain.Session{
 		{
 			ID:         10,
+			TokenHash:  "super-secret-token-hash-must-not-leak",
 			UserID:     u2,
+			IPAddress:  &testIP,
+			UserAgent:  &testUA,
 			ExpiresAt:  time.Now().Add(12 * time.Hour),
 			CreatedAt:  time.Now().Add(-1 * time.Hour),
 			LastSeenAt: time.Now(),
@@ -598,6 +603,38 @@ func TestAdminUsersCRUDAndSessions(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 on list sessions, got %d", rec.Code)
+	}
+
+	var rawSessionsResp struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&rawSessionsResp); err != nil {
+		t.Fatalf("failed to decode sessions response: %v", err)
+	}
+	if len(rawSessionsResp.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(rawSessionsResp.Sessions))
+	}
+	s0 := rawSessionsResp.Sessions[0]
+	if _, ok := s0["TokenHash"]; ok {
+		t.Errorf("expected TokenHash to be omitted from JSON, but found it")
+	}
+	if _, ok := s0["tokenHash"]; ok {
+		t.Errorf("expected tokenHash to be omitted from JSON, but found it")
+	}
+	if ip, ok := s0["ipAddress"].(string); !ok || ip != testIP {
+		t.Errorf("expected ipAddress %q, got %v", testIP, s0["ipAddress"])
+	}
+	if ua, ok := s0["userAgent"].(string); !ok || ua != testUA {
+		t.Errorf("expected userAgent %q, got %v", testUA, s0["userAgent"])
+	}
+	if _, ok := s0["expiresAt"].(string); !ok {
+		t.Errorf("expected expiresAt string, got %v", s0["expiresAt"])
+	}
+	if _, ok := s0["lastSeenAt"].(string); !ok {
+		t.Errorf("expected lastSeenAt string, got %v", s0["lastSeenAt"])
+	}
+	if _, ok := s0["createdAt"].(string); !ok {
+		t.Errorf("expected createdAt string, got %v", s0["createdAt"])
 	}
 
 	// 7. DELETE /api/v1/admin/users/{id}/sessions

@@ -48,14 +48,14 @@ type UserSummary struct {
 
 // Session represents an active session identified by the SHA-256 hash of its token.
 type Session struct {
-	ID         int64
-	TokenHash  string
-	UserID     uuid.UUID
-	IPAddress  *string
-	UserAgent  *string
-	ExpiresAt  time.Time
-	CreatedAt  time.Time
-	LastSeenAt time.Time
+	ID         int64     `json:"id"`
+	TokenHash  string    `json:"-"`
+	UserID     uuid.UUID `json:"userId"`
+	IPAddress  *string   `json:"ipAddress,omitempty"`
+	UserAgent  *string   `json:"userAgent,omitempty"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LastSeenAt time.Time `json:"lastSeenAt"`
 }
 
 // SessionWithUser is a combined view of a session and its owning user.

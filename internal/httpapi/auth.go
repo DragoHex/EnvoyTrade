@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/mail"
 	"os"
@@ -127,7 +128,7 @@ func (h *handlers) postRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(sessionDuration)
-	if err := h.store.CreateSession(r.Context(), tokenHash, userID, r.RemoteAddr, r.UserAgent(), expiresAt); err != nil {
+	if err := h.store.CreateSession(r.Context(), tokenHash, userID, clientIP(r), r.UserAgent(), expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save session")
 		return
 	}
@@ -194,7 +195,7 @@ func (h *handlers) postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(sessionDuration)
-	if err := h.store.CreateSession(r.Context(), tokenHash, user.ID, r.RemoteAddr, r.UserAgent(), expiresAt); err != nil {
+	if err := h.store.CreateSession(r.Context(), tokenHash, user.ID, clientIP(r), r.UserAgent(), expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save session")
 		return
 	}
@@ -439,3 +440,23 @@ func extractToken(r *http.Request) string {
 	}
 	return ""
 }
+
+// clientIP extracts a clean client IP from proxy headers or remote address, stripping any ephemeral port.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		ip := strings.TrimSpace(parts[0])
+		if ip != "" {
+			return ip
+		}
+	}
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
