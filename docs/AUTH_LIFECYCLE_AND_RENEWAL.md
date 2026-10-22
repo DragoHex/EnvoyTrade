@@ -136,3 +136,10 @@ func NextKiteExpiry(now time.Time) time.Time {
 
 - Any token renewed at 06:15 AM IST on day $D$ is valid until 06:00 AM IST on day $D+1$.
 - Any token renewed at 05:45 AM IST on day $D$ is valid until 06:00 AM IST on day $D$.
+
+---
+
+## 6. Related Documentation
+
+- For web dashboard and platform user authentication lifecycle, idle sliding timeout, and maximum ceiling rules, see [Platform User Session Lifecycle](USER_SESSION_LIFECYCLE.md).
+

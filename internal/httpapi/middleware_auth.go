@@ -52,8 +52,17 @@ func authMiddleware(next http.Handler, store AuthStore, logger *slog.Logger) htt
 			return
 		}
 
-		if sessWithUser.Session.ExpiresAt.Before(time.Now()) {
+		now := time.Now()
+
+		// 1. Sliding Idle Expiration: session expires_at must be in the future
+		if sessWithUser.Session.ExpiresAt.Before(now) {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		// 2. Absolute Hard Max Expiration: session cannot exceed maxSessionDuration from CreatedAt
+		if !sessWithUser.Session.CreatedAt.IsZero() && now.Sub(sessWithUser.Session.CreatedAt) >= maxSessionDuration {
+			writeError(w, http.StatusUnauthorized, "session expired")
 			return
 		}
 
@@ -62,9 +71,16 @@ func authMiddleware(next http.Handler, store AuthStore, logger *slog.Logger) htt
 			return
 		}
 
-		// Rolling session touch if older than 15 minutes
-		if time.Since(sessWithUser.Session.LastSeenAt) > 15*time.Minute {
-			_ = store.TouchSession(r.Context(), tokenHash, time.Now().Add(sessionDuration))
+		// 3. Rolling session touch if older than sessionTouchWindow (1 hour)
+		if now.Sub(sessWithUser.Session.LastSeenAt) > sessionTouchWindow {
+			newExpiry := now.Add(sessionDuration)
+			if !sessWithUser.Session.CreatedAt.IsZero() {
+				maxExpiry := sessWithUser.Session.CreatedAt.Add(maxSessionDuration)
+				if newExpiry.After(maxExpiry) {
+					newExpiry = maxExpiry
+				}
+			}
+			_ = store.TouchSession(r.Context(), tokenHash, newExpiry)
 		}
 
 		ctx := domain.ContextWithUser(r.Context(), &sessWithUser.User)

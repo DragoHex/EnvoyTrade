@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	sessionCookieName = "envoytrade_session"
-	sessionDuration   = 24 * time.Hour
+	sessionCookieName  = "envoytrade_session"
+	sessionDuration    = 3 * 24 * time.Hour // 3 days sliding idle timeout
+	maxSessionDuration = 7 * 24 * time.Hour // 7 days hard absolute ceiling
+	sessionTouchWindow = 1 * time.Hour      // database touch throttle
 )
 
 var (
@@ -133,7 +135,7 @@ func (h *handlers) postRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, r, plainToken, sessionDuration)
+	setSessionCookie(w, r, plainToken, maxSessionDuration)
 
 	createdUser := &domain.User{
 		ID:       userID,
@@ -200,7 +202,7 @@ func (h *handlers) postLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, r, plainToken, sessionDuration)
+	setSessionCookie(w, r, plainToken, maxSessionDuration)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":  toUserResponse(user),

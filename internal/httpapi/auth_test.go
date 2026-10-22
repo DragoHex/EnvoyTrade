@@ -622,3 +622,165 @@ func TestRouteProtection(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionLifecycleAndMaxExpiry(t *testing.T) {
+	store := newFullStubStore()
+	handler := httpapi.NewRouter(store, &stubActionEngine{})
+
+	// Register a test user
+	regBody, _ := json.Marshal(map[string]string{
+		"email":    "trader.expiry@example.com",
+		"username": "trader_expiry",
+		"password": "Password123!",
+		"name":     "Expiry Tester",
+	})
+	regReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(regBody))
+	regReq.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	handler.ServeHTTP(regRec, regReq)
+
+	if regRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on registration, got %d", regRec.Code)
+	}
+
+	var plainToken string
+	var sessionCookie *http.Cookie
+	for _, c := range regRec.Result().Cookies() {
+		if c.Name == "envoytrade_session" {
+			sessionCookie = c
+			plainToken = c.Value
+			break
+		}
+	}
+	if plainToken == "" {
+		t.Fatalf("session token not found in cookies")
+	}
+
+	tokenHash := auth.HashSessionToken(plainToken)
+
+	t.Run("registration sets 3-day initial expiry and 7-day cookie MaxAge", func(t *testing.T) {
+		// Cookie MaxAge should be 7 days (604800 seconds)
+		expectedCookieMaxAge := int((7 * 24 * time.Hour).Seconds())
+		if sessionCookie.MaxAge != expectedCookieMaxAge {
+			t.Errorf("expected cookie MaxAge %d (7 days), got %d", expectedCookieMaxAge, sessionCookie.MaxAge)
+		}
+
+		sess := store.sessions[tokenHash]
+		if sess == nil {
+			t.Fatalf("session not found in store")
+		}
+
+		// Initial expires_at should be ~3 days from now
+		expectedExpiry := time.Now().Add(3 * 24 * time.Hour)
+		diff := sess.Session.ExpiresAt.Sub(expectedExpiry)
+		if diff < -5*time.Second || diff > 5*time.Second {
+			t.Errorf("expected initial expires_at around %v (3 days), got %v (diff: %v)", expectedExpiry, sess.Session.ExpiresAt, diff)
+		}
+	})
+
+	t.Run("requests within 1 hour touch window do not touch database", func(t *testing.T) {
+		sess := store.sessions[tokenHash]
+		originalLastSeen := time.Now().Add(-30 * time.Minute)
+		originalExpiry := time.Now().Add(2 * 24 * time.Hour)
+		sess.Session.LastSeenAt = originalLastSeen
+		sess.Session.ExpiresAt = originalExpiry
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "envoytrade_session", Value: plainToken})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 on /auth/me, got %d", rec.Code)
+		}
+
+		if !sess.Session.LastSeenAt.Equal(originalLastSeen) {
+			t.Errorf("expected LastSeenAt not to change within 1h throttle window, but changed from %v to %v", originalLastSeen, sess.Session.LastSeenAt)
+		}
+		if !sess.Session.ExpiresAt.Equal(originalExpiry) {
+			t.Errorf("expected ExpiresAt not to change within 1h throttle window, but changed from %v to %v", originalExpiry, sess.Session.ExpiresAt)
+		}
+	})
+
+	t.Run("requests after 1 hour extend session by 3 days", func(t *testing.T) {
+		sess := store.sessions[tokenHash]
+		// Created 2 hours ago, last seen 2 hours ago
+		sess.Session.CreatedAt = time.Now().Add(-2 * time.Hour)
+		sess.Session.LastSeenAt = time.Now().Add(-2 * time.Hour)
+		sess.Session.ExpiresAt = time.Now().Add(1 * time.Hour)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "envoytrade_session", Value: plainToken})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 on /auth/me, got %d", rec.Code)
+		}
+
+		expectedNewExpiry := time.Now().Add(3 * 24 * time.Hour)
+		diff := sess.Session.ExpiresAt.Sub(expectedNewExpiry)
+		if diff < -5*time.Second || diff > 5*time.Second {
+			t.Errorf("expected extended expires_at around %v (3 days), got %v (diff: %v)", expectedNewExpiry, sess.Session.ExpiresAt, diff)
+		}
+	})
+
+	t.Run("touch extension is capped at 7 days from CreatedAt", func(t *testing.T) {
+		sess := store.sessions[tokenHash]
+		// Session created 5 days ago, last seen 2 hours ago
+		createdAt := time.Now().Add(-5 * 24 * time.Hour)
+		sess.Session.CreatedAt = createdAt
+		sess.Session.LastSeenAt = time.Now().Add(-2 * time.Hour)
+		sess.Session.ExpiresAt = time.Now().Add(1 * 24 * time.Hour)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "envoytrade_session", Value: plainToken})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 on /auth/me, got %d", rec.Code)
+		}
+
+		// A 3-day extension from now would be day 8, but max ceiling is createdAt + 7 days
+		maxCeiling := createdAt.Add(7 * 24 * time.Hour)
+		diff := sess.Session.ExpiresAt.Sub(maxCeiling)
+		if diff < -5*time.Second || diff > 5*time.Second {
+			t.Errorf("expected expires_at capped at %v (createdAt + 7 days), got %v (diff: %v)", maxCeiling, sess.Session.ExpiresAt, diff)
+		}
+	})
+
+	t.Run("session past 7 days from CreatedAt is rejected with 401 even if active", func(t *testing.T) {
+		sess := store.sessions[tokenHash]
+		// Session created 7 days and 5 minutes ago
+		sess.Session.CreatedAt = time.Now().Add(-7*24*time.Hour - 5*time.Minute)
+		sess.Session.LastSeenAt = time.Now().Add(-5 * time.Minute)
+		sess.Session.ExpiresAt = time.Now().Add(1 * time.Hour)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "envoytrade_session", Value: plainToken})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for session exceeding 7 days, got %d", rec.Code)
+		}
+	})
+
+	t.Run("session idle past 3-day window is rejected with 401", func(t *testing.T) {
+		sess := store.sessions[tokenHash]
+		// Session created 2 days ago, but expires_at has passed
+		sess.Session.CreatedAt = time.Now().Add(-2 * 24 * time.Hour)
+		sess.Session.LastSeenAt = time.Now().Add(-4 * 24 * time.Hour)
+		sess.Session.ExpiresAt = time.Now().Add(-1 * time.Minute)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "envoytrade_session", Value: plainToken})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for expired session, got %d", rec.Code)
+		}
+	})
+}
