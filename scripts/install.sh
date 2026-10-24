@@ -147,6 +147,17 @@ if [ -f "${MIGRATE_SRC}" ]; then
     run_privileged chmod 755 /usr/local/bin/envoytrade-db-migrate
 fi
 
+# Restore orders script source
+RESTORE_SRC="${SCRIPT_DIR}/restore_orders.sh"
+if [ ! -f "${RESTORE_SRC}" ]; then
+    RESTORE_SRC="${SCRIPT_DIR}/../scripts/restore_orders.sh"
+fi
+if [ -f "${RESTORE_SRC}" ]; then
+    echo "--> Installing order restore script to /usr/local/bin/envoytrade-restore-orders..."
+    run_privileged cp "${RESTORE_SRC}" /usr/local/bin/envoytrade-restore-orders
+    run_privileged chmod 755 /usr/local/bin/envoytrade-restore-orders
+fi
+
 # 3. OS-Specific Installation
 if [ "${OS}" = "Darwin" ]; then
     # ==========================================

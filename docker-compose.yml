@@ -39,6 +39,7 @@ services:
       LOG_TO_STDOUT: "true"
     volumes:
       - envoytrade-logs:/var/log/envoytrade
+      - ./backups:/var/backups/envoytrade
     networks:
       - envoytrade-net
 
