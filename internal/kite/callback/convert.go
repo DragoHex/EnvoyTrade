@@ -11,16 +11,9 @@ import (
 )
 
 // IsTerminal reports whether a Kite order status is one fan-out and
-// status-tracking care about. Intermediate states (OPEN, TRIGGER PENDING,
-// PUT ORDER REQ RECEIVED, ...) are dropped by both delivery paths — only a
-// terminal order is a signal or a final status worth recording.
+// status-tracking care about. Delegates to domain.IsTerminal.
 func IsTerminal(status string) bool {
-	switch status {
-	case domain.TerminalComplete, domain.TerminalRejected, domain.TerminalCancelled:
-		return true
-	default:
-		return false
-	}
+	return domain.IsTerminal(status)
 }
 
 // ToMasterFill converts a Kite order update into the signal the engine
