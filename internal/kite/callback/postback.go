@@ -3,6 +3,7 @@ package callback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -67,7 +68,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	id, role, apiSecret, err := h.Accounts.AccountByBrokerUserID(ctx, p.UserID)
+	var id uuid.UUID
+	var role, apiSecret string
+	var err error
+	if bal, ok := h.Accounts.(interface {
+		AccountByBrokerAndUserID(ctx context.Context, brokerName, brokerUserID string) (uuid.UUID, string, string, error)
+	}); ok {
+		id, role, apiSecret, err = bal.AccountByBrokerAndUserID(ctx, "kite", p.UserID)
+		if errors.Is(err, domain.ErrNotFound) {
+			id, role, apiSecret, err = h.Accounts.AccountByBrokerUserID(ctx, p.UserID)
+		}
+	} else {
+		id, role, apiSecret, err = h.Accounts.AccountByBrokerUserID(ctx, p.UserID)
+	}
 	if err != nil {
 		h.log().Warn("postback: unknown account, dropping", "user_id", p.UserID, "error", err)
 		w.WriteHeader(http.StatusOK)

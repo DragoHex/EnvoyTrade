@@ -70,6 +70,17 @@ const (
 	TerminalDeadLettered = "DEAD_LETTERED"
 )
 
+// IsTerminal reports whether an order status is terminal (COMPLETE, REJECTED, CANCELLED).
+// Intermediate states (OPEN, TRIGGER PENDING, etc.) are non-terminal.
+func IsTerminal(status string) bool {
+	switch status {
+	case TerminalComplete, TerminalRejected, TerminalCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // FollowerOrder is one row per (master_fill, follower) pair, created
 // before any broker call is attempted so an idempotency tag exists prior
 // to the order ever going live.

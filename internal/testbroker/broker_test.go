@@ -194,3 +194,79 @@ func TestBroker_GetPositions_OvernightZeroM2M(t *testing.T) {
 	}
 }
 
+func TestBroker_GetOrders_And_History(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/orders" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"status": "success",
+			"data": [
+				{
+					"order_id": "TB_ORD_1",
+					"tradingsymbol": "INFY",
+					"exchange": "NSE",
+					"transaction_type": "BUY",
+					"product": "CNC",
+					"order_type": "LIMIT",
+					"status": "COMPLETE",
+					"quantity": 10,
+					"filled_quantity": 10,
+					"price": 1400.0,
+					"average_price": 1400.0,
+					"order_timestamp": "2026-10-24 10:00:00"
+				},
+				{
+					"order_id": "TB_ORD_2",
+					"tradingsymbol": "TCS",
+					"exchange": "NSE",
+					"transaction_type": "SELL",
+					"product": "MIS",
+					"order_type": "MARKET",
+					"status": "OPEN",
+					"quantity": 5,
+					"filled_quantity": 0,
+					"price": 0.0,
+					"average_price": 0.0,
+					"order_timestamp": "2026-10-24 10:05:00"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	b := NewLiveBroker("key1", "tok1", server.URL, nil)
+
+	// Test GetOrders
+	orders, err := b.GetOrders(context.Background())
+	if err != nil {
+		t.Fatalf("GetOrders failed: %v", err)
+	}
+	if len(orders) != 2 {
+		t.Fatalf("expected 2 orders, got %d", len(orders))
+	}
+	if orders[0].OrderID != "TB_ORD_1" || orders[0].Status != "COMPLETE" {
+		t.Errorf("orders[0] mismatch: %+v", orders[0])
+	}
+
+	// Test GetOrderHistory
+	hist, err := b.GetOrderHistory(context.Background(), "TB_ORD_1")
+	if err != nil {
+		t.Fatalf("GetOrderHistory failed: %v", err)
+	}
+	if len(hist) != 1 || hist[0].OrderID != "TB_ORD_1" {
+		t.Fatalf("expected 1 history item for TB_ORD_1, got %+v", hist)
+	}
+
+	// Test GetOpenOrders
+	openOrders, err := b.GetOpenOrders(context.Background())
+	if err != nil {
+		t.Fatalf("GetOpenOrders failed: %v", err)
+	}
+	if len(openOrders) != 1 || openOrders[0].OrderID != "TB_ORD_2" {
+		t.Fatalf("expected 1 open order (TB_ORD_2), got %+v", openOrders)
+	}
+}
+

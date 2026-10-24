@@ -24,13 +24,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"envoytrade/frontend"
 	"envoytrade/internal/archive"
 	"envoytrade/internal/broker"
+	unifiedcallback "envoytrade/internal/callback"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
 	"envoytrade/internal/httpapi"
@@ -49,7 +49,6 @@ import (
 	"envoytrade/internal/worker"
 
 	"github.com/google/uuid"
-	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
 func main() {
@@ -315,10 +314,7 @@ func run(logger *slog.Logger) error {
 		syncer:   rawSyncer,
 	}
 	accountPool := broker.NewAccountPool(brokerResolver)
-	evicter := &compoundEvicter{
-		pool:        accountPool,
-		kiteClients: globalKiteClients,
-	}
+	evicter := accountPool
 
 	workerPool := worker.NewPool()
 	workerPool.Logger = logger.With("component", "worker_pool")
@@ -411,19 +407,24 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Postback HTTP handler (mounted at /broker-callback)
-	postbackHandler := &callback.Handler{
+	// Postback HTTP handler (mounted at /broker-callback and /broker-callback/)
+	kitePostback := &callback.Handler{
 		Accounts:        store,
 		MasterFills:     masterFillQueue,
 		FollowerUpdates: orderUpdateQueue,
-		Logger:          logger.With("component", "postback"),
+		Logger:          logger.With("component", "kite_postback"),
 	}
+
+	postbackRouter := unifiedcallback.NewAdaptiveRouter()
+	postbackRouter.Register("kite", kitePostback)
+	postbackRouter.Register("zerodha", kitePostback)
+	postbackRouter.SetDefault(kitePostback)
 
 	// Reconciliation poller
 	poller := recon.NewPoller(
 		store,
-		&serverMasterReader{store: store},
-		&serverFollowerReader{store: store},
+		&serverMasterReader{pool: accountPool},
+		&serverFollowerReader{pool: accountPool},
 		masterFillConsumer,
 		nil,
 		recon.DefaultConfig(),
@@ -535,7 +536,7 @@ func run(logger *slog.Logger) error {
 
 	var routerOpts []httpapi.Option
 	routerOpts = append(routerOpts,
-		httpapi.WithPostbackHandler(postbackHandler),
+		httpapi.WithPostbackHandler(postbackRouter),
 		httpapi.WithLogger(logger.With("component", "httpapi")),
 		httpapi.WithPortfolioSyncer(syncer),
 		httpapi.WithTickerManager(tickerManager),
@@ -758,89 +759,6 @@ func handleTokenRefreshed(
 	return nil
 }
 
-func kiteClientForAccount(ctx context.Context, store *postgres.Store, authInfo domain.AccountAuthInfo) (*kiteconnect.Client, error) {
-	if authInfo.ApiKey == "" || authInfo.AccessToken == "" {
-		return nil, nil
-	}
-	kc := kiteconnect.New(authInfo.ApiKey)
-	kc.SetAccessToken(authInfo.AccessToken)
-	if strings.EqualFold(authInfo.Broker, "testbroker") {
-		tbURL := os.Getenv("TESTBROKER_URL")
-		if tbURL == "" {
-			tbURL = "http://localhost:8089"
-		}
-		kc.SetBaseURI(tbURL)
-		return kc, nil
-	}
-	if authInfo.IPAddress != "" {
-		pIP, err := store.ProxyIPByAddress(ctx, authInfo.IPAddress)
-		if err == nil {
-			proxyCfg := kite.ProxyConfig{
-				Scheme:       "https",
-				Host:         pIP.Host,
-				Port:         pIP.Port,
-				ClientID:     pIP.Username,
-				ClientSecret: pIP.Password,
-			}
-			if httpClient, err := kite.RESTClientFor(proxyCfg); err == nil {
-				kc.SetHTTPClient(httpClient)
-			}
-		}
-	}
-	return kc, nil
-}
-
-type kiteClientPool struct {
-	mu      sync.RWMutex
-	clients map[uuid.UUID]*kiteconnect.Client
-}
-
-var globalKiteClients = &kiteClientPool{
-	clients: make(map[uuid.UUID]*kiteconnect.Client),
-}
-
-func (p *kiteClientPool) Evict(id uuid.UUID) {
-	p.mu.Lock()
-	delete(p.clients, id)
-	p.mu.Unlock()
-}
-
-func (p *kiteClientPool) GetOrCreate(ctx context.Context, store *postgres.Store, id uuid.UUID, authInfo domain.AccountAuthInfo) (*kiteconnect.Client, error) {
-	p.mu.RLock()
-	kc, ok := p.clients[id]
-	p.mu.RUnlock()
-	if ok && kc != nil {
-		return kc, nil
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if kc, ok = p.clients[id]; ok && kc != nil {
-		return kc, nil
-	}
-
-	fresh, err := kiteClientForAccount(ctx, store, authInfo)
-	if err != nil || fresh == nil {
-		return nil, err
-	}
-	p.clients[id] = fresh
-	return fresh, nil
-}
-
-type compoundEvicter struct {
-	pool        *broker.AccountPool
-	kiteClients *kiteClientPool
-}
-
-func (e *compoundEvicter) Evict(id uuid.UUID) {
-	if e.pool != nil {
-		e.pool.Evict(id)
-	}
-	if e.kiteClients != nil {
-		e.kiteClients.Evict(id)
-	}
-}
-
 func logProcessLimits(logger *slog.Logger) {
 	var rlimit syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit); err == nil {
@@ -852,47 +770,35 @@ func logProcessLimits(logger *slog.Logger) {
 }
 
 type serverMasterReader struct {
-	store *postgres.Store
+	pool *broker.AccountPool
 }
 
-func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error) {
-	authInfo, err := r.store.AccountAuthInfo(ctx, masterID)
+func (r *serverMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]broker.Order, error) {
+	b, err := r.pool.ResolveBroker(ctx, masterID)
 	if err != nil {
 		return nil, err
 	}
-	kc, err := globalKiteClients.GetOrCreate(ctx, r.store, masterID, authInfo)
-	if err != nil || kc == nil {
-		return nil, err
-	}
-	return kc.GetOrders()
+	return b.GetOrders(ctx)
 }
 
 type serverFollowerReader struct {
-	store *postgres.Store
+	pool *broker.AccountPool
 }
 
-func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]kiteconnect.Order, error) {
-	authInfo, err := r.store.AccountAuthInfo(ctx, followerID)
+func (r *serverFollowerReader) GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]broker.Order, error) {
+	b, err := r.pool.ResolveBroker(ctx, followerID)
 	if err != nil {
 		return nil, err
 	}
-	kc, err := globalKiteClients.GetOrCreate(ctx, r.store, followerID, authInfo)
-	if err != nil || kc == nil {
-		return nil, err
-	}
-	return kc.GetOrderHistory(brokerOrderID)
+	return b.GetOrderHistory(ctx, brokerOrderID)
 }
 
-func (r *serverFollowerReader) GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]kiteconnect.Order, error) {
-	authInfo, err := r.store.AccountAuthInfo(ctx, followerID)
+func (r *serverFollowerReader) GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]broker.Order, error) {
+	b, err := r.pool.ResolveBroker(ctx, followerID)
 	if err != nil {
 		return nil, err
 	}
-	kc, err := globalKiteClients.GetOrCreate(ctx, r.store, followerID, authInfo)
-	if err != nil || kc == nil {
-		return nil, err
-	}
-	return kc.GetOrders()
+	return b.GetOrders(ctx)
 }
 
 // setupLogger initializes structured slog output to a file (default: /var/log/envoytrade/app.log)

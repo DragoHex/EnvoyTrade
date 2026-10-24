@@ -10,23 +10,22 @@ import (
 	"log/slog"
 	"time"
 
+	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
-	"envoytrade/internal/kite/callback"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
 // MasterOrderReader fetches recent orders for a master account via REST.
 type MasterOrderReader interface {
-	GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error)
+	GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]broker.Order, error)
 }
 
 // FollowerOrderReader fetches transition history and orders for a follower's order via REST.
 type FollowerOrderReader interface {
-	GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]kiteconnect.Order, error)
-	GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]kiteconnect.Order, error)
+	GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]broker.Order, error)
+	GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]broker.Order, error)
 }
 
 // MasterFillConsumer handles a master fill (idempotently inserting and fanning out).
@@ -223,9 +222,9 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 		}
 
 		latest := history[len(history)-1]
-		if callback.IsTerminal(latest.Status) {
-			avgPrice := decimal.NewFromFloat(latest.AveragePrice)
-			_, err := p.store.UpdateFollowerOrderStatus(ctx, fo.BrokerOrderID, latest.Status, int(latest.FilledQuantity), avgPrice)
+		if domain.IsTerminal(latest.Status) {
+			avgPrice := latest.AveragePrice
+			_, err := p.store.UpdateFollowerOrderStatus(ctx, fo.BrokerOrderID, latest.Status, latest.FilledQuantity, avgPrice)
 			if err != nil {
 				p.alerter.Alert(ctx, "failed to update resolved follower order status", map[string]any{
 					"follower_order_id": fo.ID,
@@ -244,7 +243,7 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 			}
 
 			// Check drift
-			if latest.Status != domain.TerminalComplete || int(latest.FilledQuantity) != fo.IntendedQty {
+			if latest.Status != domain.TerminalComplete || latest.FilledQuantity != fo.IntendedQty {
 				p.alerter.Alert(ctx, "drift detected on follower order", map[string]any{
 					"follower_order_id": fo.ID,
 					"follower_id":       fo.FollowerID,
@@ -297,17 +296,17 @@ func (p *Poller) ReconcileMaster(ctx context.Context, masterID uuid.UUID) error 
 	}
 
 	for _, o := range orders {
-		if !callback.IsTerminal(o.Status) {
+		if !domain.IsTerminal(o.Status) {
 			continue
 		}
-		if !o.OrderTimestamp.Time.IsZero() && o.OrderTimestamp.Time.Before(windowStart) {
+		if !o.OrderTimestamp.IsZero() && o.OrderTimestamp.Before(windowStart) {
 			continue
 		}
-		exists, err := p.store.MasterFillExists(ctx, masterID, o.OrderID, int(o.FilledQuantity), o.Status)
+		exists, err := p.store.MasterFillExists(ctx, masterID, o.OrderID, o.FilledQuantity, o.Status)
 		if err == nil && exists {
 			continue
 		}
-		fill := callback.ToMasterFill(o, masterID)
+		fill := o.ToMasterFill(masterID)
 		if err := p.masterConsumer.Handle(ctx, fill); err != nil {
 			p.alerter.Alert(ctx, "failed to handle master fill from recon", map[string]any{
 				"master_id":       masterID,
@@ -337,17 +336,17 @@ func (p *Poller) ReconcileFollower(ctx context.Context, followerID uuid.UUID) er
 	}
 
 	for _, o := range orders {
-		if !callback.IsTerminal(o.Status) {
+		if !domain.IsTerminal(o.Status) {
 			continue
 		}
-		if !o.OrderTimestamp.Time.IsZero() && o.OrderTimestamp.Time.Before(windowStart) {
+		if !o.OrderTimestamp.IsZero() && o.OrderTimestamp.Before(windowStart) {
 			continue
 		}
 		exists, err := p.store.FollowerOrderTerminalExists(ctx, followerID, o.OrderID)
 		if err == nil && exists {
 			continue
 		}
-		upd := callback.ToOrderUpdate(o, followerID)
+		upd := o.ToOrderUpdate(followerID)
 		if err := p.FollowerConsumer.Handle(ctx, upd); err != nil {
 			p.alerter.Alert(ctx, "failed to handle follower order from recon", map[string]any{
 				"follower_id":     followerID,

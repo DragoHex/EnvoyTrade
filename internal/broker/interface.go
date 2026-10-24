@@ -11,5 +11,7 @@ type Broker interface {
 	PlaceOrder(ctx context.Context, variety string, params OrderParams) (OrderResponse, error)
 	GetPositions(ctx context.Context) ([]Position, error)
 	GetOpenOrders(ctx context.Context) ([]Order, error)
+	GetOrders(ctx context.Context) ([]Order, error)
+	GetOrderHistory(ctx context.Context, orderID string) ([]Order, error)
 	CancelOrder(ctx context.Context, variety, orderID string) (OrderResponse, error)
 }

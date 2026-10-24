@@ -2,11 +2,13 @@ package kite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
 
+	"github.com/shopspring/decimal"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
@@ -70,22 +72,52 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 	return broker.OrderResponse{OrderID: resp.OrderID}, nil
 }
 
-// GetOrders retrieves all orders from the broker account.
-func (b *Broker) GetOrders(ctx context.Context) ([]kiteconnect.Order, error) {
+func toBrokerOrder(o kiteconnect.Order) broker.Order {
+	raw, _ := json.Marshal(o)
+	return broker.Order{
+		OrderID:         o.OrderID,
+		Exchange:        o.Exchange,
+		Tradingsymbol:   o.TradingSymbol,
+		TransactionType: o.TransactionType,
+		Product:         o.Product,
+		OrderType:       o.OrderType,
+		Status:          o.Status,
+		StatusMessage:   o.StatusMessage,
+		Quantity:        int(o.Quantity),
+		FilledQuantity:  int(o.FilledQuantity),
+		Price:           decimal.NewFromFloat(o.Price),
+		TriggerPrice:    decimal.NewFromFloat(o.TriggerPrice),
+		AveragePrice:    decimal.NewFromFloat(o.AveragePrice),
+		OrderTimestamp:  o.OrderTimestamp.Time,
+		Tag:             o.Tag,
+		RawPayload:      raw,
+	}
+}
+
+// GetOrders retrieves all orders from the broker account mapped to broker-agnostic Order types.
+func (b *Broker) GetOrders(ctx context.Context) ([]broker.Order, error) {
 	orders, err := b.api.GetOrders()
 	if err != nil {
 		return nil, fmt.Errorf("kite get orders: %w", err)
 	}
-	return orders, nil
+	out := make([]broker.Order, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, toBrokerOrder(o))
+	}
+	return out, nil
 }
 
-// GetOrderHistory retrieves transition history for an order.
-func (b *Broker) GetOrderHistory(ctx context.Context, orderID string) ([]kiteconnect.Order, error) {
+// GetOrderHistory retrieves transition history for an order mapped to broker-agnostic Order types.
+func (b *Broker) GetOrderHistory(ctx context.Context, orderID string) ([]broker.Order, error) {
 	history, err := b.api.GetOrderHistory(orderID)
 	if err != nil {
 		return nil, fmt.Errorf("kite get order history: %w", err)
 	}
-	return history, nil
+	out := make([]broker.Order, 0, len(history))
+	for _, o := range history {
+		out = append(out, toBrokerOrder(o))
+	}
+	return out, nil
 }
 
 // GetPositions retrieves user net positions mapped to broker-agnostic Position types.
@@ -123,14 +155,7 @@ func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
 	var out []broker.Order
 	for _, o := range orders {
 		if o.Status == "OPEN" || o.Status == "TRIGGER PENDING" {
-			out = append(out, broker.Order{
-				OrderID:        o.OrderID,
-				Exchange:       o.Exchange,
-				Tradingsymbol:  o.TradingSymbol,
-				Status:         o.Status,
-				Quantity:       int(o.Quantity),
-				FilledQuantity: int(o.FilledQuantity),
-			})
+			out = append(out, toBrokerOrder(o))
 		}
 	}
 	return out, nil

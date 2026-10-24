@@ -259,6 +259,12 @@ flowchart LR
   PN -.-> SelfCheck
 ```
 
+### Two-Tier Connection Pooling & Keep-Alive Warming
+* **Tier 1 (`broker.TransportPool`)**: Caches `*http.Transport` per customer proxy URL with `IdleConnTimeout: 90s` and `MaxIdleConnsPerHost: 4`, maintaining persistent TCP sockets and TLS 1.3 session tickets.
+* **Tier 2 (`broker.AccountPool`)**: Caches instantiated `broker.Broker` instances per `accountID`. Worker execution, square-off, rebalance, and reconciliation all share the exact same `*http.Client` per customer.
+* **Continuous Heartbeat Warmer**: The periodic reconciliation poller (`PollInterval: 10s`) issues order history/book requests across all active accounts, refreshing the 90s idle timer and ensuring TCP sockets stay active and warm 24/7.
+* **Full Specification**: See [TRANSPORT_AND_CONNECTION_POOLING.md](./TRANSPORT_AND_CONNECTION_POOLING.md).
+
 ---
 
 ## 8. Data model relationships

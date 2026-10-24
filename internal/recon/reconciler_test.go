@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/recon"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
 type fakeStore struct {
@@ -95,11 +95,11 @@ func (s *fakeStore) SweepPendingOrderUpdates(ctx context.Context, cutoff time.Ti
 
 type fakeMasterReader struct {
 	mu     sync.Mutex
-	orders map[uuid.UUID][]kiteconnect.Order
+	orders map[uuid.UUID][]broker.Order
 	err    error
 }
 
-func (r *fakeMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]kiteconnect.Order, error) {
+func (r *fakeMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UUID) ([]broker.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
@@ -110,12 +110,12 @@ func (r *fakeMasterReader) GetMasterOrders(ctx context.Context, masterID uuid.UU
 
 type fakeFollowerReader struct {
 	mu      sync.Mutex
-	history map[string][]kiteconnect.Order
-	orders  map[uuid.UUID][]kiteconnect.Order
+	history map[string][]broker.Order
+	orders  map[uuid.UUID][]broker.Order
 	err     error
 }
 
-func (r *fakeFollowerReader) GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]kiteconnect.Order, error) {
+func (r *fakeFollowerReader) GetFollowerOrderHistory(ctx context.Context, followerID uuid.UUID, brokerOrderID string) ([]broker.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
@@ -124,7 +124,7 @@ func (r *fakeFollowerReader) GetFollowerOrderHistory(ctx context.Context, follow
 	return r.history[brokerOrderID], nil
 }
 
-func (r *fakeFollowerReader) GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]kiteconnect.Order, error) {
+func (r *fakeFollowerReader) GetFollowerOrders(ctx context.Context, followerID uuid.UUID) ([]broker.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
@@ -184,13 +184,13 @@ func TestPoller_BackfillsMasterOrderGap(t *testing.T) {
 		},
 	}
 	masterReader := &fakeMasterReader{
-		orders: map[uuid.UUID][]kiteconnect.Order{
+		orders: map[uuid.UUID][]broker.Order{
 			masterID: {
 				{
 					OrderID:        "MO-1",
 					Status:         "COMPLETE",
 					FilledQuantity: 100,
-					TradingSymbol:  "INFY",
+					Tradingsymbol:  "INFY",
 				},
 			},
 		},
@@ -229,10 +229,10 @@ func TestPoller_ResolvesStuckFollowerOrder(t *testing.T) {
 	}
 	masterReader := &fakeMasterReader{}
 	followerReader := &fakeFollowerReader{
-		history: map[string][]kiteconnect.Order{
+		history: map[string][]broker.Order{
 			brokerOrderID: {
 				{OrderID: brokerOrderID, Status: "OPEN"},
-				{OrderID: brokerOrderID, Status: "COMPLETE", FilledQuantity: 50, AveragePrice: 120.5},
+				{OrderID: brokerOrderID, Status: "COMPLETE", FilledQuantity: 50, AveragePrice: decimal.NewFromFloat(120.5)},
 			},
 		},
 	}
@@ -276,7 +276,7 @@ func TestPoller_AlertsOnDriftAndUnresolved(t *testing.T) {
 	}
 	masterReader := &fakeMasterReader{}
 	followerReader := &fakeFollowerReader{
-		history: map[string][]kiteconnect.Order{
+		history: map[string][]broker.Order{
 			"FO-REJECTED": {
 				{OrderID: "FO-REJECTED", Status: "REJECTED", FilledQuantity: 0},
 			},
@@ -355,12 +355,12 @@ func TestPoller_ReconcileMaster_OnlyReconcilesSpecifiedMaster(t *testing.T) {
 	master2 := uuid.New()
 
 	masterReader := &fakeMasterReader{
-		orders: map[uuid.UUID][]kiteconnect.Order{
+		orders: map[uuid.UUID][]broker.Order{
 			master1: {
-				{OrderID: "M1-ORDER", Status: domain.TerminalComplete, Exchange: "NSE", TradingSymbol: "RELIANCE", FilledQuantity: 100},
+				{OrderID: "M1-ORDER", Status: domain.TerminalComplete, Exchange: "NSE", Tradingsymbol: "RELIANCE", FilledQuantity: 100},
 			},
 			master2: {
-				{OrderID: "M2-ORDER", Status: domain.TerminalComplete, Exchange: "NSE", TradingSymbol: "TCS", FilledQuantity: 50},
+				{OrderID: "M2-ORDER", Status: domain.TerminalComplete, Exchange: "NSE", Tradingsymbol: "TCS", FilledQuantity: 50},
 			},
 		},
 	}
@@ -400,13 +400,13 @@ func TestPoller_SkipsExistingMasterFill(t *testing.T) {
 		},
 	}
 	masterReader := &fakeMasterReader{
-		orders: map[uuid.UUID][]kiteconnect.Order{
+		orders: map[uuid.UUID][]broker.Order{
 			masterID: {
 				{
 					OrderID:        "MO-EXISTS",
 					Status:         "COMPLETE",
 					FilledQuantity: 100,
-					TradingSymbol:  "INFY",
+					Tradingsymbol:  "INFY",
 				},
 			},
 		},
@@ -432,15 +432,15 @@ func TestPoller_BackfillsFollowerOrders(t *testing.T) {
 		},
 	}
 	followerReader := &fakeFollowerReader{
-		orders: map[uuid.UUID][]kiteconnect.Order{
+		orders: map[uuid.UUID][]broker.Order{
 			followerID: {
 				{
-					OrderID:        "FO-MISSED",
-					Status:         "COMPLETE",
-					FilledQuantity: 50,
-					TradingSymbol:  "TCS",
-					Exchange:       "NSE",
-					Product:        "CNC",
+					OrderID:         "FO-MISSED",
+					Status:          "COMPLETE",
+					FilledQuantity:  50,
+					Tradingsymbol:   "TCS",
+					Exchange:        "NSE",
+					Product:         "CNC",
 					TransactionType: "BUY",
 				},
 			},
@@ -484,7 +484,7 @@ func TestPoller_FailsUnresolvableFollowerOrderPast5Minutes(t *testing.T) {
 		},
 	}
 	followerReader := &fakeFollowerReader{
-		history: map[string][]kiteconnect.Order{
+		history: map[string][]broker.Order{
 			"FO-STUCK": {}, // Not found at broker
 		},
 	}

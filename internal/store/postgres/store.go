@@ -236,6 +236,26 @@ func (s *Store) AccountByBrokerUserID(ctx context.Context, brokerUserID string) 
 	return row.ID, row.Role, row.ApiSecret, err
 }
 
+// AccountByBrokerAndUserID resolves an account by its broker and broker_user_id.
+// Strictly matches the UNIQUE(broker, broker_user_id) constraint.
+// Returns domain.ErrNotFound if no account matches.
+func (s *Store) AccountByBrokerAndUserID(ctx context.Context, brokerName, brokerUserID string) (uuid.UUID, string, string, error) {
+	var id uuid.UUID
+	var role string
+	var apiSecret string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, role, api_secret FROM accounts WHERE LOWER(broker) = LOWER($1) AND broker_user_id = $2 AND deleted_at IS NULL`,
+		brokerName, brokerUserID,
+	).Scan(&id, &role, &apiSecret)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.UUID{}, "", "", domain.ErrNotFound
+	}
+	if err != nil {
+		return uuid.UUID{}, "", "", fmt.Errorf("lookup account by broker and user id: %w", err)
+	}
+	return id, role, apiSecret, nil
+}
+
 // CreateFollowLink is a fixture helper for tests and, later, onboarding
 // — and the Accounts page's "attach account to group" action. Returns
 // domain.ErrDuplicate if the follower is already attached to a group

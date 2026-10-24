@@ -22,6 +22,10 @@ func (d *dummyPoolBroker) PlaceOrder(ctx context.Context, variety string, params
 }
 func (d *dummyPoolBroker) GetPositions(ctx context.Context) ([]broker.Position, error) { return nil, nil }
 func (d *dummyPoolBroker) GetOpenOrders(ctx context.Context) ([]broker.Order, error)    { return nil, nil }
+func (d *dummyPoolBroker) GetOrders(ctx context.Context) ([]broker.Order, error)        { return nil, nil }
+func (d *dummyPoolBroker) GetOrderHistory(ctx context.Context, orderID string) ([]broker.Order, error) {
+	return nil, nil
+}
 func (d *dummyPoolBroker) CancelOrder(ctx context.Context, variety, orderID string) (broker.OrderResponse, error) {
 	return broker.OrderResponse{OrderID: orderID}, nil
 }

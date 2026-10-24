@@ -227,6 +227,7 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 
 	if cfg.postbackHandler != nil {
 		mux.Handle("POST /broker-callback", cfg.postbackHandler)
+		mux.Handle("POST /broker-callback/", cfg.postbackHandler)
 	}
 
 	if cfg.staticFS != nil {
