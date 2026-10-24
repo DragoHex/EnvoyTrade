@@ -17,10 +17,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// DefaultVersion is the fallback application version, which can also be injected via -ldflags.
+var DefaultVersion = "dev"
+
 // Option configures optional router behaviors.
 type Option func(*routerConfig)
 
 type routerConfig struct {
+	version           string
 	postbackHandler   http.Handler
 	logger            *slog.Logger
 	syncer            PortfolioSyncer
@@ -139,6 +143,12 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithVersion configures the software version reported by the healthz endpoint.
+func WithVersion(version string) Option {
+	return func(c *routerConfig) {
+		c.version = version
+	}
+}
 
 // NewRouter wires every Dashboard-page route onto a stdlib ServeMux using
 // Go 1.22+ method+path pattern routing. If WithLogger option is supplied,
@@ -147,6 +157,11 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	var cfg routerConfig
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+
+	version := cfg.version
+	if version == "" {
+		version = DefaultVersion
 	}
 
 	mux := http.NewServeMux()
@@ -165,7 +180,10 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	}
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"version": version,
+		})
 	})
 
 	mux.HandleFunc("POST /api/v1/auth/register", h.postRegister)

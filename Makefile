@@ -11,6 +11,9 @@ FRONTEND_LOG ?= /tmp/envoytrade-frontend.log
 CLOUDFLARED_LOG ?= /tmp/cloudflared.log
 TUNNEL_NAME ?= mytunnel
 
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || git describe --tags --always 2>/dev/null || echo "dev")
+LDFLAGS ?= -s -w -X main.Version=$(VERSION) -X envoytrade/internal/httpapi.DefaultVersion=$(VERSION)
+
 .PHONY: build build-backend build-frontend run-backend run-frontend test test-integration e2e install \
 	db-up db-down db-seed db-flush seed flush db-maintenance db-migrate \
 	backend-up backend-down frontend-up frontend-down tunnel-up tunnel-down \
@@ -125,7 +128,7 @@ backend-up: db-up check-log-dir check-encryption-key
 		echo "Backend is already running on port $(PORT) (PID: $$(lsof -ti :$(PORT) | tr '\n' ' '))"; \
 	else \
 		echo "Starting backend server on port $(PORT)..."; \
-		DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" nohup go run $(CURDIR)/cmd/server > $(BACKEND_LOG) 2>&1 & \
+		DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" nohup go run -ldflags "$(LDFLAGS)" $(CURDIR)/cmd/server > $(BACKEND_LOG) 2>&1 & \
 		for i in $$(seq 1 30); do \
 			if lsof -ti :$(PORT) >/dev/null 2>&1; then \
 				echo "Backend started (PID: $$(lsof -ti :$(PORT) | tr '\n' ' '))"; \
@@ -257,13 +260,13 @@ all-down: down-all
 down-everything: down-all
 
 build-backend:
-	cd $(CURDIR) && go build ./...
+	cd $(CURDIR) && go build -ldflags "$(LDFLAGS)" ./...
 
 build-frontend:
 	cd $(CURDIR)/frontend && pnpm build
 
 run-backend: check-log-dir check-encryption-key
-	DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" go run $(CURDIR)/cmd/server
+	DATABASE_URL="$(DATABASE_URL)" PORT="$(PORT)" ENCRYPTION_KEY="$${ENCRYPTION_KEY}" go run -ldflags "$(LDFLAGS)" $(CURDIR)/cmd/server
 
 run-frontend:
 	cd $(CURDIR)/frontend && pnpm dev
@@ -299,12 +302,12 @@ sqlc-generate:
 
 # Option 1: Standalone Single Binary (Embedded UI, Native Process)
 package-binary:
-	@./scripts/build_binary.sh
+	@VERSION="$(VERSION)" ./scripts/build_binary.sh
 
 build-single-binary: package-binary
 
 package-binary-linux:
-	@GOOS=linux GOARCH=amd64 ./scripts/build_binary.sh
+	@VERSION="$(VERSION)" GOOS=linux GOARCH=amd64 ./scripts/build_binary.sh
 
 build-single-binary-linux: package-binary-linux
 

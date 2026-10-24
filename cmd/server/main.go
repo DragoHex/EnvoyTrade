@@ -51,6 +51,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// Version is the application version, set at compile time via -ldflags.
+var Version = "dev"
+
 func main() {
 	loadEnvFallback()
 
@@ -268,6 +271,7 @@ func run(logger *slog.Logger) error {
 	logProcessLimits(logger)
 
 	logger.Info("starting server",
+		"version", Version,
 		"port", addr,
 		"database", maskDatabaseURL(dbURL),
 	)
@@ -536,6 +540,7 @@ func run(logger *slog.Logger) error {
 
 	var routerOpts []httpapi.Option
 	routerOpts = append(routerOpts,
+		httpapi.WithVersion(Version),
 		httpapi.WithPostbackHandler(postbackRouter),
 		httpapi.WithLogger(logger.With("component", "httpapi")),
 		httpapi.WithPortfolioSyncer(syncer),
