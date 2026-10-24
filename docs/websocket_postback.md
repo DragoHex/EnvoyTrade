@@ -53,11 +53,22 @@ Drift & Alert Hooks
 - Publishes `domain.MasterFill` to `queue.Publisher[domain.MasterFill]`.
 - Implements `SetCatchUpHook`: on reconnect (`OnConnect` count > 1), automatically triggers catch-up REST sweep to backfill any fills executed during the disconnect window.
 
-### Postback Webhook Handler (`internal/kite/callback/postback.go`)
-- Mounted at `POST /broker-callback`.
+### Adaptive Postback Webhook Router (`internal/callback/router.go`)
+- Mounted at `POST /broker-callback` and `POST /broker-callback/`.
+- Routes any broker's webhook through an adaptive 5-stage pipeline:
+  1. `?broker=name` query param
+  2. `X-Broker: name` HTTP header
+  3. `/broker-callback/{broker}` subpath
+  4. Sub-microsecond zero-allocation byte fingerprinting (`groww_order_id`, `uniqueorderid`+`filledshares`, `checksum`+`user_id`)
+  5. Default fallback to Kite handler
+- Request body is preserved for downstream signature validation.
+- See `docs/CALLBACKS.md` for full specification.
+
+### Kite Postback Webhook Handler (`internal/kite/callback/postback.go`)
+- Handles Zerodha Kite and TestBroker postback payloads.
 - Computes SHA256 signature `order_id + order_timestamp + api_secret` and verifies with constant-time compare against payload checksum.
-- Uses per-account `api_secret` looked up via `AccountLookup.AccountByBrokerUserID`.
-- Responds `200 OK` for invalid checksum, unknown user, non-terminal status, or queue-full to prevent Kite retry spam.
+- Resolves account via `AccountByBrokerAndUserID(ctx, "kite", userID)` with fallback to `AccountByBrokerUserID`.
+- Responds `200 OK` for invalid checksum, unknown user, non-terminal status, or queue-full to prevent broker retry spam.
 - Routes master fills to `MasterFills` queue and follower order updates to `FollowerUpdates` queue.
 
 ### Worker Pool (`internal/worker/pool.go`)
