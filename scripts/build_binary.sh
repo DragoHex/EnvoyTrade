@@ -13,10 +13,11 @@ OS="${GOOS:-$(go env GOOS)}"
 ARCH="${GOARCH:-$(go env GOARCH)}"
 TARGET_NAME="envoytrade"
 TARBALL_NAME="envoytrade-${OS}-${ARCH}.tar.gz"
+VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null || git describe --tags --always 2>/dev/null || echo "dev")}"
 
 echo "=================================================================="
 echo " Packaging EnvoyTrade Single Embedded Binary"
-echo " OS: ${OS} | Arch: ${ARCH}"
+echo " Version: ${VERSION} | OS: ${OS} | Arch: ${ARCH}"
 echo "=================================================================="
 
 # 1. Ensure artifacts directory exists
@@ -31,7 +32,7 @@ pnpm build
 # 3. Build Go binary with embedded UI build tag
 echo "--> Compiling standalone binary (${OS}/${ARCH}) with -tags embed_ui..."
 cd "${ROOT_DIR}"
-CGO_ENABLED=0 GOOS="${OS}" GOARCH="${ARCH}" go build -tags embed_ui -ldflags="-s -w" -o "${ARTIFACTS_DIR}/${TARGET_NAME}" ./cmd/server
+CGO_ENABLED=0 GOOS="${OS}" GOARCH="${ARCH}" go build -tags embed_ui -ldflags="-s -w -X main.Version=${VERSION} -X envoytrade/internal/httpapi.DefaultVersion=${VERSION}" -o "${ARTIFACTS_DIR}/${TARGET_NAME}" ./cmd/server
 
 # Verify the binary was created and is executable
 chmod +x "${ARTIFACTS_DIR}/${TARGET_NAME}"

@@ -13,7 +13,8 @@ RUN go mod download
 COPY . ./
 
 # Build without -tags embed_ui so no UI assets are compiled into the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/bin/envoytrade ./cmd/server
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION} -X envoytrade/internal/httpapi.DefaultVersion=${VERSION}" -o /app/bin/envoytrade ./cmd/server
 
 FROM alpine:3.19
 

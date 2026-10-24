@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -61,5 +62,53 @@ func TestRouter_WithLogger_EmitsAccessLogs(t *testing.T) {
 	}
 	if !strings.Contains(logged, `"status":200`) {
 		t.Errorf("expected status 200 in log, got: %s", logged)
+	}
+}
+
+func TestRouter_Healthz_DefaultVersion(t *testing.T) {
+	router := httpapi.NewRouter(&stubStore{}, &stubActionEngine{})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode healthz response: %v", err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("status = %q, want %q", resp["status"], "ok")
+	}
+	if resp["version"] == "" {
+		t.Error("expected version to be populated")
+	}
+}
+
+func TestRouter_Healthz_WithVersion(t *testing.T) {
+	router := httpapi.NewRouter(&stubStore{}, &stubActionEngine{}, httpapi.WithVersion("v0.5.0"))
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode healthz response: %v", err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("status = %q, want %q", resp["status"], "ok")
+	}
+	if resp["version"] != "v0.5.0" {
+		t.Errorf("version = %q, want %q", resp["version"], "v0.5.0")
 	}
 }
