@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"envoytrade/frontend"
+	"envoytrade/internal/archive"
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
@@ -61,10 +63,142 @@ func main() {
 
 	slog.SetDefault(logger)
 
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "archive":
+			if err := runArchive(logger, os.Args[2:]); err != nil {
+				logger.Error("archive command failed", "error", err)
+				os.Exit(1)
+			}
+			return
+		case "restore":
+			if err := runRestore(logger, os.Args[2:]); err != nil {
+				logger.Error("restore command failed", "error", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	if err := run(logger); err != nil {
 		logger.Error("server stopped with error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runArchive(logger *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("archive", flag.ContinueOnError)
+	var (
+		cutoffStr  = fs.String("cutoff", "", "Cutoff date/time in YYYY-MM-DD or RFC3339 format (defaults to yesterday 23:59:59 IST)")
+		archiveDir = fs.String("dir", "/var/backups/envoytrade/archive", "Base directory for Parquet archives")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return errors.New("DATABASE_URL is not set")
+	}
+
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		loc = time.UTC
+	}
+
+	var cutoff time.Time
+	if *cutoffStr != "" {
+		if t, err := time.ParseInLocation("2006-01-02", *cutoffStr, loc); err == nil {
+			cutoff = time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, loc)
+		} else if t, err := time.Parse(time.RFC3339, *cutoffStr); err == nil {
+			cutoff = t
+		} else {
+			return fmt.Errorf("invalid cutoff date format %q: use YYYY-MM-DD or RFC3339", *cutoffStr)
+		}
+	} else {
+		now := time.Now().In(loc)
+		yesterday := now.AddDate(0, 0, -1)
+		cutoff = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 23, 59, 59, 999999999, loc)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	pool, err := postgres.NewPool(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("connect db: %w", err)
+	}
+	defer pool.Close()
+
+	archiver := archive.NewArchiver(pool, logger)
+	summary, err := archiver.Archive(ctx, cutoff, *archiveDir)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Archived: %d follower orders, %d master fills, %d order events into %s\n",
+		summary.FollowerOrdersArchived, summary.MasterFillsArchived, summary.OrderEventsArchived, *archiveDir)
+	return nil
+}
+
+func runRestore(logger *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	var (
+		archiveDir = fs.String("dir", "/var/backups/envoytrade/archive", "Base directory for Parquet archives")
+		fromStr    = fs.String("from", "", "Start date (inclusive) in YYYY-MM-DD format")
+		uptoStr    = fs.String("upto", "", "End date (inclusive) in YYYY-MM-DD format")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return errors.New("DATABASE_URL is not set")
+	}
+
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		loc = time.UTC
+	}
+
+	var fromDate, uptoDate *time.Time
+	if *fromStr != "" {
+		t, err := time.ParseInLocation("2006-01-02", *fromStr, loc)
+		if err != nil {
+			return fmt.Errorf("invalid --from format %q: use YYYY-MM-DD", *fromStr)
+		}
+		f := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+		fromDate = &f
+	}
+	if *uptoStr != "" {
+		t, err := time.ParseInLocation("2006-01-02", *uptoStr, loc)
+		if err != nil {
+			return fmt.Errorf("invalid --upto format %q: use YYYY-MM-DD", *uptoStr)
+		}
+		u := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, loc)
+		uptoDate = &u
+	}
+	if fromDate != nil && uptoDate != nil && fromDate.After(*uptoDate) {
+		return fmt.Errorf("invalid date range: --from (%s) cannot be after --upto (%s)", *fromStr, *uptoStr)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	pool, err := postgres.NewPool(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("connect db: %w", err)
+	}
+	defer pool.Close()
+
+	restorer := archive.NewRestorer(pool, logger)
+	summary, err := restorer.Restore(ctx, *archiveDir, fromDate, uptoDate)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Restored: %d master fills, %d follower orders, %d order events from %d partition(s)\n",
+		summary.MasterFillsRestored, summary.FollowerOrdersRestored, summary.OrderEventsRestored, len(summary.PartitionsRestored))
+	return nil
 }
 
 // loadEnvFallback checks standard system and user locations for envoytrade.env

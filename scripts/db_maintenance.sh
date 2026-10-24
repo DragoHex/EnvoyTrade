@@ -15,10 +15,13 @@ export TZ="Asia/Kolkata"
 # ==============================================================================
 
 DRY_RUN=false
+DO_ARCHIVE=true
 DO_VACUUM=true
 DO_BACKUP=true
 RETENTION_DAYS=14
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/envoytrade}"
+ARCHIVE_DIR="${ARCHIVE_DIR:-${BACKUP_DIR}/archive}"
+CUTOFF=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -27,15 +30,35 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        --cutoff)
+            CUTOFF="$2"
+            shift 2
+            ;;
+        --archive-only)
+            DO_ARCHIVE=true
+            DO_VACUUM=false
+            DO_BACKUP=false
+            shift
+            ;;
+        --no-archive)
+            DO_ARCHIVE=false
+            shift
+            ;;
         --vacuum-only)
+            DO_ARCHIVE=false
             DO_VACUUM=true
             DO_BACKUP=false
             shift
             ;;
         --backup-only)
+            DO_ARCHIVE=false
             DO_VACUUM=false
             DO_BACKUP=true
             shift
+            ;;
+        --archive-dir)
+            ARCHIVE_DIR="$2"
+            shift 2
             ;;
         --retention-days)
             RETENTION_DAYS="$2"
@@ -47,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown argument: $1" >&2
-            echo "Usage: $0 [--dry-run] [--vacuum-only] [--backup-only] [--retention-days N] [--backup-dir DIR]" >&2
+            echo "Usage: $0 [--dry-run] [--archive-only] [--no-archive] [--vacuum-only] [--backup-only] [--archive-dir DIR] [--retention-days N] [--backup-dir DIR]" >&2
             exit 1
             ;;
     esac
@@ -78,8 +101,50 @@ echo "=================================================================="
 echo " EnvoyTrade Database Maintenance"
 echo " Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo " Mode:      $([ "${DRY_RUN}" = true ] && echo "DRY-RUN" || echo "ACTIVE")"
-echo " Options:   Vacuum=${DO_VACUUM} | Backup=${DO_BACKUP} | Retention=${RETENTION_DAYS}d"
+echo " Options:   Archive=${DO_ARCHIVE} | Vacuum=${DO_VACUUM} | Backup=${DO_BACKUP} | Retention=${RETENTION_DAYS}d"
 echo "=================================================================="
+
+# 1. EOD Parquet Archival & DB Purge
+if [ "${DO_ARCHIVE}" = true ]; then
+    echo "--> [1/3] Archiving terminal order data to Parquet and purging primary DB..."
+    if [ "${DRY_RUN}" = true ]; then
+        echo "    [DRY-RUN] envoytrade archive --dir ${ARCHIVE_DIR}"
+    else
+        mkdir -p "${ARCHIVE_DIR}"
+        # Resolve binary to run (local Go, host binary, or container exec)
+        ARCHIVE_CMD=""
+        if [ -f "./cmd/server/main.go" ] && command -v go >/dev/null 2>&1; then
+            ARCHIVE_CMD="go run ./cmd/server"
+        elif command -v envoytrade >/dev/null 2>&1; then
+            ARCHIVE_CMD="envoytrade"
+        elif [ -x "/usr/local/bin/envoytrade" ]; then
+            ARCHIVE_CMD="/usr/local/bin/envoytrade"
+        else
+            for c in envoytrade-api; do
+                if podman ps --filter "name=^/${c}$" --filter "name=^${c}$" -q 2>/dev/null | grep -q . || \
+                   docker ps --filter "name=^/${c}$" --filter "name=^${c}$" -q 2>/dev/null | grep -q .; then
+                    if command -v podman >/dev/null 2>&1 && podman ps -q --filter "name=^/${c}$" --filter "name=^${c}$" 2>/dev/null | grep -q .; then
+                        ARCHIVE_CMD="podman exec -i ${c} envoytrade"
+                    else
+                        ARCHIVE_CMD="docker exec -i ${c} envoytrade"
+                    fi
+                    break
+                fi
+            done
+        fi
+
+        if [ -n "${ARCHIVE_CMD}" ]; then
+            ARCH_ARGS=("archive" "--dir" "${ARCHIVE_DIR}")
+            if [ -n "${CUTOFF}" ]; then
+                ARCH_ARGS+=("--cutoff" "${CUTOFF}")
+            fi
+            DATABASE_URL="${DATABASE_URL}" ${ARCHIVE_CMD} "${ARCH_ARGS[@]}"
+            echo "    ✓ Parquet archival completed."
+        else
+            echo "    [!] Warning: envoytrade binary or Go not found. Skipping Parquet archival." >&2
+        fi
+    fi
+fi
 
 # Determine Postgres execution tool (psql/pg_dump or container exec)
 USE_CONTAINER=""
@@ -105,9 +170,9 @@ TABLES=(
     "instruments"
 )
 
-# 1. VACUUM ANALYZE
+# 2. VACUUM ANALYZE
 if [ "${DO_VACUUM}" = true ]; then
-    echo "--> [1/2] Running VACUUM ANALYZE on trading tables..."
+    echo "--> [2/3] Running VACUUM ANALYZE on trading tables..."
     for tbl in "${TABLES[@]}"; do
         SQL="VACUUM (ANALYZE) ${tbl};"
         if [ "${DRY_RUN}" = true ]; then
@@ -124,9 +189,9 @@ if [ "${DO_VACUUM}" = true ]; then
     done
 fi
 
-# 2. Compressed Backup
+# 3. Compressed Backup
 if [ "${DO_BACKUP}" = true ]; then
-    echo "--> [2/2] Creating compressed database backup..."
+    echo "--> [3/3] Creating compressed database backup..."
     if [ "${DRY_RUN}" = true ]; then
         echo "    [DRY-RUN] pg_dump -> gzip > ${BACKUP_FILE}"
         echo "    [DRY-RUN] Retention cleanup: Purge files older than ${RETENTION_DAYS} days in ${BACKUP_DIR}"

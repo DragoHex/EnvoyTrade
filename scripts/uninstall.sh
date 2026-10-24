@@ -80,6 +80,14 @@ if [ "${OS}" = "Darwin" ]; then
         run_privileged rm -f "/usr/local/bin/envoytrade-db-maintenance"
         echo "    Removed /usr/local/bin/envoytrade-db-maintenance"
     fi
+    if [ -f "/usr/local/bin/envoytrade-restore-orders" ]; then
+        run_privileged rm -f "/usr/local/bin/envoytrade-restore-orders"
+        echo "    Removed /usr/local/bin/envoytrade-restore-orders"
+    fi
+    if [ -f "/usr/local/bin/envoytrade-db-migrate" ]; then
+        run_privileged rm -f "/usr/local/bin/envoytrade-db-migrate"
+        echo "    Removed /usr/local/bin/envoytrade-db-migrate"
+    fi
 
     rm -f /tmp/envoytrade.stdout.log /tmp/envoytrade.stderr.log
 
@@ -120,6 +128,14 @@ elif [ "${OS}" = "Linux" ]; then
     if [ -f "/usr/local/bin/envoytrade-db-maintenance" ]; then
         run_privileged rm -f "/usr/local/bin/envoytrade-db-maintenance"
         echo "    Removed /usr/local/bin/envoytrade-db-maintenance"
+    fi
+    if [ -f "/usr/local/bin/envoytrade-restore-orders" ]; then
+        run_privileged rm -f "/usr/local/bin/envoytrade-restore-orders"
+        echo "    Removed /usr/local/bin/envoytrade-restore-orders"
+    fi
+    if [ -f "/usr/local/bin/envoytrade-db-migrate" ]; then
+        run_privileged rm -f "/usr/local/bin/envoytrade-db-migrate"
+        echo "    Removed /usr/local/bin/envoytrade-db-migrate"
     fi
     if [ -f "/etc/cron.d/envoytrade-maintenance" ]; then
         run_privileged rm -f "/etc/cron.d/envoytrade-maintenance"
