@@ -5,6 +5,16 @@
 // to these types.
 package broker
 
+import (
+	"encoding/json"
+	"time"
+
+	"envoytrade/internal/domain"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+)
+
 // OrderParams are the broker-agnostic inputs to PlaceOrder. Each broker
 // adapter translates these to its native type.
 type OrderParams struct {
@@ -38,12 +48,75 @@ type Position struct {
 	PnL           float64 `json:"pnl"`
 }
 
-// Order represents an existing order on the broker (e.g., for status check or cancellation).
+// Order represents an existing order on the broker (e.g., for status check, history, or reconciliation).
 type Order struct {
-	OrderID       string  `json:"order_id"`
-	Exchange      string  `json:"exchange"`
-	Tradingsymbol string  `json:"tradingsymbol"`
-	Status        string  `json:"status"` // OPEN, COMPLETE, CANCELLED, REJECTED
-	Quantity      int     `json:"quantity"`
-	FilledQuantity int    `json:"filled_quantity"`
+	OrderID         string          `json:"order_id"`
+	Exchange        string          `json:"exchange"`
+	Tradingsymbol   string          `json:"tradingsymbol"`
+	TransactionType string          `json:"transaction_type"` // BUY | SELL
+	Product         string          `json:"product"`          // CNC | MIS | NRML
+	OrderType       string          `json:"order_type"`        // MARKET | LIMIT | etc.
+	Status          string          `json:"status"`           // COMPLETE | REJECTED | CANCELLED | OPEN
+	StatusMessage   string          `json:"status_message,omitempty"`
+	Quantity        int             `json:"quantity"`
+	FilledQuantity  int             `json:"filled_quantity"`
+	Price           decimal.Decimal `json:"price"`
+	TriggerPrice    decimal.Decimal `json:"trigger_price"`
+	AveragePrice    decimal.Decimal `json:"average_price"`
+	OrderTimestamp  time.Time       `json:"order_timestamp"`
+	Tag             string          `json:"tag,omitempty"`
+	RawPayload      json.RawMessage `json:"raw_payload,omitempty"`
+}
+
+// ToMasterFill converts a broker Order into domain.MasterFill.
+func (o Order) ToMasterFill(masterID uuid.UUID) domain.MasterFill {
+	price := o.Price
+	if o.OrderType == "LIMIT" && price.IsZero() && o.AveragePrice.GreaterThan(decimal.Zero) {
+		price = o.AveragePrice
+	}
+	raw := o.RawPayload
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(o)
+	}
+	return domain.MasterFill{
+		MasterID:        masterID,
+		BrokerOrderID:   o.OrderID,
+		Exchange:        o.Exchange,
+		Tradingsymbol:   o.Tradingsymbol,
+		TransactionType: o.TransactionType,
+		Product:         o.Product,
+		OrderType:       o.OrderType,
+		FilledQuantity:  o.FilledQuantity,
+		Price:           price,
+		TriggerPrice:    o.TriggerPrice,
+		AveragePrice:    o.AveragePrice,
+		Status:          o.Status,
+		OrderTimestamp:  o.OrderTimestamp,
+		RawPayload:      raw,
+		Tag:             o.Tag,
+	}
+}
+
+// ToOrderUpdate converts a broker Order into domain.OrderUpdate for followers.
+func (o Order) ToOrderUpdate(followerID uuid.UUID) domain.OrderUpdate {
+	raw := o.RawPayload
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(o)
+	}
+	return domain.OrderUpdate{
+		FollowerID:      followerID,
+		BrokerOrderID:   o.OrderID,
+		Tradingsymbol:   o.Tradingsymbol,
+		Exchange:        o.Exchange,
+		Product:         o.Product,
+		TransactionType: o.TransactionType,
+		OrderType:       o.OrderType,
+		Quantity:        o.Quantity,
+		Status:          o.Status,
+		FilledQuantity:  o.FilledQuantity,
+		AveragePrice:    o.AveragePrice,
+		OrderTimestamp:  o.OrderTimestamp,
+		Tag:             o.Tag,
+		RawPayload:      raw,
+	}
 }

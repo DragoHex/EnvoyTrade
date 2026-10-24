@@ -64,34 +64,35 @@ ON CONFLICT (ip_address) DO UPDATE SET
 
 -- 1. Accounts: 2 masters and 8 followers, scoped to primary demo user
 -- MASTER01 has IP assigned; MASTER02 has no IP (to test master without IP behavior)
-INSERT INTO accounts (id, user_id, role, broker, broker_user_id, status, api_key, api_secret, access_token, ip_address, auth_status, active, name, created_at, updated_at)
+INSERT INTO accounts (id, user_id, role, broker, broker_user_id, status, api_key, api_secret, access_token, ip_address, auth_status, token_expires_at, active, name, created_at, updated_at)
 VALUES
-  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER01',  'active', 'key_master01',  'secret_master01',  'token_master01',  '148.113.41.41', 'authenticated', true, 'Rajesh Sharma',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:20:40.549228+00'),
-  ('c80b3596-4449-4f32-b25a-a5bfd6883c4f', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER02',  'active', 'key_master02',  'secret_master02',  'token_master02',  '',              'authenticated', true, 'Priya Patel',     '2026-09-08 02:23:46.867428+00', '2026-09-11 15:14:57.102543+00'),
-  ('a5183e89-6cb2-4d32-91a2-6dc525570185', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01A', 'active', 'key_follow01a', 'secret_follow01a', 'token_follow01a', '148.113.41.42', 'authenticated', true, 'Amit Verma',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.865876+00'),
-  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01B', 'active', 'key_follow01b', 'secret_follow01b', 'token_follow01b', '148.113.41.43', 'authenticated', true, 'Sneha Kulkarni',  '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.883042+00'),
-  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01C', 'active', 'key_follow01c', 'secret_follow01c', 'token_follow01c', '148.113.41.44', 'authenticated', true, 'Vikram Malhotra', '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.901048+00'),
-  ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01D', 'active', 'key_follow01d', 'secret_follow01d', 'token_follow01d', '148.113.41.45', 'authenticated', true, 'Ananya Iyer',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.921094+00'),
-  ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02A', 'active', 'key_follow02a', 'secret_follow02a', 'token_follow02a', '148.113.41.46', 'authenticated', true, 'Rohan Gupta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.939633+00'),
-  ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02B', 'active', 'key_follow02b', 'secret_follow02b', 'token_follow02b', '148.113.41.47', 'authenticated', true, 'Neha Deshmukh',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.957899+00'),
-  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02C', 'active', 'key_follow02c', 'secret_follow02c', 'token_follow02c', '148.113.41.48', 'authenticated', true, 'Aditya Nair',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.981594+00'),
-  ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02D', 'active', 'key_follow02d', 'secret_follow02d', 'token_follow02d', '148.113.41.49', 'authenticated', true, 'Pooja Mehta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.996682+00')
+  ('f6e70723-b904-4427-83ee-a85771dee2e4', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER01',  'active', 'key_master01',  'secret_master01',  'token_master01',  '148.113.41.41', 'authenticated', now() + interval '30 days', true, 'Rajesh Sharma',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:20:40.549228+00'),
+  ('c80b3596-4449-4f32-b25a-a5bfd6883c4f', 'a0000000-0000-0000-0000-000000000001', 'master',   'testbroker', 'MASTER02',  'active', 'key_master02',  'secret_master02',  'token_master02',  '',              'authenticated', now() + interval '30 days', true, 'Priya Patel',     '2026-09-08 02:23:46.867428+00', '2026-09-11 15:14:57.102543+00'),
+  ('a5183e89-6cb2-4d32-91a2-6dc525570185', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01A', 'active', 'key_follow01a', 'secret_follow01a', 'token_follow01a', '148.113.41.42', 'authenticated', now() + interval '30 days', true, 'Amit Verma',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.865876+00'),
+  ('5894c29d-7740-4494-9c98-c9d59d1364bc', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01B', 'active', 'key_follow01b', 'secret_follow01b', 'token_follow01b', '148.113.41.43', 'authenticated', now() + interval '30 days', true, 'Sneha Kulkarni',  '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.883042+00'),
+  ('18dfc57d-0f23-49af-8ccd-1c0edcbe4788', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01C', 'active', 'key_follow01c', 'secret_follow01c', 'token_follow01c', '148.113.41.44', 'authenticated', now() + interval '30 days', true, 'Vikram Malhotra', '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.901048+00'),
+  ('ef0a6211-e753-42b8-a6eb-9c8d15ad90db', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW01D', 'active', 'key_follow01d', 'secret_follow01d', 'token_follow01d', '148.113.41.45', 'authenticated', now() + interval '30 days', true, 'Ananya Iyer',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.921094+00'),
+  ('0f40d9f2-34aa-42fa-8d99-90b9255fd168', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02A', 'active', 'key_follow02a', 'secret_follow02a', 'token_follow02a', '148.113.41.46', 'authenticated', now() + interval '30 days', true, 'Rohan Gupta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.939633+00'),
+  ('d0527ce3-4c4b-40c4-ba0d-af5a79f19a99', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02B', 'active', 'key_follow02b', 'secret_follow02b', 'token_follow02b', '148.113.41.47', 'authenticated', now() + interval '30 days', true, 'Neha Deshmukh',   '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.957899+00'),
+  ('d800e6e7-5d11-4d35-b24a-74a9b4aa4832', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02C', 'active', 'key_follow02c', 'secret_follow02c', 'token_follow02c', '148.113.41.48', 'authenticated', now() + interval '30 days', true, 'Aditya Nair',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.981594+00'),
+  ('4f9b42e4-e1ea-4fab-b9f7-e6197c28ea9a', 'a0000000-0000-0000-0000-000000000001', 'follower', 'testbroker', 'FOLLOW02D', 'active', 'key_follow02d', 'secret_follow02d', 'token_follow02d', '148.113.41.49', 'authenticated', now() + interval '30 days', true, 'Pooja Mehta',     '2026-09-08 02:23:46.867428+00', '2026-09-11 14:21:01.996682+00')
 ON CONFLICT (id) DO UPDATE SET
-  user_id        = EXCLUDED.user_id,
-  role           = EXCLUDED.role,
-  broker         = EXCLUDED.broker,
-  broker_user_id = EXCLUDED.broker_user_id,
-  status         = EXCLUDED.status,
-  api_key        = EXCLUDED.api_key,
-  api_secret     = EXCLUDED.api_secret,
-  access_token   = EXCLUDED.access_token,
-  ip_address     = EXCLUDED.ip_address,
-  auth_status    = EXCLUDED.auth_status,
-  active         = EXCLUDED.active,
-  name           = EXCLUDED.name,
-  deleted_at     = NULL,
-  created_at     = EXCLUDED.created_at,
-  updated_at     = EXCLUDED.updated_at;
+  user_id          = EXCLUDED.user_id,
+  role             = EXCLUDED.role,
+  broker           = EXCLUDED.broker,
+  broker_user_id   = EXCLUDED.broker_user_id,
+  status           = EXCLUDED.status,
+  api_key          = EXCLUDED.api_key,
+  api_secret       = EXCLUDED.api_secret,
+  access_token     = EXCLUDED.access_token,
+  ip_address       = EXCLUDED.ip_address,
+  auth_status      = EXCLUDED.auth_status,
+  token_expires_at = EXCLUDED.token_expires_at,
+  active           = EXCLUDED.active,
+  name             = EXCLUDED.name,
+  deleted_at       = NULL,
+  created_at       = EXCLUDED.created_at,
+  updated_at       = EXCLUDED.updated_at;
 
 -- 2. Groups: Master groups linked to master accounts, scoped to primary demo user
 -- Clean up legacy seeded groups where group.id equaled master_id

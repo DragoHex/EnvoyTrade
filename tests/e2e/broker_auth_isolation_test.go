@@ -51,7 +51,7 @@ func TestE2E_BrokerAuthExpiration_DoesNotInvalidateTraderWebSession(t *testing.T
 		"apiKey":          "key_badtoken01",
 		"apiSecret":       "secret_badtoken01",
 		"accessToken":     "token_completely_invalid_and_expired",
-		"ip":              "148.113.41.52",
+		"ip":              "148.113.41.50",
 		"masterId":        Master01ID,
 		"cloneFactor":     "1.0",
 		"maxQtyPerOrder":  500,

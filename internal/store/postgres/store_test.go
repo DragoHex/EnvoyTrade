@@ -541,6 +541,52 @@ func TestAccountByBrokerUserID_UnknownUserReturnsErrNotFound(t *testing.T) {
 	}
 }
 
+func TestAccountByBrokerAndUserID_ReturnsMatchingBrokerAccount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, brokerUserID := seedAccountWithSecret(t, s, "follower", "secret-z")
+
+	gotID, role, apiSecret, err := s.AccountByBrokerAndUserID(ctx, "zerodha", brokerUserID)
+	if err != nil {
+		t.Fatalf("AccountByBrokerAndUserID: %v", err)
+	}
+	if gotID != id || role != "follower" || apiSecret != "secret-z" {
+		t.Errorf("got (%v, %q, %q), want (%v, follower, secret-z)", gotID, role, apiSecret, id)
+	}
+}
+
+func TestAccountByBrokerAndUserID_MultiBrokerSameUserID_ResolvesCorrectly(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	commonUserID := "SHARED_USER_123"
+	id1 := uuid.New()
+	id2 := uuid.New()
+
+	if err := s.CreateAccount(ctx, id1, "Zero Acc", "follower", "zerodha", commonUserID, "key-z", "secret-z", "10.0.1.1"); err != nil {
+		t.Fatalf("CreateAccount 1: %v", err)
+	}
+	if err := s.CreateAccount(ctx, id2, "Test Acc", "follower", "testbroker", commonUserID, "key-t", "secret-t", "10.0.1.2"); err != nil {
+		t.Fatalf("CreateAccount 2: %v", err)
+	}
+
+	gotID1, _, secret1, err1 := s.AccountByBrokerAndUserID(ctx, "zerodha", commonUserID)
+	if err1 != nil || gotID1 != id1 || secret1 != "secret-z" {
+		t.Errorf("lookup zerodha = (%v, %v), want (%v, secret-z)", gotID1, err1, id1)
+	}
+
+	gotID2, _, secret2, err2 := s.AccountByBrokerAndUserID(ctx, "testbroker", commonUserID)
+	if err2 != nil || gotID2 != id2 || secret2 != "secret-t" {
+		t.Errorf("lookup testbroker = (%v, %v), want (%v, secret-t)", gotID2, err2, id2)
+	}
+
+	_, _, _, errUnknown := s.AccountByBrokerAndUserID(ctx, "nonexistent", commonUserID)
+	if errUnknown != domain.ErrNotFound {
+		t.Errorf("lookup unknown broker = %v, want domain.ErrNotFound", errUnknown)
+	}
+}
+
 func TestUpdateFollowerOrderStatus_UpdatesMatchingRow(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -14,11 +14,13 @@ import (
 // always-succeeding broker with an empty OrderID; set Err to make every
 // call fail, or Latency to simulate a slow broker.
 type Broker struct {
-	Latency    time.Duration
-	Err        error
-	OrderID    string
-	Positions  []broker.Position
-	OpenOrders []broker.Order
+	Latency      time.Duration
+	Err          error
+	OrderID      string
+	Positions    []broker.Position
+	OpenOrders   []broker.Order
+	Orders       []broker.Order
+	OrderHistory map[string][]broker.Order
 
 	mu          sync.Mutex
 	Calls       []broker.OrderParams
@@ -69,6 +71,35 @@ func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
 	out := make([]broker.Order, len(b.OpenOrders))
 	copy(out, b.OpenOrders)
 	return out, nil
+}
+
+// GetOrders returns configured orders.
+func (b *Broker) GetOrders(ctx context.Context) ([]broker.Order, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.Err != nil {
+		return nil, b.Err
+	}
+	out := make([]broker.Order, len(b.Orders))
+	copy(out, b.Orders)
+	return out, nil
+}
+
+// GetOrderHistory returns configured order history for an orderID.
+func (b *Broker) GetOrderHistory(ctx context.Context, orderID string) ([]broker.Order, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.Err != nil {
+		return nil, b.Err
+	}
+	if b.OrderHistory != nil {
+		if history, ok := b.OrderHistory[orderID]; ok {
+			out := make([]broker.Order, len(history))
+			copy(out, history)
+			return out, nil
+		}
+	}
+	return []broker.Order{}, nil
 }
 
 // CancelOrder records the cancellation call and returns success.

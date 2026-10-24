@@ -9,6 +9,7 @@ import (
 	"envoytrade/internal/domain"
 	"envoytrade/internal/kite"
 
+	"github.com/shopspring/decimal"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
@@ -308,5 +309,115 @@ func TestRESTClientFor_BuildsClient(t *testing.T) {
 	badCfg := kite.ProxyConfig{}
 	if _, err := kite.RESTClientFor(badCfg); err == nil {
 		t.Fatal("RESTClientFor with empty host want error, got nil")
+	}
+}
+
+func TestBroker_GetOrders_MapsToBrokerOrders(t *testing.T) {
+	api := &fakeKiteAPI{
+		orders: kiteconnect.Orders{
+			{
+				OrderID:        "order-101",
+				Exchange:       "NSE",
+				TradingSymbol:  "INFY",
+				TransactionType: "BUY",
+				Product:        "CNC",
+				OrderType:      "LIMIT",
+				Status:         "COMPLETE",
+				StatusMessage:  "Executed",
+				Quantity:       25,
+				FilledQuantity: 25,
+				Price:          1450.50,
+				TriggerPrice:   0,
+				AveragePrice:   1450.50,
+				Tag:            "tag-kite",
+			},
+		},
+	}
+	b := kite.NewBroker(api, false)
+
+	orders, err := b.GetOrders(context.Background())
+	if err != nil {
+		t.Fatalf("GetOrders failed: %v", err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("expected 1 order, got %d", len(orders))
+	}
+	o := orders[0]
+	if o.OrderID != "order-101" || o.Tradingsymbol != "INFY" || o.Exchange != "NSE" {
+		t.Errorf("unexpected order info: %s %s:%s", o.OrderID, o.Exchange, o.Tradingsymbol)
+	}
+	if o.Quantity != 25 || o.FilledQuantity != 25 {
+		t.Errorf("quantity = %d, filled = %d", o.Quantity, o.FilledQuantity)
+	}
+	if !o.AveragePrice.Equal(decimal.NewFromFloat(1450.50)) {
+		t.Errorf("average price = %v, want 1450.50", o.AveragePrice)
+	}
+	if o.Tag != "tag-kite" {
+		t.Errorf("tag = %s, want tag-kite", o.Tag)
+	}
+}
+
+func TestBroker_GetOrderHistory_MapsToBrokerOrders(t *testing.T) {
+	api := &fakeKiteAPI{
+		history: []kiteconnect.Order{
+			{
+				OrderID:        "order-hist-1",
+				Status:         "UPDATE",
+				Quantity:       10,
+				FilledQuantity: 0,
+			},
+			{
+				OrderID:        "order-hist-1",
+				Status:         "COMPLETE",
+				Quantity:       10,
+				FilledQuantity: 10,
+				AveragePrice:   200.0,
+			},
+		},
+	}
+	b := kite.NewBroker(api, false)
+
+	history, err := b.GetOrderHistory(context.Background(), "order-hist-1")
+	if err != nil {
+		t.Fatalf("GetOrderHistory failed: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 history entries, got %d", len(history))
+	}
+	if history[1].Status != "COMPLETE" || history[1].FilledQuantity != 10 {
+		t.Errorf("history[1] = %+v", history[1])
+	}
+}
+
+func TestBroker_GetOrders_PropagatesError(t *testing.T) {
+	api := &fakeKiteAPI{ordersErr: errors.New("network timeout")}
+	b := kite.NewBroker(api, false)
+
+	_, err := b.GetOrders(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestBroker_GetOrderHistory_PropagatesError(t *testing.T) {
+	api := &fakeKiteAPI{historyErr: errors.New("unauthorized")}
+	b := kite.NewBroker(api, false)
+
+	_, err := b.GetOrderHistory(context.Background(), "order-1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestBroker_GetOrders_Empty(t *testing.T) {
+	api := &fakeKiteAPI{orders: kiteconnect.Orders{}}
+	b := kite.NewBroker(api, false)
+
+	orders, err := b.GetOrders(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orders == nil || len(orders) != 0 {
+		t.Fatalf("expected empty non-nil slice, got %+v", orders)
 	}
 }

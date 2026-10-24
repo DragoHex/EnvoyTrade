@@ -22,6 +22,14 @@ func (d *dummyBroker) GetOpenOrders(ctx context.Context) ([]Order, error) {
 	return nil, nil
 }
 
+func (d *dummyBroker) GetOrders(ctx context.Context) ([]Order, error) {
+	return nil, nil
+}
+
+func (d *dummyBroker) GetOrderHistory(ctx context.Context, orderID string) ([]Order, error) {
+	return nil, nil
+}
+
 func (d *dummyBroker) CancelOrder(ctx context.Context, variety, orderID string) (OrderResponse, error) {
 	return OrderResponse{OrderID: orderID}, nil
 }

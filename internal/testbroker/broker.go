@@ -2,12 +2,16 @@ package testbroker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
 	"testbroker/sdk"
+
+	"github.com/shopspring/decimal"
 )
 
 const defaultBaseURI = "http://localhost:8089"
@@ -114,6 +118,64 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 	return out, nil
 }
 
+func toTestBrokerOrder(o sdk.Order) broker.Order {
+	raw, _ := json.Marshal(o)
+	var t time.Time
+	if o.OrderTimestamp != "" {
+		if parsed, err := time.Parse("2006-01-02 15:04:05", o.OrderTimestamp); err == nil {
+			t = parsed
+		} else if parsed, err := time.Parse(time.RFC3339, o.OrderTimestamp); err == nil {
+			t = parsed
+		}
+	}
+	return broker.Order{
+		OrderID:         o.OrderID,
+		Exchange:        o.Exchange,
+		Tradingsymbol:   o.Tradingsymbol,
+		TransactionType: o.TransactionType,
+		Product:         o.Product,
+		OrderType:       o.OrderType,
+		Status:          o.Status,
+		StatusMessage:   o.StatusMessage,
+		Quantity:        o.Quantity,
+		FilledQuantity:  o.FilledQuantity,
+		Price:           decimal.NewFromFloat(o.Price),
+		TriggerPrice:    decimal.NewFromFloat(o.TriggerPrice),
+		AveragePrice:    decimal.NewFromFloat(o.AveragePrice),
+		OrderTimestamp:  t,
+		Tag:             o.Tag,
+		RawPayload:      raw,
+	}
+}
+
+// GetOrders retrieves all orders from testbroker mapped to broker.Order.
+func (b *Broker) GetOrders(ctx context.Context) ([]broker.Order, error) {
+	orders, err := b.client.GetOrders()
+	if err != nil {
+		return nil, fmt.Errorf("testbroker get orders: %w", err)
+	}
+	out := make([]broker.Order, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, toTestBrokerOrder(o))
+	}
+	return out, nil
+}
+
+// GetOrderHistory retrieves history for a specific order.
+func (b *Broker) GetOrderHistory(ctx context.Context, orderID string) ([]broker.Order, error) {
+	orders, err := b.client.GetOrders()
+	if err != nil {
+		return nil, fmt.Errorf("testbroker get order history: %w", err)
+	}
+	var out []broker.Order
+	for _, o := range orders {
+		if o.OrderID == orderID {
+			out = append(out, toTestBrokerOrder(o))
+		}
+	}
+	return out, nil
+}
+
 // GetOpenOrders retrieves currently open orders from testbroker.
 func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
 	orders, err := b.client.GetOrders()
@@ -123,14 +185,7 @@ func (b *Broker) GetOpenOrders(ctx context.Context) ([]broker.Order, error) {
 	var out []broker.Order
 	for _, o := range orders {
 		if o.Status == sdk.OrderStatusOpen {
-			out = append(out, broker.Order{
-				OrderID:        o.OrderID,
-				Exchange:       o.Exchange,
-				Tradingsymbol:  o.Tradingsymbol,
-				Status:         o.Status,
-				Quantity:       o.Quantity,
-				FilledQuantity: o.FilledQuantity,
-			})
+			out = append(out, toTestBrokerOrder(o))
 		}
 	}
 	return out, nil
