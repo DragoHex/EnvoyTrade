@@ -262,7 +262,7 @@ describe('api client', () => {
     expect(url).toBe('/api/v1/proxy-ips')
   })
 
-  it('fetchAvailableProxyIPs sends GET /api/v1/proxy-ips/available with optional accountId', async () => {
+  it('fetchAvailableProxyIPs sends GET /api/v1/proxy-ips/available with optional accountId and broker', async () => {
     const fakeAvailable = {
       ipv4: [{ ipAddress: '148.113.41.42', ipType: 'ipv4' }],
       ipv6: [{ ipAddress: '2402:1f00::1', ipType: 'ipv6' }],
@@ -271,10 +271,10 @@ describe('api client', () => {
       new Response(JSON.stringify(fakeAvailable), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )
 
-    const result = await fetchAvailableProxyIPs('acc-123')
+    const result = await fetchAvailableProxyIPs('acc-123', 'kite')
     expect(result).toEqual(fakeAvailable)
     const [url] = (globalThis.fetch as any).mock.calls[0]
-    expect(url).toBe('/api/v1/proxy-ips/available?accountId=acc-123')
+    expect(url).toBe('/api/v1/proxy-ips/available?accountId=acc-123&broker=kite')
   })
 
   it('squareOffGroup sends POST /api/v1/groups/:id/positions/square-off', async () => {

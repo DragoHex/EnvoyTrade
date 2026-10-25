@@ -49,6 +49,7 @@ func (s *Store) Groups(ctx context.Context) ([]domain.GroupSummary, error) {
 			FollowerCount:   int(r.FollowerCount),
 			Status:          statusFromAccountStatus(r.Status),
 			Active:          r.Active,
+			HasImbalance:    r.HasImbalance,
 		})
 	}
 	return groups, nil
@@ -81,6 +82,7 @@ func (s *Store) GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDeta
 		MasterAccountID: info.MasterBrokerUserID,
 		MasterName:      info.MasterName,
 		MasterActive:    info.MasterActive,
+		HasImbalance:    info.HasImbalance,
 	}
 
 	rows, err := s.queries.GroupFollowerRows(ctx, info.ID)
@@ -524,3 +526,13 @@ func (s *Store) LatestMasterFill(ctx context.Context, masterID uuid.UUID) (domai
 		RawPayload:      row.RawPayload,
 	}, nil
 }
+
+// SetGroupImbalance updates the has_imbalance flag on a group.
+func (s *Store) SetGroupImbalance(ctx context.Context, groupID uuid.UUID, hasImbalance bool) error {
+	_, err := s.queries.SetGroupImbalance(ctx, sqlcgen.SetGroupImbalanceParams{
+		ID:           groupID,
+		HasImbalance: hasImbalance,
+	})
+	return err
+}
+

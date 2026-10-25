@@ -54,6 +54,7 @@ export interface GroupSummary {
   followerCount: number
   status: 'ok' | 'error'
   active?: boolean
+  hasImbalance?: boolean
 }
 
 export interface MarginBreakdown {
@@ -88,6 +89,7 @@ export interface GroupDetail {
   masterAccountId: string
   masterName?: string
   masterActive: boolean
+  hasImbalance?: boolean
   masterNetQty?: number
   masterOpenPositionsCount?: number
   masterClosedPositionsCount?: number
@@ -128,8 +130,9 @@ export interface CreateAccountRequest {
   role: 'master' | 'follower'
   broker: string
   brokerAccountId: string
-  apiKey: string
-  apiSecret: string
+  apiKey?: string
+  apiSecret?: string
+  accessToken?: string
   password?: string
   totpSecret?: string
   ip?: string
@@ -593,8 +596,11 @@ export function fetchProxyIPs(): Promise<ProxyIP[]> {
   return apiFetch(`${BASE}/proxy-ips`).then((r) => json(r))
 }
 
-export function fetchAvailableProxyIPs(accountId?: string): Promise<AvailableProxyIPsResponse> {
-  const qs = accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''
+export function fetchAvailableProxyIPs(accountId?: string, broker?: string): Promise<AvailableProxyIPsResponse> {
+  const params = new URLSearchParams()
+  if (accountId) params.set('accountId', accountId)
+  if (broker) params.set('broker', broker)
+  const qs = params.toString() ? `?${params.toString()}` : ''
   return apiFetch(`${BASE}/proxy-ips/available${qs}`).then((r) => json(r))
 }
 

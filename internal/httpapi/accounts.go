@@ -505,6 +505,13 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 			}
 		}
+		if h.rebalanceSvc != nil {
+			if masterID, err := h.store.ResolveMasterID(r.Context(), id); err == nil {
+				go func(mID uuid.UUID) {
+					_, _ = h.rebalanceSvc.ComputeGroupDiff(context.Background(), mID)
+				}(masterID)
+			}
+		}
 		updated = true
 	}
 	if req.GroupID != nil {

@@ -330,7 +330,7 @@ describe('Dashboard', () => {
 
   it('displays yellow group status dot and rebalance notification dots when active follower drift exists', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
-      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok', hasImbalance: true },
     ])
     vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
       id: 'g1',
@@ -339,6 +339,7 @@ describe('Dashboard', () => {
       masterAccountId: 'ZX1234',
       masterName: 'Alice Trader',
       masterActive: true,
+      hasImbalance: true,
       followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
     vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
@@ -387,9 +388,9 @@ describe('Dashboard', () => {
     expect(within(rebalanceButtons[1]).getByTestId('rebalance-notification-dot')).toBeInTheDocument()
   })
 
-  it('keeps green group status dot and no notification dots when group is in equilibrium', async () => {
+  it('keeps green group status dot and does not fetch diff when group is in equilibrium', async () => {
     vi.spyOn(api, 'getGroups').mockResolvedValue([
-      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok' },
+      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok', hasImbalance: false },
     ])
     vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
       id: 'g1',
@@ -398,9 +399,10 @@ describe('Dashboard', () => {
       masterAccountId: 'ZX1234',
       masterName: 'Alice Trader',
       masterActive: true,
+      hasImbalance: false,
       followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
     })
-    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+    const diffSpy = vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
       group_id: 'g1',
       master_id: 'm1',
       followers_evaluated: 1,
@@ -419,6 +421,103 @@ describe('Dashboard', () => {
     const rebalanceButtons = screen.getAllByRole('button', { name: 'Rebalance' })
     expect(within(rebalanceButtons[0]).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
     expect(within(rebalanceButtons[1]).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
+
+    // Assert that diff was never fetched because hasImbalance is false
+    expect(diffSpy).not.toHaveBeenCalled()
+  })
+
+  it('periodically polls getGroupRebalanceDiff every 30s when hasImbalance is true', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(api, 'getGroups').mockResolvedValue([
+        { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok', hasImbalance: true },
+      ])
+      vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+        id: 'g1',
+        name: 'Alpha Group',
+        masterId: 'm1',
+        masterAccountId: 'ZX1234',
+        masterName: 'Alice Trader',
+        masterActive: true,
+        hasImbalance: true,
+        followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+      })
+      const diffSpy = vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+        group_id: 'g1',
+        master_id: 'm1',
+        followers_evaluated: 1,
+        followers_with_drift: 1,
+        drifts: [],
+      })
+
+      render(() => <Dashboard />)
+      await vi.advanceTimersByTimeAsync(10)
+
+      expect(diffSpy).toHaveBeenCalledTimes(1)
+
+      // Fast-forward 30 seconds
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(diffSpy).toHaveBeenCalledTimes(2)
+
+      // Fast-forward another 30 seconds
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(diffSpy).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('treats imbalance as resolved if all drifting followers are disabled', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'ok', hasImbalance: true },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Alpha Group',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
+      masterActive: true,
+      hasImbalance: true,
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: false, status: 'ok' }],
+    })
+    vi.spyOn(api, 'getGroupRebalanceDiff').mockResolvedValue({
+      group_id: 'g1',
+      master_id: 'm1',
+      followers_evaluated: 1,
+      followers_with_drift: 1,
+      drifts: [
+        {
+          account_id: 'f1',
+          account_name: 'Follower 1',
+          broker_account_id: 'ZY5678',
+          enabled: false,
+          clone_factor: '1',
+          symbols: [
+            {
+              exchange: 'NSE',
+              tradingsymbol: 'INFY',
+              product: 'CNC',
+              lot_size: 1,
+              master_qty: 10,
+              target_qty: 10,
+              follower_qty: 0,
+              drift_qty: 10,
+              action: 'BUY',
+            },
+          ],
+        },
+      ],
+    })
+
+    render(() => <Dashboard />)
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    await waitFor(() => {
+      const heading = screen.getByRole('heading', { level: 2 })
+      const statusDot = within(heading).getByTestId('status-dot')
+      expect(statusDot).toHaveAttribute('data-status', 'ok')
+    })
   })
 })
 

@@ -3,6 +3,7 @@ package squareoff_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"envoytrade/internal/broker"
@@ -14,20 +15,26 @@ import (
 )
 
 type fakeSquareOffStore struct {
-	roles       map[uuid.UUID]string
-	groupDetail map[uuid.UUID]domain.GroupDetail
-	accounts    map[uuid.UUID]domain.Account
+	mu             sync.Mutex
+	roles          map[uuid.UUID]string
+	groupDetail    map[uuid.UUID]domain.GroupDetail
+	accounts       map[uuid.UUID]domain.Account
 	insertedOrders []domain.FollowerOrder
 	placedOrders   map[int64]string
 	failedOrders   map[int64]string
+	imbalances     map[uuid.UUID]bool
 }
 
 func (s *fakeSquareOffStore) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.insertedOrders = append(s.insertedOrders, o)
 	return int64(len(s.insertedOrders)), nil
 }
 
 func (s *fakeSquareOffStore) UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.placedOrders == nil {
 		s.placedOrders = make(map[int64]string)
 	}
@@ -36,6 +43,8 @@ func (s *fakeSquareOffStore) UpdateFollowerOrderPlaced(ctx context.Context, id i
 }
 
 func (s *fakeSquareOffStore) UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.failedOrders == nil {
 		s.failedOrders = make(map[int64]string)
 	}
@@ -58,6 +67,16 @@ func (s *fakeSquareOffStore) GroupDetail(ctx context.Context, groupID uuid.UUID)
 }
 
 func (s *fakeSquareOffStore) AppendOrderEvent(ctx context.Context, ev domain.OrderEvent) error {
+	return nil
+}
+
+func (s *fakeSquareOffStore) SetGroupImbalance(ctx context.Context, groupID uuid.UUID, hasImbalance bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.imbalances == nil {
+		s.imbalances = make(map[uuid.UUID]bool)
+	}
+	s.imbalances[groupID] = hasImbalance
 	return nil
 }
 
@@ -520,4 +539,64 @@ func TestSquareOffAccount_DisabledFollowerRejected(t *testing.T) {
 		t.Errorf("expected 0 orders placed, got %d", len(b.Calls))
 	}
 }
+
+func TestSquareOffGroup_ClearsImbalance_WhenFullGroupSquareOffSucceeds(t *testing.T) {
+	masterID := uuid.New()
+	followerID := uuid.New()
+	groupID := uuid.New()
+
+	store := &fakeSquareOffStore{
+		roles: map[uuid.UUID]string{
+			masterID:   "master",
+			followerID: "follower",
+		},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			groupID: {
+				GroupID:  groupID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: followerID, Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			masterID:   {ID: masterID, Role: "master", Enabled: true},
+			followerID: {ID: followerID, Role: "follower", Enabled: true},
+		},
+		imbalances: map[uuid.UUID]bool{
+			groupID: true, // starts with imbalance
+		},
+	}
+
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 10},
+		},
+	}
+	bFollower := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "RELIANCE", Product: "CNC", Quantity: 10},
+		},
+	}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]*fake.Broker{
+			masterID:   bMaster,
+			followerID: bFollower,
+		},
+	}
+
+	svc := squareoff.NewService(store, resolver, nil, nil)
+
+	res, err := svc.SquareOffGroup(context.Background(), groupID, nil)
+	if err != nil {
+		t.Fatalf("SquareOffGroup failed: %v", err)
+	}
+	if res.Status != "completed" {
+		t.Errorf("expected completed, got %s", res.Status)
+	}
+	if store.imbalances[groupID] {
+		t.Errorf("expected store.imbalances[%s] to be false after full group square off, got true", groupID)
+	}
+}
+
 

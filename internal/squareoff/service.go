@@ -24,6 +24,7 @@ type Store interface {
 	InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error)
 	UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error
 	UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error
+	SetGroupImbalance(ctx context.Context, groupID uuid.UUID, hasImbalance bool) error
 }
 
 
@@ -342,6 +343,12 @@ func (s *Service) SquareOffGroup(ctx context.Context, groupID uuid.UUID, symbols
 			}(followerID)
 		}
 		wg.Wait()
+	}
+
+	if len(symbols) == 0 && len(result.Errors) == 0 && result.Status == "completed" {
+		if err := s.store.SetGroupImbalance(ctx, groupID, false); err != nil {
+			s.log().Warn("squareoff: failed to clear group imbalance state", "group_id", groupID, "error", err)
+		}
 	}
 
 	s.log().Info("squareoff: group square off finished",

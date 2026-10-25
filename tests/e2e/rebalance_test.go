@@ -123,6 +123,22 @@ func TestE2E_Rebalance(t *testing.T) {
 			t.Fatalf("expected follower 01a in follower drifts list, got %+v", diffRes.Drifts)
 		}
 
+		// Verify group summary & detail return hasImbalance = true
+		groupsResp, groupsBody, err := h.EnvoyAPI(http.MethodGet, "/api/v1/groups", nil)
+		if err != nil || groupsResp.StatusCode != http.StatusOK {
+			t.Fatalf("get groups failed: %v", err)
+		}
+		var groupsList []struct {
+			ID           string `json:"id"`
+			HasImbalance bool   `json:"hasImbalance"`
+		}
+		_ = json.Unmarshal(groupsBody, &groupsList)
+		for _, g := range groupsList {
+			if g.ID == Group01ID && !g.HasImbalance {
+				t.Errorf("expected group 1 hasImbalance = true while drift exists, got false")
+			}
+		}
+
 		// 4. Execute Group Rebalance via POST /api/v1/groups/{id}/positions/rebalance
 		rebalResp, rebalBody, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/rebalance", Group01ID), map[string]any{
 			"follower_ids": []string{Follow01AID},
@@ -162,6 +178,18 @@ func TestE2E_Rebalance(t *testing.T) {
 			}
 			if p.Tradingsymbol == "NIFTY26OCTFUT" && p.Quantity != 75 {
 				t.Errorf("expected NIFTY26OCTFUT to be restored to 75, got %d", p.Quantity)
+			}
+		}
+
+		// 5b. Verify group summary now returns hasImbalance = false
+		groupsResp, groupsBody, err = h.EnvoyAPI(http.MethodGet, "/api/v1/groups", nil)
+		if err != nil || groupsResp.StatusCode != http.StatusOK {
+			t.Fatalf("get groups failed: %v", err)
+		}
+		_ = json.Unmarshal(groupsBody, &groupsList)
+		for _, g := range groupsList {
+			if g.ID == Group01ID && g.HasImbalance {
+				t.Errorf("expected group 1 hasImbalance = false after rebalance, got true")
 			}
 		}
 
@@ -230,7 +258,7 @@ func TestE2E_Rebalance(t *testing.T) {
 
 	t.Run("Group_Rebalance_EquilibriumAndSelective", func(t *testing.T) {
 		fCliA := h.FollowerClient("follow01a")
-		fCliB := h.FollowerClient("follow01b")
+		fCliD := h.FollowerClient("follow01d")
 
 		// 1. Ensure clean flat state
 		_, _, _ = h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/groups/%s/positions/square-off", Group01ID), map[string]any{})
@@ -249,7 +277,7 @@ func TestE2E_Rebalance(t *testing.T) {
 			t.Errorf("expected 0 followers with drift, got %d", cleanDiff.FollowersWithDrift)
 		}
 
-		// 3. Create rogue positions on BOTH Follower 01A and Follower 01B
+		// 3. Create rogue positions on BOTH Follower 01A and Follower 01D (both enabled followers)
 		_, err = fCliA.PlaceOrder("regular", sdk.OrderParams{
 			Exchange:        "NSE",
 			Tradingsymbol:   "RELIANCE",
@@ -261,7 +289,7 @@ func TestE2E_Rebalance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("place fA order: %v", err)
 		}
-		_, err = fCliB.PlaceOrder("regular", sdk.OrderParams{
+		_, err = fCliD.PlaceOrder("regular", sdk.OrderParams{
 			Exchange:        "NFO",
 			Tradingsymbol:   "NIFTY26OCTFUT",
 			TransactionType: "BUY",
@@ -270,7 +298,7 @@ func TestE2E_Rebalance(t *testing.T) {
 			Product:         "NRML",
 		})
 		if err != nil {
-			t.Fatalf("place fB order: %v", err)
+			t.Fatalf("place fD order: %v", err)
 		}
 
 		// 4. Selective rebalance: ONLY select Follower 01A
@@ -294,20 +322,36 @@ func TestE2E_Rebalance(t *testing.T) {
 			}
 		}
 
-		// 6. Follower 01B NIFTY26OCTFUT should STILL be open (qty 75)
-		posB, err := fCliB.GetPositions()
+		// 6. Follower 01D NIFTY26OCTFUT should STILL be open (qty 75)
+		posD, err := fCliD.GetPositions()
 		if err != nil {
-			t.Fatalf("get posB: %v", err)
+			t.Fatalf("get posD: %v", err)
 		}
 		var niftyStillOpen bool
-		for _, p := range posB.Net {
+		for _, p := range posD.Net {
 			if p.Tradingsymbol == "NIFTY26OCTFUT" && p.Quantity == 75 {
 				niftyStillOpen = true
 				break
 			}
 		}
 		if !niftyStillOpen {
-			t.Errorf("expected Follower 01B NIFTY26OCTFUT to remain untouched with qty 75, got %+v", posB.Net)
+			t.Errorf("expected Follower 01D NIFTY26OCTFUT to remain untouched with qty 75, got %+v", posD.Net)
+		}
+
+		// 7. Group must STILL have hasImbalance = true because Follower 01D was NOT rebalanced!
+		groupsResp, groupsBody, err := h.EnvoyAPI(http.MethodGet, "/api/v1/groups", nil)
+		if err != nil || groupsResp.StatusCode != http.StatusOK {
+			t.Fatalf("get groups: %v", err)
+		}
+		var gList []struct {
+			ID           string `json:"id"`
+			HasImbalance bool   `json:"hasImbalance"`
+		}
+		_ = json.Unmarshal(groupsBody, &gList)
+		for _, g := range gList {
+			if g.ID == Group01ID && !g.HasImbalance {
+				t.Errorf("expected group 1 hasImbalance = true after selective rebalance leaving D drifting, got false")
+			}
 		}
 
 		// Cleanup
@@ -333,6 +377,8 @@ func TestE2E_Rebalance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("place master buy order: %v", err)
 		}
+		// Allow asynchronous fan-out orders to be placed and filled on enabled followers
+		time.Sleep(300 * time.Millisecond)
 
 		// 1. Single account rebalance call on disabled follower must return 400 Bad Request
 		sResp, _, err := h.EnvoyAPI(http.MethodPost, fmt.Sprintf("/api/v1/accounts/%s/positions/rebalance", Follow01BID), nil)
@@ -364,6 +410,22 @@ func TestE2E_Rebalance(t *testing.T) {
 		}
 		if !fFound {
 			t.Errorf("expected follow01b to be listed in diff with drift")
+		}
+
+		// Group hasImbalance must be FALSE because only a disabled follower has drift
+		gListResp, gListBody, err := h.EnvoyAPI(http.MethodGet, "/api/v1/groups", nil)
+		if err != nil || gListResp.StatusCode != http.StatusOK {
+			t.Fatalf("get groups failed: %v", err)
+		}
+		var gListDisabled []struct {
+			ID           string `json:"id"`
+			HasImbalance bool   `json:"hasImbalance"`
+		}
+		_ = json.Unmarshal(gListBody, &gListDisabled)
+		for _, g := range gListDisabled {
+			if g.ID == Group01ID && g.HasImbalance {
+				t.Errorf("expected group 1 hasImbalance = false when only disabled follower has drift, got true")
+			}
 		}
 
 		// 3. Group rebalance explicitly requesting follow01b must NOT place any orders on follow01b

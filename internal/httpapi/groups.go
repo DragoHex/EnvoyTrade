@@ -35,6 +35,7 @@ type groupSummaryResponse struct {
 	FollowerCount   int    `json:"followerCount"`
 	Status          string `json:"status"`
 	Active          bool   `json:"active"`
+	HasImbalance    bool   `json:"hasImbalance"`
 }
 
 type groupFollowerResponse struct {
@@ -61,6 +62,7 @@ type groupDetailResponse struct {
 	MasterAccountID            string                     `json:"masterAccountId"`
 	MasterName                 string                     `json:"masterName"`
 	MasterActive               bool                       `json:"masterActive"`
+	HasImbalance               bool                       `json:"hasImbalance"`
 	MasterNetQty               int                        `json:"masterNetQty"`
 	MasterOpenPositionsCount   int                        `json:"masterOpenPositionsCount"`
 	MasterClosedPositionsCount int                        `json:"masterClosedPositionsCount"`
@@ -92,6 +94,7 @@ func (h *handlers) getGroups(w http.ResponseWriter, r *http.Request) {
 			FollowerCount:   g.FollowerCount,
 			Status:          g.Status,
 			Active:          g.Active,
+			HasImbalance:    g.HasImbalance,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -191,6 +194,7 @@ func (h *handlers) getGroupDetail(w http.ResponseWriter, r *http.Request) {
 		MasterAccountID:            detail.MasterAccountID,
 		MasterName:                 detail.MasterName,
 		MasterActive:               detail.MasterActive,
+		HasImbalance:               detail.HasImbalance,
 		MasterNetQty:               detail.MasterNetQty,
 		MasterOpenPositionsCount:   detail.MasterOpenPositionsCount,
 		MasterClosedPositionsCount: detail.MasterClosedPositionsCount,

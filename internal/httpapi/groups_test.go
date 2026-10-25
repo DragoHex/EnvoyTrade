@@ -18,7 +18,7 @@ func TestGetGroups_ReturnsGroupsAsJSON(t *testing.T) {
 	master := uuid.New()
 	store := &stubStore{
 		groups: []domain.GroupSummary{
-			{MasterID: master, MasterAccountID: "ZX1234", Broker: "zerodha", FollowerCount: 2, Status: "ok"},
+			{MasterID: master, MasterAccountID: "ZX1234", Broker: "zerodha", FollowerCount: 2, Status: "ok", HasImbalance: true},
 		},
 	}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
@@ -46,6 +46,9 @@ func TestGetGroups_ReturnsGroupsAsJSON(t *testing.T) {
 	if got[0]["status"] != "ok" {
 		t.Errorf("status = %v, want ok", got[0]["status"])
 	}
+	if got[0]["hasImbalance"] != true {
+		t.Errorf("hasImbalance = %v, want true", got[0]["hasImbalance"])
+	}
 }
 
 func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
@@ -57,6 +60,7 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 		detail: domain.GroupDetail{
 			MasterID:                   master,
 			MasterAccountID:            "ZX1234",
+			HasImbalance:               true,
 			MasterNetQty:               100,
 			MasterOpenPositionsCount:   2,
 			MasterClosedPositionsCount: 1,
@@ -110,6 +114,9 @@ func TestGetGroupDetail_ReturnsDetailAsJSON(t *testing.T) {
 	}
 	if got["masterNetQty"] != float64(100) {
 		t.Errorf("masterNetQty = %v, want 100", got["masterNetQty"])
+	}
+	if got["hasImbalance"] != true {
+		t.Errorf("hasImbalance = %v, want true", got["hasImbalance"])
 	}
 	if got["masterOpenPositionsCount"] != float64(2) {
 		t.Errorf("masterOpenPositionsCount = %v, want 2", got["masterOpenPositionsCount"])

@@ -26,6 +26,7 @@ type Store interface {
 	InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error)
 	UpdateFollowerOrderPlaced(ctx context.Context, id int64, brokerOrderID string, placedQty int) error
 	UpdateFollowerOrderFailed(ctx context.Context, id int64, terminalStatus string, errMsg string) error
+	SetGroupImbalance(ctx context.Context, groupID uuid.UUID, hasImbalance bool) error
 }
 
 // BrokerResolver resolves the broker.Broker instance for a given account.
@@ -237,6 +238,22 @@ func (s *Service) ComputeGroupDiff(ctx context.Context, groupID uuid.UUID) (doma
 			diffResult.FollowersWithDrift++
 			diffResult.Drifts = append(diffResult.Drifts, fDrift)
 		}
+	}
+
+	hasActiveImbalance := false
+	for _, d := range diffResult.Drifts {
+		if d.Enabled {
+			hasActiveImbalance = true
+			break
+		}
+	}
+
+	targetGroupID := groupDetail.GroupID
+	if targetGroupID == uuid.Nil {
+		targetGroupID = groupID
+	}
+	if err := s.store.SetGroupImbalance(ctx, targetGroupID, hasActiveImbalance); err != nil {
+		s.log().Warn("rebalance: failed to update group imbalance state", "group_id", targetGroupID, "error", err)
 	}
 
 	return diffResult, nil
@@ -554,6 +571,29 @@ func (s *Service) RebalanceGroup(ctx context.Context, groupID uuid.UUID, followe
 	}
 
 	wg.Wait()
+
+	totalActiveDrifts := 0
+	for _, d := range diff.Drifts {
+		if d.Enabled {
+			totalActiveDrifts++
+		}
+	}
+
+	targetGroupID := groupID
+	if diff.GroupID != uuid.Nil {
+		targetGroupID = diff.GroupID
+	}
+
+	allActiveResolved := totalActiveDrifts > 0 &&
+		len(targetDrifts) == totalActiveDrifts &&
+		len(result.Errors) == 0 &&
+		result.Status == "completed"
+
+	if allActiveResolved {
+		if err := s.store.SetGroupImbalance(ctx, targetGroupID, false); err != nil {
+			s.log().Warn("rebalance: failed to clear group imbalance state", "group_id", targetGroupID, "error", err)
+		}
+	}
 
 	s.log().Info("rebalance: group rebalance finished",
 		"group_id", groupID,

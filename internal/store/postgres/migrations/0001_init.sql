@@ -99,14 +99,17 @@ WHERE ip_address IS NOT NULL AND ip_address != '';
 
 -- 5. Trading Groups (Strictly 1 Master Account per Group)
 CREATE TABLE IF NOT EXISTS groups (
-    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     uuid REFERENCES users(id) ON DELETE CASCADE,
-    name        text NOT NULL DEFAULT '',
-    master_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    updated_at  timestamptz NOT NULL DEFAULT now(),
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       uuid REFERENCES users(id) ON DELETE CASCADE,
+    name          text NOT NULL DEFAULT '',
+    master_id     uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    has_imbalance boolean NOT NULL DEFAULT false,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT groups_master_id_unique UNIQUE (master_id) DEFERRABLE INITIALLY DEFERRED
 );
+
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS has_imbalance boolean NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_groups_user_id ON groups (user_id);
 CREATE INDEX IF NOT EXISTS groups_master_id_idx ON groups (master_id);

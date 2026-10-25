@@ -22,6 +22,15 @@ type fakeRebalanceStore struct {
 	insertedOrders []domain.FollowerOrder
 	placedOrders   map[int64]string
 	failedOrders   map[int64]string
+	imbalances     map[uuid.UUID]bool
+}
+
+func (s *fakeRebalanceStore) SetGroupImbalance(ctx context.Context, groupID uuid.UUID, hasImbalance bool) error {
+	if s.imbalances == nil {
+		s.imbalances = make(map[uuid.UUID]bool)
+	}
+	s.imbalances[groupID] = hasImbalance
+	return nil
 }
 
 func (s *fakeRebalanceStore) InsertFollowerOrder(ctx context.Context, o domain.FollowerOrder) (int64, error) {
@@ -1073,6 +1082,395 @@ func TestRebalanceAccount_DisabledFollowerRejected(t *testing.T) {
 		t.Errorf("expected 0 orders on disabled follower, got %d", len(bDisabled.Calls))
 	}
 }
+
+func TestComputeGroupDiff_UpdatesGroupImbalance_TrueWhenDriftExists(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{masterID: "master", f1ID: "follower"},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "F1", BrokerAccountID: "BRK_F1", Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {ID: f1ID, CloneFactor: &cloneFactor, Enabled: true, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{"NSE:TCS": 1},
+	}
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	}
+	bF1 := &fake.Broker{Positions: []broker.Position{}} // drift exists!
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, f1ID: bF1},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	diff, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	if len(diff.Drifts) != 1 {
+		t.Fatalf("expected 1 drift, got %d", len(diff.Drifts))
+	}
+	if !store.imbalances[gID] {
+		t.Errorf("expected store.imbalances[%s] to be true, got false", gID)
+	}
+}
+
+func TestComputeGroupDiff_UpdatesGroupImbalance_FalseWhenNoDrift(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{masterID: "master", f1ID: "follower"},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "F1", BrokerAccountID: "BRK_F1", Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {ID: f1ID, CloneFactor: &cloneFactor, Enabled: true, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{"NSE:TCS": 1},
+	}
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	}
+	bF1 := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	} // balanced!
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, f1ID: bF1},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	diff, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	if len(diff.Drifts) != 0 {
+		t.Fatalf("expected 0 drifts, got %d", len(diff.Drifts))
+	}
+	if store.imbalances[gID] {
+		t.Errorf("expected store.imbalances[%s] to be false, got true", gID)
+	}
+}
+
+func TestRebalanceGroup_ClearsGroupImbalance_WhenSuccess(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{masterID: "master", f1ID: "follower"},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "F1", BrokerAccountID: "BRK_F1", Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {ID: f1ID, Role: "follower", CloneFactor: &cloneFactor, Enabled: true, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{"NSE:TCS": 1},
+	}
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	}
+	bF1 := &fake.Broker{Positions: []broker.Position{}} // initially drift exists
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, f1ID: bF1},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	// First verify diff marks imbalance = true
+	_, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	if !store.imbalances[gID] {
+		t.Fatalf("expected imbalance to be true before rebalance")
+	}
+
+	// Now rebalance group
+	res, err := svc.RebalanceGroup(context.Background(), gID, nil)
+	if err != nil {
+		t.Fatalf("RebalanceGroup failed: %v", err)
+	}
+	if res.Status != "completed" || len(res.Errors) > 0 {
+		t.Fatalf("expected completed status with 0 errors, got status=%s errors=%v", res.Status, res.Errors)
+	}
+	if store.imbalances[gID] {
+		t.Errorf("expected store.imbalances[%s] to be false after successful rebalance, got true", gID)
+	}
+}
+
+func TestComputeGroupDiff_NoImbalance_WhenAllDriftingFollowersDisabled(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	fDisabledID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{masterID: "master", fDisabledID: "follower"},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: fDisabledID, Name: "Disabled Follower", BrokerAccountID: "BRK_DIS", Enabled: false},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			fDisabledID: {ID: fDisabledID, Role: "follower", CloneFactor: &cloneFactor, Enabled: false, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{"NSE:TCS": 1},
+	}
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	}
+	bDisabled := &fake.Broker{Positions: []broker.Position{}} // drift exists relative to master, but follower is disabled!
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, fDisabledID: bDisabled},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	diff, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	// Diff record still exists for audit
+	if len(diff.Drifts) != 1 {
+		t.Fatalf("expected 1 drift in result, got %d", len(diff.Drifts))
+	}
+	// But because follower is disabled, active group imbalance in store must be false!
+	if store.imbalances[gID] {
+		t.Errorf("expected store.imbalances[%s] to be false for disabled follower drift, got true", gID)
+	}
+}
+
+func TestComputeGroupDiff_ActiveImbalance_WhenDisabledAccountBecomesEnabled(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	fID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{masterID: "master", fID: "follower"},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: fID, Name: "Follower 1", BrokerAccountID: "BRK_F1", Enabled: false},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			fID: {ID: fID, Role: "follower", CloneFactor: &cloneFactor, Enabled: false, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{"NSE:TCS": 1},
+	}
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	}
+	bFollower := &fake.Broker{Positions: []broker.Position{}}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, fID: bFollower},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	// Step 1: When disabled, no active imbalance
+	_, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	if store.imbalances[gID] {
+		t.Errorf("expected imbalance false while disabled")
+	}
+
+	// Step 2: Account is enabled
+	store.groupDetail[gID] = domain.GroupDetail{
+		GroupID:  gID,
+		MasterID: masterID,
+		Followers: []domain.GroupFollower{
+			{AccountID: fID, Name: "Follower 1", BrokerAccountID: "BRK_F1", Enabled: true},
+		},
+	}
+	store.accounts[fID] = domain.Account{
+		ID:          fID,
+		Role:        "follower",
+		CloneFactor: &cloneFactor,
+		Enabled:     true,
+		MasterID:    &masterID,
+	}
+
+	// Step 3: Recompute diff -> must now be active imbalance!
+	_, err = svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	if !store.imbalances[gID] {
+		t.Errorf("expected store.imbalances[%s] to be true once follower was enabled", gID)
+	}
+}
+
+func TestRebalanceGroup_PreservesImbalance_WhenSelectiveRebalanceLeavesRemainingDrifts(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+	f2ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{
+			masterID: "master",
+			f1ID:     "follower",
+			f2ID:     "follower",
+		},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "F1", BrokerAccountID: "BRK_F1", Enabled: true},
+					{AccountID: f2ID, Name: "F2", BrokerAccountID: "BRK_F2", Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {ID: f1ID, Role: "follower", CloneFactor: &cloneFactor, Enabled: true, MasterID: &masterID},
+			f2ID: {ID: f2ID, Role: "follower", CloneFactor: &cloneFactor, Enabled: true, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{
+			"NSE:TCS":  1,
+			"NSE:INFY": 1,
+		},
+	}
+
+	// Master has 10 TCS and 10 INFY
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10},
+			{Exchange: "NSE", Tradingsymbol: "INFY", Product: "CNC", Quantity: 10},
+		},
+	}
+	// F1 has 0 TCS (drift 10)
+	bF1 := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "INFY", Product: "CNC", Quantity: 10},
+		},
+	}
+	// F2 has 0 INFY (drift 10)
+	bF2 := &fake.Broker{
+		Positions: []broker.Position{
+			{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10},
+		},
+	}
+
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, f1ID: bF1, f2ID: bF2},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	// Compute initial diff -> both F1 and F2 drift, so imbalance is true
+	diff, err := svc.ComputeGroupDiff(context.Background(), gID)
+	if err != nil {
+		t.Fatalf("ComputeGroupDiff failed: %v", err)
+	}
+	if len(diff.Drifts) != 2 {
+		t.Fatalf("expected 2 drifts, got %d", len(diff.Drifts))
+	}
+	if !store.imbalances[gID] {
+		t.Fatalf("expected imbalance to be true initially")
+	}
+
+	// Selective rebalance ONLY F1
+	res, err := svc.RebalanceGroup(context.Background(), gID, []uuid.UUID{f1ID})
+	if err != nil {
+		t.Fatalf("selective RebalanceGroup failed: %v", err)
+	}
+	if res.Status != "completed" || len(res.Errors) > 0 {
+		t.Fatalf("expected completed with 0 errors for F1 rebalance, got status=%s errors=%v", res.Status, res.Errors)
+	}
+
+	// CRITICAL ASSERTION: store.imbalances must STILL be true because F2 still has drift!
+	if !store.imbalances[gID] {
+		t.Errorf("FAULTY CODE DETECTED: store.imbalances[%s] was falsely cleared to false even though F2 still has unresolved drift!", gID)
+	}
+}
+
+func TestRebalanceGroup_PreservesImbalance_WhenTargetFollowerErrors(t *testing.T) {
+	gID := uuid.New()
+	masterID := uuid.New()
+	f1ID := uuid.New()
+
+	cloneFactor := decimal.NewFromFloat(1.0)
+	store := &fakeRebalanceStore{
+		roles: map[uuid.UUID]string{masterID: "master", f1ID: "follower"},
+		groupDetail: map[uuid.UUID]domain.GroupDetail{
+			gID: {
+				GroupID:  gID,
+				MasterID: masterID,
+				Followers: []domain.GroupFollower{
+					{AccountID: f1ID, Name: "F1", BrokerAccountID: "BRK_F1", Enabled: true},
+				},
+			},
+		},
+		accounts: map[uuid.UUID]domain.Account{
+			f1ID: {ID: f1ID, Role: "follower", CloneFactor: &cloneFactor, Enabled: true, MasterID: &masterID},
+		},
+		lotSizes: map[string]int{"NSE:TCS": 1},
+		imbalances: map[uuid.UUID]bool{gID: true},
+	}
+
+	bMaster := &fake.Broker{
+		Positions: []broker.Position{{Exchange: "NSE", Tradingsymbol: "TCS", Product: "CNC", Quantity: 10}},
+	}
+	// F1 broker fails on order placement
+	bF1 := &failingOrderBroker{
+		Broker:   &fake.Broker{Positions: []broker.Position{}},
+		orderErr: errors.New("RMS margin failure"),
+	}
+	resolver := &fakeResolver{
+		brokers: map[uuid.UUID]broker.Broker{masterID: bMaster, f1ID: bF1},
+	}
+	svc := rebalance.NewService(store, resolver, nil, nil)
+
+	res, err := svc.RebalanceGroup(context.Background(), gID, nil)
+	if err != nil {
+		t.Fatalf("RebalanceGroup error: %v", err)
+	}
+	if res.Status != "partial" || len(res.Errors) == 0 {
+		t.Errorf("expected partial status with errors, got status=%s errors=%v", res.Status, res.Errors)
+	}
+	// Imbalance must remain true because rebalance failed
+	if !store.imbalances[gID] {
+		t.Errorf("expected store.imbalances[%s] to remain true when order placement fails, got false", gID)
+	}
+}
+
+
 
 
 
