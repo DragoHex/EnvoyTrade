@@ -210,10 +210,12 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
     }
   })
 
+  const LIVE_POLL_TABS: OrderTabId[] = ['open_positions', 'open_orders']
+
   createEffect(() => {
     if (!isExpanded()) return
     const unregister = registerSyncSubscriber(async () => {
-      if (activeTab() === 'holdings') return
+      if (!LIVE_POLL_TABS.includes(activeTab())) return
       try {
         setIsPolling(true)
         const currentTab = activeTab()

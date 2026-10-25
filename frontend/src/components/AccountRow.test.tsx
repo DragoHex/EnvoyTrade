@@ -462,6 +462,38 @@ describe('AccountRow', () => {
     }
   })
 
+  it('does not duplicate fetch getAccountOrders on row expansion (only AccountOrderDetails fetches once)', async () => {
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 50, openPositionsCount: 1, closedPositionsCount: 0, pendingOrdersCount: 0, totalMtm: 100, realizedPnl: 0, accountValue: 10000, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 0, holdings: 0, openOrders: 0, closedOrders: 0, rejectedOrders: 0 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => (
+      <AccountRow
+        follower={follower}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+      />
+    ))
+
+    expect(getOrdersSpy).not.toHaveBeenCalled()
+
+    const expandBtn = screen.getByTestId('expand-row-btn')
+    fireEvent.click(expandBtn)
+
+    // Exactly 1 call from AccountOrderDetails, NOT 2!
+    expect(getOrdersSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('resets live summary when row is collapsed so it displays updated follower props', async () => {
     const initialFollower: GroupFollower = {
       accountId: 'f-fold',

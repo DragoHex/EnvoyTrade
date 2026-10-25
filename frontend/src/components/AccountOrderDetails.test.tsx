@@ -778,6 +778,61 @@ it('locks column header widths with fixed table layout so headers do not shift a
     }
   })
 
+  it('polls on sync ticks only for live active tabs (open_positions, open_orders) and throttles terminal tabs', async () => {
+    vi.useFakeTimers()
+    const getOrdersSpy = vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      summary: { netQty: 0, openCount: 0, closedCount: 0, pendingMetric: 0, totalMtm: 0, realizedPnl: 0, accountValue: 0, status: 'online' },
+      counts: { openPositions: 1, closedPositions: 1, holdings: 1, openOrders: 1, closedOrders: 1, rejectedOrders: 1 },
+      pagination: { tab: 'open_positions', page: 1, limit: 10, totalCount: 1, totalPages: 1 },
+      openPositions: [{ product: 'CNC', instrument: 'NIFTY26SEP', qty: 50, avgPrice: '100', ltp: '105', mtm: '250', action: 'exit' }],
+      closedPositions: [{ product: 'CNC', instrument: 'INFY', qty: 0, avgPrice: '1500', ltp: '1550', mtm: '500', action: 'exit' }],
+      holdings: [],
+      openOrders: [{ id: 'ord-1', instrument: 'SBIN', type: 'BUY', quantity: 10, price: '800', status: 'OPEN', time: '10:00' }],
+      closedOrders: [{ id: 'ord-2', instrument: 'TCS', type: 'BUY', quantity: 5, price: '3500', status: 'COMPLETE', time: '09:30' }],
+      rejectedOrders: [{ id: 'ord-3', instrument: 'RELIANCE', type: 'BUY', quantity: 10, price: '2500', status: 'REJECTED', time: '09:15' }],
+    })
+
+    try {
+      render(() => <AccountOrderDetails accountId="acc-live-throttle" />)
+
+      // 1. Initial tab open_positions: initial fetch + 1 poll
+      expect(getOrdersSpy).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(2)
+
+      // 2. Open Orders tab: active trading tab, should poll
+      const openOrdersBtn = screen.getByRole('tab', { name: /Open Order/i })
+      fireEvent.click(openOrdersBtn)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(3) // tab switch fetch
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(4) // active tab poll
+
+      // 3. Closed Positions: terminal tab, should NOT poll
+      const closedPosBtn = screen.getByRole('tab', { name: /Closed Position/i })
+      fireEvent.click(closedPosBtn)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(5) // tab switch fetch
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(5) // no poll
+
+      // 4. Closed Orders: terminal tab, should NOT poll
+      const closedOrdersBtn = screen.getByRole('tab', { name: /Closed Order/i })
+      fireEvent.click(closedOrdersBtn)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(6) // tab switch fetch
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(6) // no poll
+
+      // 5. Rejected Orders: terminal tab, should NOT poll
+      const rejectedOrdersBtn = screen.getByRole('tab', { name: /Rejected Order/i })
+      fireEvent.click(rejectedOrdersBtn)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(7) // tab switch fetch
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(getOrdersSpy).toHaveBeenCalledTimes(7) // no poll
+    } finally {
+      resetSyncBusForTest()
+      vi.useRealTimers()
+    }
+  })
+
   it('does not flicker or unmount table rows on periodic poll when incoming data is identical', async () => {
     vi.useFakeTimers()
     const sampleData = (): api.AccountOrdersResponse => ({
