@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"envoytrade/internal/crypto"
 	"envoytrade/internal/domain"
@@ -718,6 +719,66 @@ func TestPostAccount_FollowerWithGroupID_Succeeds(t *testing.T) {
 	if link.GroupID != groupID || link.MasterID != masterID || link.CloneFactor.String() != "1.5" {
 		t.Errorf("unexpected link args: %+v", link)
 	}
+
+	var resp struct {
+		GroupID   *string `json:"groupId"`
+		GroupName *string `json:"groupName"`
+		MasterID  *string `json:"masterId"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response body: %v", err)
+	}
+	if resp.GroupName == nil || *resp.GroupName != "Alpha Group" {
+		t.Errorf("expected groupName 'Alpha Group', got %v", resp.GroupName)
+	}
+	if resp.GroupID == nil || *resp.GroupID != groupID.String() {
+		t.Errorf("expected groupId %s, got %v", groupID, resp.GroupID)
+	}
+}
+
+func TestPostAccount_FollowerWithMasterID_ReturnsGroupName(t *testing.T) {
+	groupID := uuid.New()
+	masterID := uuid.New()
+	store := &stubStore{
+		groupDetails: map[uuid.UUID]domain.GroupDetail{
+			masterID: {
+				GroupID:         groupID,
+				GroupName:       "Beta Group",
+				MasterID:        masterID,
+				MasterAccountID: "ZX1234",
+				MasterActive:    true,
+			},
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"role": "follower", "broker": "kite", "brokerAccountId": "ZY5678",
+		"ip": "192.168.1.100", "masterId": masterID.String(),
+		"cloneFactor": "1.0",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		GroupID   *string `json:"groupId"`
+		GroupName *string `json:"groupName"`
+		MasterID  *string `json:"masterId"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response body: %v", err)
+	}
+	if resp.GroupName == nil || *resp.GroupName != "Beta Group" {
+		t.Errorf("expected groupName 'Beta Group', got %v", resp.GroupName)
+	}
+	if resp.GroupID == nil || *resp.GroupID != groupID.String() {
+		t.Errorf("expected groupId %s, got %v", groupID, resp.GroupID)
+	}
 }
 
 func TestPostAccount_InvalidMasterID_Returns400(t *testing.T) {
@@ -762,6 +823,46 @@ func TestPostAccount_AllowsTestbroker(t *testing.T) {
 	}
 	if store.createAccountArgs[0].Broker != "testbroker" {
 		t.Errorf("broker = %s, want testbroker", store.createAccountArgs[0].Broker)
+	}
+}
+
+func TestPostAccount_AllowsDhan(t *testing.T) {
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"name":            "Dhan Master",
+		"role":            "master",
+		"broker":          "dhan",
+		"brokerAccountId": "1000000001",
+		"apiKey":          "dhan_key",
+		"apiSecret":       "dhan_secret",
+		"accessToken":     "jwt_token_sample",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createAccountArgs) != 1 {
+		t.Fatalf("expected 1 createAccount call, got %d", len(store.createAccountArgs))
+	}
+	if store.createAccountArgs[0].Broker != "dhan" {
+		t.Errorf("broker = %s, want dhan", store.createAccountArgs[0].Broker)
+	}
+	if len(store.setAccessTokenArgs) != 1 {
+		t.Fatalf("expected 1 setAccessToken call, got %d", len(store.setAccessTokenArgs))
+	}
+	if store.setAccessTokenArgs[0].Token != "jwt_token_sample" {
+		t.Errorf("token = %s, want jwt_token_sample", store.setAccessTokenArgs[0].Token)
+	}
+	if store.setAccessTokenArgs[0].ExpiresAt == nil {
+		t.Fatalf("expected non-nil ExpiresAt for Dhan access token")
+	}
+	if store.setAccessTokenArgs[0].ExpiresAt.Before(time.Now().Add(23 * time.Hour)) {
+		t.Errorf("expected ExpiresAt around 24h in future, got %v", store.setAccessTokenArgs[0].ExpiresAt)
 	}
 }
 
@@ -1211,6 +1312,7 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 			{IPAddress: "10.0.0.2", WhitelistedBrokers: "Zerodha"},
 			{IPAddress: "10.0.0.3", WhitelistedBrokers: "Zerodha, TestBroker"},
 			{IPAddress: "10.0.0.4", WhitelistedBrokers: ""},
+			{IPAddress: "10.0.0.5", WhitelistedBrokers: "Dhan"},
 		},
 	}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
@@ -1321,6 +1423,134 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 		r.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200 patching kite account with Zerodha IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 7: Create Dhan account with IP whitelisted for Dhan -> 201 Created
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "dhan",
+			"role":            "follower",
+			"brokerAccountId": "1000000005",
+			"ip":              "10.0.0.5",
+			"accessToken":     "token_dhan_valid",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for broker dhan on Dhan IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 8: Create Dhan account with IP whitelisted only for Zerodha -> 400 Bad Request
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "dhan",
+			"role":            "follower",
+			"brokerAccountId": "1000000006",
+			"ip":              "10.0.0.2",
+			"accessToken":     "token_dhan_bad",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for broker dhan on Zerodha IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 9: Create Dhan account with IP whitelisted for All Brokers ("") -> 201 Created
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "dhan",
+			"role":            "follower",
+			"brokerAccountId": "1000000007",
+			"ip":              "10.0.0.4",
+			"accessToken":     "token_dhan_all",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for broker dhan on All Brokers IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 10: Create Kite account with IP whitelisted for Dhan -> 400 Bad Request
+	{
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "kite",
+			"role":            "follower",
+			"brokerAccountId": "FOLLOWER_KITE_BAD",
+			"apiKey":          "k",
+			"apiSecret":       "s",
+			"ip":              "10.0.0.5",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for broker kite on Dhan IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 11: Patch Dhan account with IP whitelisted for Zerodha -> 400 Bad Request
+	dhanAccID := uuid.New()
+	store.accounts = append(store.accounts, domain.Account{
+		ID:              dhanAccID,
+		Broker:          "dhan",
+		Role:            "follower",
+		BrokerAccountID: "1000000008",
+	})
+	store.accountRoles[dhanAccID] = "follower"
+
+	{
+		body, _ := json.Marshal(map[string]any{
+			"ip": "10.0.0.2",
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+dhanAccID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 patching dhan account with Zerodha IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 12: Patch Dhan account with IP whitelisted for Dhan -> 200 OK
+	{
+		body, _ := json.Marshal(map[string]any{
+			"ip": "10.0.0.5",
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+dhanAccID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 patching dhan account with Dhan IP, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 13: Patch Dhan account with accessToken -> sets ExpiresAt ~24h in future
+	{
+		before := len(store.setAccessTokenArgs)
+		body, _ := json.Marshal(map[string]any{
+			"accessToken": "patched_jwt_token",
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+dhanAccID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 patching dhan account accessToken, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(store.setAccessTokenArgs) != before+1 {
+			t.Fatalf("expected 1 setAccessToken call, got %d", len(store.setAccessTokenArgs)-before)
+		}
+		call := store.setAccessTokenArgs[len(store.setAccessTokenArgs)-1]
+		if call.Token != "patched_jwt_token" {
+			t.Errorf("token = %s, want patched_jwt_token", call.Token)
+		}
+		if call.ExpiresAt == nil || call.ExpiresAt.Before(time.Now().Add(23*time.Hour)) {
+			t.Errorf("expected 24h ExpiresAt on patched token, got %v", call.ExpiresAt)
 		}
 	}
 }

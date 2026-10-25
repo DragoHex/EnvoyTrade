@@ -278,6 +278,9 @@ func TestNormalizeWhitelistedBrokers(t *testing.T) {
 		{"test_broker", "TestBroker"},
 		{"zerodha, testbroker", "Zerodha, TestBroker"},
 		{"Kite, TestBroker", "Zerodha, TestBroker"},
+		{"dhan", "Dhan"},
+		{"Dhan", "Dhan"},
+		{"dhan, kite", "Dhan, Zerodha"},
 		{"unknown_broker", "unknown_broker"},
 	}
 
@@ -293,6 +296,7 @@ func TestProxyIP_MatchesBroker(t *testing.T) {
 	pZerodha := domain.ProxyIP{WhitelistedBrokers: "Zerodha"}
 	pTest := domain.ProxyIP{WhitelistedBrokers: "TestBroker"}
 	pBoth := domain.ProxyIP{WhitelistedBrokers: "Zerodha, TestBroker"}
+	pDhan := domain.ProxyIP{WhitelistedBrokers: "Dhan"}
 	pEmpty := domain.ProxyIP{WhitelistedBrokers: ""}
 
 	// pZerodha
@@ -328,11 +332,66 @@ func TestProxyIP_MatchesBroker(t *testing.T) {
 		t.Errorf("pBoth should match 'testbroker'")
 	}
 
+	// pDhan
+	if !pDhan.MatchesBroker("dhan") {
+		t.Errorf("pDhan should match 'dhan'")
+	}
+	if !pDhan.MatchesBroker("Dhan") {
+		t.Errorf("pDhan should match 'Dhan'")
+	}
+	if pDhan.MatchesBroker("zerodha") {
+		t.Errorf("pDhan should NOT match 'zerodha'")
+	}
+
 	// pEmpty matches all (backwards compatible)
 	if !pEmpty.MatchesBroker("zerodha") {
 		t.Errorf("pEmpty should match 'zerodha'")
+	}
+	if !pEmpty.MatchesBroker("dhan") {
+		t.Errorf("pEmpty should match 'dhan'")
 	}
 	if !pEmpty.MatchesBroker("testbroker") {
 		t.Errorf("pEmpty should match 'testbroker'")
 	}
 }
+
+func TestProxyIP_BrokerPriority(t *testing.T) {
+	pZerodha := domain.ProxyIP{WhitelistedBrokers: "Zerodha"}
+	pDhan := domain.ProxyIP{WhitelistedBrokers: "Dhan"}
+	pBoth := domain.ProxyIP{WhitelistedBrokers: "Zerodha, TestBroker"}
+	pEmpty := domain.ProxyIP{WhitelistedBrokers: ""}
+
+	// Priority constants: 0 = incompatible, 1 = specialized, 2 = all brokers (unrestricted)
+
+	// For Kite / Zerodha
+	if p := pZerodha.BrokerPriority("kite"); p != 1 {
+		t.Errorf("pZerodha for 'kite' got priority %d, want 1", p)
+	}
+	if p := pZerodha.BrokerPriority("zerodha"); p != 1 {
+		t.Errorf("pZerodha for 'zerodha' got priority %d, want 1", p)
+	}
+	if p := pBoth.BrokerPriority("kite"); p != 1 {
+		t.Errorf("pBoth for 'kite' got priority %d, want 1", p)
+	}
+	if p := pEmpty.BrokerPriority("kite"); p != 2 {
+		t.Errorf("pEmpty for 'kite' got priority %d, want 2", p)
+	}
+	if p := pDhan.BrokerPriority("kite"); p != 0 {
+		t.Errorf("pDhan for 'kite' got priority %d, want 0", p)
+	}
+
+	// For Dhan
+	if p := pDhan.BrokerPriority("dhan"); p != 1 {
+		t.Errorf("pDhan for 'dhan' got priority %d, want 1", p)
+	}
+	if p := pEmpty.BrokerPriority("dhan"); p != 2 {
+		t.Errorf("pEmpty for 'dhan' got priority %d, want 2", p)
+	}
+	if p := pZerodha.BrokerPriority("dhan"); p != 0 {
+		t.Errorf("pZerodha for 'dhan' got priority %d, want 0", p)
+	}
+	if p := pBoth.BrokerPriority("dhan"); p != 0 {
+		t.Errorf("pBoth for 'dhan' got priority %d, want 0", p)
+	}
+}
+

@@ -57,6 +57,31 @@ describe('AccountsTable', () => {
     expect(brokerLogos[0].querySelector('svg.broker-logo-svg')).not.toBeNull()
   })
 
+  it('displays groupName directly when present on account', () => {
+    const acct: Account = { ...follower, groupName: 'Alpha Momentum' }
+    render(() => <AccountsTable accounts={[acct]} onEdit={vi.fn()} />)
+    expect(screen.getByText('Alpha Momentum')).toBeInTheDocument()
+  })
+
+  it('resolves group name from groups prop and never displays raw UUID', () => {
+    const rawUuid = 'b0000000-0000-0000-0000-000000000001'
+    const acctWithGroup: Account = { ...follower, groupId: rawUuid, groupName: undefined }
+    const groups: api.GroupSummary[] = [
+      { id: rawUuid, name: 'Beta Scalping', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 1, status: 'ok' },
+    ]
+    render(() => <AccountsTable accounts={[acctWithGroup]} groups={groups} onEdit={vi.fn()} />)
+    expect(screen.getByText('Beta Scalping')).toBeInTheDocument()
+    expect(screen.queryByText(rawUuid)).not.toBeInTheDocument()
+  })
+
+  it('renders em-dash and never displays raw UUID when group cannot be resolved', () => {
+    const rawUuid = 'b0000000-0000-0000-0000-000000000002'
+    const unresolvableAcct: Account = { ...follower, groupId: rawUuid, masterId: 'm999', groupName: undefined }
+    render(() => <AccountsTable accounts={[unresolvableAcct]} groups={[]} onEdit={vi.fn()} />)
+    expect(screen.queryByText(rawUuid)).not.toBeInTheDocument()
+    expect(screen.queryByText('m999')).not.toBeInTheDocument()
+  })
+
   it('renders emptyMessage spanning all columns when accounts is empty', () => {
     render(() => (
       <AccountsTable accounts={[]} emptyMessage="No master accounts." onEdit={vi.fn()} />

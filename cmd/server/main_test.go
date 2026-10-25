@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"envoytrade/internal/broker"
+	"envoytrade/internal/dhan"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/fake"
@@ -135,6 +136,26 @@ func setupTestResolver(store brokerResolverStore) *serverBrokerResolver {
 	reg.Register("kite", kiteFactory)
 	reg.Register("zerodha", kiteFactory)
 	reg.Register("testbroker", testbroker.NewBrokerFactory())
+
+	dhanResolver := dhan.NewInstrumentResolver(nil)
+	dhanFactory := broker.FactoryFunc(func(_ context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
+		var proxyCfg *dhan.ProxyConfig
+		if acc.ProxyHost != "" {
+			proxyCfg = &dhan.ProxyConfig{
+				Scheme:       "https",
+				Host:         acc.ProxyHost,
+				Port:         acc.ProxyPort,
+				ClientID:     acc.ProxyUsername,
+				ClientSecret: acc.ProxyPassword,
+			}
+		}
+		clientID := acc.BrokerAccountID
+		if clientID == "" {
+			clientID = acc.ApiKey
+		}
+		return dhan.NewLiveBroker(clientID, acc.AccessToken, proxyCfg, dhanResolver)
+	})
+	reg.Register("dhan", dhanFactory)
 
 	return &serverBrokerResolver{
 		store:    store,
@@ -583,6 +604,131 @@ func TestWorkerFollowerRegistrar_ResolveBrokerError_ReturnsError(t *testing.T) {
 	err := reg.RegisterFollower(context.Background(), fid)
 	if !errors.Is(err, resErr) {
 		t.Fatalf("expected error %v, got %v", resErr, err)
+	}
+}
+
+func TestResolveBroker_DhanMaster_ResolvesDhanBroker(t *testing.T) {
+	ctx := context.Background()
+	mid := uuid.New()
+	store := &mockResolverStore{
+		accounts: map[uuid.UUID]domain.AccountAuthInfo{
+			mid: {
+				ID:              mid,
+				Role:            "master",
+				Broker:          "dhan",
+				BrokerAccountID: "1000000001",
+				ApiKey:          "1000000001",
+				AccessToken:     "valid-dhan-token",
+			},
+		},
+	}
+	resolver := setupTestResolver(store)
+
+	b, err := resolver.ResolveBroker(ctx, mid)
+	if err != nil {
+		t.Fatalf("unexpected error resolving Dhan master broker: %v", err)
+	}
+	if b == nil {
+		t.Fatal("expected non-nil broker for Dhan master")
+	}
+}
+
+func TestResolveBroker_DhanFollower_RequiresProxyAndResolvesProxied(t *testing.T) {
+	ctx := context.Background()
+	fid := uuid.New()
+	store := &mockResolverStore{
+		accounts: map[uuid.UUID]domain.AccountAuthInfo{
+			fid: {
+				ID:              fid,
+				Role:            "follower",
+				Broker:          "dhan",
+				BrokerAccountID: "1000000002",
+				ApiKey:          "1000000002",
+				AccessToken:     "valid-dhan-token",
+				IPAddress:       "", // Missing IP
+			},
+		},
+		proxies: map[string]domain.ProxyIP{
+			"198.51.100.25": {
+				IPAddress:          "198.51.100.25",
+				Host:               "proxy.dhan.corp",
+				Port:               8080,
+				Username:           "dhan_user",
+				Password:           "dhan_pass",
+				WhitelistedBrokers: "Dhan",
+			},
+		},
+	}
+	resolver := setupTestResolver(store)
+
+	// Negative: missing IP should fail with ErrIPRequired
+	_, err := resolver.ResolveBroker(ctx, fid)
+	if err == nil {
+		t.Fatal("expected ErrIPRequired for Dhan follower without IP, got nil")
+	}
+	if !errors.Is(err, domain.ErrIPRequired) {
+		t.Fatalf("expected ErrIPRequired, got: %v", err)
+	}
+
+	// Positive: with assigned proxy IP
+	acc := store.accounts[fid]
+	acc.IPAddress = "198.51.100.25"
+	store.accounts[fid] = acc
+
+	b, err := resolver.ResolveBroker(ctx, fid)
+	if err != nil {
+		t.Fatalf("unexpected error resolving Dhan follower with proxy: %v", err)
+	}
+	if b == nil {
+		t.Fatal("expected non-nil broker for Dhan follower with proxy")
+	}
+}
+
+func TestMultiBrokerSyncer_RoutesByBroker(t *testing.T) {
+	ctx := context.Background()
+	kiteAccID := uuid.New()
+	dhanAccID := uuid.New()
+
+	store := &mockResolverStore{
+		accounts: map[uuid.UUID]domain.AccountAuthInfo{
+			kiteAccID: {
+				ID:     kiteAccID,
+				Broker: "zerodha",
+			},
+			dhanAccID: {
+				ID:     dhanAccID,
+				Broker: "dhan",
+			},
+		},
+	}
+
+	kiteSyncCalled := false
+	dhanSyncCalled := false
+
+	multi := &multiBrokerSyncer{
+		store: store,
+		syncAccount: func(ctx context.Context, brokerName string, id uuid.UUID) error {
+			if brokerName == "dhan" {
+				dhanSyncCalled = true
+			} else {
+				kiteSyncCalled = true
+			}
+			return nil
+		},
+	}
+
+	if err := multi.SyncAccountPortfolio(ctx, kiteAccID); err != nil {
+		t.Fatalf("SyncAccountPortfolio kite failed: %v", err)
+	}
+	if !kiteSyncCalled {
+		t.Error("expected kite sync to be called")
+	}
+
+	if err := multi.SyncAccountPortfolio(ctx, dhanAccID); err != nil {
+		t.Fatalf("SyncAccountPortfolio dhan failed: %v", err)
+	}
+	if !dhanSyncCalled {
+		t.Error("expected dhan sync to be called")
 	}
 }
 

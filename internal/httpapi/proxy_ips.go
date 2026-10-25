@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"envoytrade/internal/domain"
@@ -31,13 +33,14 @@ type proxyIPResponse struct {
 }
 
 type availableIPResponse struct {
-	IPAddress  string    `json:"ipAddress"`
-	IPType     string    `json:"ipType"`
-	Host       string    `json:"host"`
-	Port       int       `json:"port"`
-	ValidFrom  time.Time `json:"validFrom"`
-	ValidUntil time.Time `json:"validUntil"`
-	Plan       string    `json:"plan"`
+	IPAddress          string    `json:"ipAddress"`
+	IPType             string    `json:"ipType"`
+	Host               string    `json:"host"`
+	Port               int       `json:"port"`
+	WhitelistedBrokers string    `json:"whitelistedBrokers"`
+	ValidFrom          time.Time `json:"validFrom"`
+	ValidUntil         time.Time `json:"validUntil"`
+	Plan               string    `json:"plan"`
 }
 
 type availableIPsGroupedResponse struct {
@@ -95,6 +98,25 @@ func (h *handlers) getAvailableProxyIPs(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	broker := strings.TrimSpace(r.URL.Query().Get("broker"))
+	if broker != "" {
+		filtered := make([]domain.ProxyIP, 0, len(ips))
+		for _, ip := range ips {
+			if ip.MatchesBroker(broker) {
+				filtered = append(filtered, ip)
+			}
+		}
+		sort.SliceStable(filtered, func(i, j int) bool {
+			pI := filtered[i].BrokerPriority(broker)
+			pJ := filtered[j].BrokerPriority(broker)
+			if pI != pJ {
+				return pI < pJ // Priority 1 (specialized) before Priority 2 (unrestricted)
+			}
+			return filtered[i].IPAddress < filtered[j].IPAddress
+		})
+		ips = filtered
+	}
+
 	result := availableIPsGroupedResponse{
 		IPv4: make([]availableIPResponse, 0),
 		IPv6: make([]availableIPResponse, 0),
@@ -102,13 +124,14 @@ func (h *handlers) getAvailableProxyIPs(w http.ResponseWriter, r *http.Request) 
 
 	for _, ip := range ips {
 		item := availableIPResponse{
-			IPAddress:  ip.IPAddress,
-			IPType:     ip.IPType,
-			Host:       ip.Host,
-			Port:       ip.Port,
-			ValidFrom:  ip.ValidFrom,
-			ValidUntil: ip.ValidUntil,
-			Plan:       ip.Plan,
+			IPAddress:          ip.IPAddress,
+			IPType:             ip.IPType,
+			Host:               ip.Host,
+			Port:               ip.Port,
+			WhitelistedBrokers: ip.WhitelistedBrokers,
+			ValidFrom:          ip.ValidFrom,
+			ValidUntil:         ip.ValidUntil,
+			Plan:               ip.Plan,
 		}
 		if ip.IPType == "ipv4" {
 			result.IPv4 = append(result.IPv4, item)

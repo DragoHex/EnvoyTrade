@@ -189,8 +189,8 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	broker := strings.ToLower(strings.TrimSpace(req.Broker))
-	if broker != "kite" && broker != "testbroker" {
-		writeError(w, http.StatusBadRequest, `broker must be "kite" or "testbroker"`)
+	if broker != "kite" && broker != "testbroker" && broker != "dhan" {
+		writeError(w, http.StatusBadRequest, `broker must be "kite", "dhan", or "testbroker"`)
 		return
 	}
 	req.Broker = broker
@@ -236,6 +236,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	var cloneFactor decimal.Decimal = decimal.NewFromInt(1)
 	var masterID uuid.UUID
 	var groupID uuid.UUID
+	var groupName string
 	var attachGroup bool
 	if req.Role == "follower" {
 		rawCF := req.CloneFactor
@@ -267,6 +268,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			groupID = gDetail.GroupID
 			masterID = gDetail.MasterID
+			groupName = gDetail.GroupName
 			attachGroup = true
 		} else if req.MasterID != nil && strings.TrimSpace(*req.MasterID) != "" {
 			parsedMaster, err := uuid.Parse(strings.TrimSpace(*req.MasterID))
@@ -285,6 +287,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			groupID = gDetail.GroupID
 			masterID = gDetail.MasterID
+			groupName = gDetail.GroupName
 			attachGroup = true
 		}
 	}
@@ -324,13 +327,18 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	id = resolvedID
 
 	if req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "" {
-		if err := h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), nil, "authenticated", ""); err != nil {
+		var expiresAt *time.Time
+		if broker == "dhan" {
+			exp := time.Now().UTC().Add(24 * time.Hour)
+			expiresAt = &exp
+		}
+		if err := h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), expiresAt, "authenticated", ""); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to set access token")
 			return
 		}
 	}
 
-	if h.syncer != nil && encPass != "" && encTotp != "" {
+	if h.syncer != nil && ((encPass != "" && encTotp != "") || (broker == "dhan" && req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "")) {
 		go func() {
 			_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
 		}()
@@ -380,6 +388,9 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			if groupID != uuid.Nil {
 				groupIDStr := groupID.String()
 				resp.GroupID = &groupIDStr
+			}
+			if groupName != "" {
+				resp.GroupName = &groupName
 			}
 			cloneFactorStr := cloneFactor.String()
 			resp.CloneFactor = &cloneFactorStr
@@ -693,12 +704,22 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		updated = true
 	}
 	if req.AccessToken != nil {
-		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, *req.AccessToken, nil, "authenticated", "")) {
+		var expiresAt *time.Time
+		if accs, err := h.store.Accounts(r.Context(), []uuid.UUID{id}); err == nil && len(accs) > 0 && strings.ToLower(accs[0].Broker) == "dhan" {
+			exp := time.Now().UTC().Add(24 * time.Hour)
+			expiresAt = &exp
+		}
+		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, *req.AccessToken, expiresAt, "authenticated", "")) {
 			return
 		}
 		role, _ := h.store.AccountRole(r.Context(), id)
 		if role == "follower" && h.followerRegistrar != nil {
 			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+		}
+		if h.syncer != nil {
+			go func() {
+				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
+			}()
 		}
 		resp["accessToken"] = "updated"
 		updated = true

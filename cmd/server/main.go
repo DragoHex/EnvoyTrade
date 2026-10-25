@@ -31,6 +31,9 @@ import (
 	"envoytrade/internal/archive"
 	"envoytrade/internal/broker"
 	unifiedcallback "envoytrade/internal/callback"
+	"envoytrade/internal/dhan"
+	dhancallback "envoytrade/internal/dhan/callback"
+	dhanws "envoytrade/internal/dhan/ws"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
 	"envoytrade/internal/httpapi"
@@ -289,6 +292,13 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("database migrations applied")
 
+	dhanResolver := dhan.NewInstrumentResolver(logger.With("component", "dhan_resolver"))
+	go func() {
+		if err := dhanResolver.Load(context.Background()); err != nil {
+			logger.Error("dhan: failed to load instrument resolver", "error", err)
+		}
+	}()
+
 	brokerRegistry := broker.NewRegistry()
 	kiteBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
 		var proxyCfg *kite.ProxyConfig
@@ -303,19 +313,45 @@ func run(logger *slog.Logger) error {
 		}
 		return kite.NewLiveBroker(acc.ApiKey, acc.AccessToken, proxyCfg)
 	})
+	dhanBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
+		var proxyCfg *dhan.ProxyConfig
+		if acc.ProxyHost != "" {
+			proxyCfg = &dhan.ProxyConfig{
+				Scheme:       "https",
+				Host:         acc.ProxyHost,
+				Port:         acc.ProxyPort,
+				ClientID:     acc.ProxyUsername,
+				ClientSecret: acc.ProxyPassword,
+			}
+		}
+		clientID := acc.BrokerAccountID
+		if clientID == "" {
+			clientID = acc.ApiKey
+		}
+		return dhan.NewLiveBroker(clientID, acc.AccessToken, proxyCfg, dhanResolver)
+	})
 	brokerRegistry.Register("kite", kiteBrokerFactory)
 	brokerRegistry.Register("zerodha", kiteBrokerFactory)
+	brokerRegistry.Register("dhan", dhanBrokerFactory)
 	brokerRegistry.Register("testbroker", testbroker.NewBrokerFactory())
 
-	rawSyncer := &kite.PortfolioSyncer{
+	rawKiteSyncer := &kite.PortfolioSyncer{
 		Store: store,
 	}
-	syncer := kite.NewDebouncedSyncer(rawSyncer, 500*time.Millisecond)
+	rawDhanSyncer := &dhan.PortfolioSyncer{
+		Store: store,
+	}
+	multiSyncer := &multiBrokerSyncer{
+		store:      store,
+		kiteSyncer: rawKiteSyncer,
+		dhanSyncer: rawDhanSyncer,
+	}
+	syncer := kite.NewDebouncedSyncer(multiSyncer, 500*time.Millisecond)
 
 	brokerResolver := &serverBrokerResolver{
 		store:    store,
 		registry: brokerRegistry,
-		syncer:   rawSyncer,
+		syncer:   multiSyncer,
 	}
 	accountPool := broker.NewAccountPool(brokerResolver)
 	evicter := accountPool
@@ -422,6 +458,15 @@ func run(logger *slog.Logger) error {
 	postbackRouter := unifiedcallback.NewAdaptiveRouter()
 	postbackRouter.Register("kite", kitePostback)
 	postbackRouter.Register("zerodha", kitePostback)
+
+	dhanPostback := &dhancallback.Handler{
+		Accounts:        store,
+		MasterFills:     masterFillQueue,
+		FollowerUpdates: orderUpdateQueue,
+		Resolver:        dhanResolver,
+		Logger:          logger.With("component", "dhan_postback"),
+	}
+	postbackRouter.Register("dhan", dhanPostback)
 	postbackRouter.SetDefault(kitePostback)
 
 	// Reconciliation poller
@@ -450,9 +495,11 @@ func run(logger *slog.Logger) error {
 	// Dynamic multi-master WebSocket ticker manager (generic, multi-broker)
 	tickerManager := ticker.NewManager(store, poller, logger.With("component", "ticker_manager"))
 	kiteTickerFactory := kite.NewTickerFactory(masterFillQueue, logger.With("component", "kite_ticker"))
+	dhanTickerFactory := dhanws.NewTickerFactory(masterFillQueue, dhanResolver, logger.With("component", "dhan_ticker"))
 	testbrokerTickerFactory := testbroker.NewTickerFactory(masterFillQueue, logger.With("component", "testbroker_ticker"))
 	tickerManager.RegisterFactory("kite", kiteTickerFactory)
 	tickerManager.RegisterFactory("zerodha", kiteTickerFactory)
+	tickerManager.RegisterFactory("dhan", dhanTickerFactory)
 	tickerManager.RegisterFactory("testbroker", testbrokerTickerFactory)
 	defer tickerManager.Shutdown()
 
@@ -461,7 +508,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Auto-restart master ticker or refresh follower worker on headless token refresh
-	rawSyncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+	rawKiteSyncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
 		evicter.Evict(accountID)
 		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
 	}
@@ -596,10 +643,47 @@ type brokerResolverStore interface {
 	ProxyIPByAddress(ctx context.Context, ip string) (domain.ProxyIP, error)
 }
 
+type portfolioSyncer interface {
+	SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error
+}
+
+type accountBrokerStore interface {
+	AccountAuthInfo(ctx context.Context, id uuid.UUID) (domain.AccountAuthInfo, error)
+}
+
+type multiBrokerSyncer struct {
+	store       accountBrokerStore
+	kiteSyncer  portfolioSyncer
+	dhanSyncer  portfolioSyncer
+	syncAccount func(ctx context.Context, brokerName string, id uuid.UUID) error
+}
+
+func (m *multiBrokerSyncer) SyncAccountPortfolio(ctx context.Context, accountID uuid.UUID) error {
+	authInfo, err := m.store.AccountAuthInfo(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	brokerName := strings.ToLower(authInfo.Broker)
+	if m.syncAccount != nil {
+		return m.syncAccount(ctx, brokerName, accountID)
+	}
+	switch brokerName {
+	case "dhan":
+		if m.dhanSyncer != nil {
+			return m.dhanSyncer.SyncAccountPortfolio(ctx, accountID)
+		}
+	default:
+		if m.kiteSyncer != nil {
+			return m.kiteSyncer.SyncAccountPortfolio(ctx, accountID)
+		}
+	}
+	return nil
+}
+
 type serverBrokerResolver struct {
 	store    brokerResolverStore
 	registry *broker.Registry
-	syncer   *kite.PortfolioSyncer
+	syncer   portfolioSyncer
 }
 
 func (r *serverBrokerResolver) ResolveBroker(ctx context.Context, accountID uuid.UUID) (broker.Broker, error) {

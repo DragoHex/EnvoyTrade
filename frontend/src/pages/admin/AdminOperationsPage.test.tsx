@@ -88,6 +88,8 @@ describe('AdminOperationsPage', () => {
 
     expect(screen.getByText('Attention Follower (ZW1234)')).toBeInTheDocument()
     expect(screen.getByText('Token expired')).toBeInTheDocument()
+    expect(screen.getByText('Master Broker Session')).toBeInTheDocument()
+    expect(screen.queryByText('Master Zerodha Token')).not.toBeInTheDocument()
 
     // Role Icon (Follower Hobbit) and Auth Status Icon (Red Cross Error)
     expect(screen.getByRole('img', { name: 'Follower' })).toBeInTheDocument()
