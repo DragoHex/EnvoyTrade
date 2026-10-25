@@ -133,31 +133,7 @@ listener.FollowerStatusConsumer.Handle (drains queue.Consumer[domain.OrderUpdate
 - `internal/kite/fake.Broker` is a programmable fake (injectable `Latency`, `Err`, `OrderID`, and call recording) used across worker and kite/fake tests — not a mock framework.
 - `internal/kite/callback` tests use small hand-written fakes (`fakeAccounts`, generic `fakePublisher[T]`, `fakeConn`) rather than a mock framework, same style as the rest of the repo.
 
-## Frontend design principles
+## Frontend
 
-- **Never reload/remount a whole component for a small state change.** Only the piece that actually changed should update. A list refreshing after one row's action shouldn't blank or remount the other rows.
-- **Loading state gets a skeleton of the real layout, not a "Loading…" text line.** Cap it with a timeout — stop showing the skeleton and say something's wrong if data never arrives.
-- **Icon-only buttons get a hover tooltip with the action's name.** Never ship an icon-only control with no text anywhere.
-- **Async actions (anything that hits the network on click) give immediate feedback**: disable the control and show a busy/spin state while pending, then confirm the outcome (success or failure) after — never leave a clicked button looking inert while work happens.
-- **Toggles that represent on/off state look like switches, not checkboxes.**
-- **Buttons and icons must stay visible and legible in both light and dark mode** — check contrast in both themes, not just one.
-- **Destructive/irreversible actions are gated behind a confirmation step.**
-- **A modal's dimmed backdrop and its content panel are visually and structurally distinct** — the backdrop dims the page, the panel stands out from it.
-- **Verify UI changes by actually looking at the rendered result**, not just by reading the code — a change that looks right in source can still render wrong.
-- **Show broker logo instead of plain text.** Use `<BrokerLogo broker={...} />` (`frontend/src/components/BrokerLogo.tsx`). An extensible `BROKER_REGISTRY` maps broker IDs (`kite`, `zerodha`) to official vector logos with accessible hover tooltip (`data-tooltip`). Unknown brokers fall back gracefully to a text badge.
-- **Never display UUIDs on the UI.** Display human-readable `name` when present, falling back to `brokerAccountId`, never raw database UUID.
-- **Distinct iconography for actions.** Use dedicated SVG icons with tooltips: pencil (`EditIcon`) for edit, person-with-minus (`UserMinusIcon`) for remove from group, trash bin (`TrashIcon`) for delete.
-- **Fixed table layout prevents shifts on state toggle.** Use `table-layout: fixed` and explicit column widths/classes so buttons toggling text (e.g. "Enable"/"Disable") or badge status never cause table column jitter.
+For frontend design principles, themed dropdown rules, and UI color palette, see [`frontend/AGENTS.md`](frontend/AGENTS.md).
 
-## UI color palette
-
-Source of truth for `docs/plans/UI-PLAN.md` — reuse for any future UI work, don't re-derive.
-
-| Role | Light | Dark | Hex meaning |
-|---|---|---|---|
-| Primary/Brand | `#44475b` | `#1a1c24` | Dark slate |
-| Accent (Action) | `#04b488` | `#06d896` | Teal/Green |
-| Border/Divider | `#f0f0f2` | `#2a2c34` | Light gray / Charcoal |
-| Text Primary | `#44475b` | `#f0f0f2` | Slate / Off-white |
-| Background | `#ffffff` | `#0f1117` | White / Near-black |
-| Surface | `#f5f5f7` | `#1a1c24` | Light gray / Dark gray |

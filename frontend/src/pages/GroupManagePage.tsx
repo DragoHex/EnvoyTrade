@@ -18,6 +18,7 @@ import { StatusDot } from '../components/StatusDot'
 import { CopyToggle } from '../components/CopyToggle'
 import { UserMinusIcon } from '../components/icons'
 import { RoleIcon } from '../components/RoleIcon'
+import { ThemedSelect } from '../components/ThemedSelect'
 
 const TOAST_DISMISS_MS = 4000
 
@@ -208,7 +209,7 @@ export function GroupManagePage() {
 
   const unattachedFollowers = () =>
     (allAccounts() ?? [])
-      .filter((a) => a.role === 'follower' && a.masterId == null)
+      .filter((a) => a.role === 'follower' && (a.masterId == null || a.masterId === '') && (a.groupId == null || a.groupId === ''))
       .sort((a, b) =>
         (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
       )
@@ -321,27 +322,27 @@ export function GroupManagePage() {
         </Show>
       </section>
 
-      <section class="accounts-card">
+      <section class="accounts-card group-add-card">
         <h3>Add Follower to Group</h3>
         <form onSubmit={handleAddToGroup} class="group-add-form">
           <label>
             Account
-            <select
+            <ThemedSelect
+              aria-label="Account"
               value={selectedAccountId()}
-              onChange={(e) => setSelectedAccountId(e.currentTarget.value)}
+              placeholder="Select an Account"
+              disabled={unattachedFollowers().length === 0}
+              onChange={(val) => setSelectedAccountId(val)}
               required
-            >
-              <option value="" disabled>
-                select an account
-              </option>
-              <Index each={unattachedFollowers()}>
-                {(a) => (
-                  <option value={a().id}>
-                    {a().name ? `${a().name} (${a().brokerAccountId})` : a().brokerAccountId}
-                  </option>
-                )}
-              </Index>
-            </select>
+              options={
+                unattachedFollowers().length === 0
+                  ? [{ value: '', label: 'no unassigned follower accounts available', disabled: true }]
+                  : unattachedFollowers().map((a) => ({
+                      value: a.id,
+                      label: a.name ? `${a.name} (${a.brokerAccountId})` : a.brokerAccountId,
+                    }))
+              }
+            />
           </label>
           <label>
             Clone Factor
@@ -360,7 +361,11 @@ export function GroupManagePage() {
               onInput={(e) => setMaxQtyPerOrder(e.currentTarget.value)}
             />
           </label>
-          <button type="submit" class="btn-primary" disabled={submittingAdd()}>
+          <button
+            type="submit"
+            class="btn-primary"
+            disabled={submittingAdd() || unattachedFollowers().length === 0 || !selectedAccountId()}
+          >
             Add to group
           </button>
         </form>

@@ -17,6 +17,43 @@ import {
 import { SyncIcon, EditIcon, TrashIcon } from '../../components/icons'
 import { Skeleton } from '../../components/Skeleton'
 import { BrokerLogo } from '../../components/BrokerLogo'
+import { ThemedSelect } from '../../components/ThemedSelect'
+
+export const WHITELISTED_BROKER_OPTIONS = [
+  { value: 'Zerodha', label: 'Zerodha' },
+  { value: 'Dhan', label: 'Dhan' },
+  { value: 'TestBroker', label: 'TestBroker' },
+  { value: '', label: 'All Brokers (Unrestricted)' },
+]
+
+export const PLAN_OPTIONS = [
+  { value: 'MONTHLY', label: 'MONTHLY' },
+  { value: 'QUARTERLY', label: 'QUARTERLY' },
+  { value: 'HALF_YEARLY', label: 'HALF_YEARLY' },
+  { value: 'YEARLY', label: 'YEARLY' },
+]
+
+export const IP_TYPE_OPTIONS = [
+  { value: 'IPV4', label: 'IPv4' },
+  { value: 'IPV6', label: 'IPv6' },
+]
+
+export function getWhitelistedBrokerSelectOptions(currentVal?: string) {
+  const options = [
+    { value: 'Zerodha', label: 'Zerodha', badge: { text: 'Specialized', variant: 'emerald' as const } },
+    { value: 'Dhan', label: 'Dhan', badge: { text: 'Specialized', variant: 'emerald' as const } },
+    { value: 'TestBroker', label: 'TestBroker', badge: { text: 'Specialized', variant: 'emerald' as const } },
+    { value: '', label: 'All Brokers (Unrestricted)', badge: { text: 'Unrestricted', variant: 'slate' as const } },
+  ]
+  if (currentVal && !options.some((o) => o.value === currentVal)) {
+    options.unshift({
+      value: currentVal,
+      label: currentVal,
+      badge: { text: 'Specialized', variant: 'emerald' as const },
+    })
+  }
+  return options
+}
 
 export function AdminIPsPage() {
   const [allIps, setAllIps] = createSignal<AdminProxyIP[]>([])
@@ -1085,26 +1122,13 @@ export function AdminIPsPage() {
                       <label for="edit-ip-plan" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Subscription Plan
                       </label>
-                      <select
+                      <ThemedSelect
                         id="edit-ip-plan"
+                        aria-label="Subscription Plan"
                         value={editPlan()}
-                        onChange={(e) => setEditPlan(e.currentTarget.value)}
-                        style={{
-                          width: '100%',
-                          padding: '0.55rem 0.75rem',
-                          border: '1px solid var(--color-border)',
-                          'border-radius': '6px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          'box-sizing': 'border-box',
-                          'font-size': '0.875rem',
-                        }}
-                      >
-                        <option value="MONTHLY">MONTHLY</option>
-                        <option value="QUARTERLY">QUARTERLY</option>
-                        <option value="HALF_YEARLY">HALF_YEARLY</option>
-                        <option value="YEARLY">YEARLY</option>
-                      </select>
+                        onChange={(val) => setEditPlan(val)}
+                        options={PLAN_OPTIONS}
+                      />
                     </div>
                   </div>
 
@@ -1113,49 +1137,25 @@ export function AdminIPsPage() {
                       <label for="edit-ip-type" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         IP Type
                       </label>
-                      <select
+                      <ThemedSelect
                         id="edit-ip-type"
+                        aria-label="IP Type"
                         value={editType()}
-                        onChange={(e) => setEditType(e.currentTarget.value)}
-                        style={{
-                          width: '100%',
-                          padding: '0.55rem 0.75rem',
-                          border: '1px solid var(--color-border)',
-                          'border-radius': '6px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          'box-sizing': 'border-box',
-                          'font-size': '0.875rem',
-                        }}
-                      >
-                        <option value="IPV4">IPv4</option>
-                        <option value="IPV6">IPv6</option>
-                      </select>
+                        onChange={(val) => setEditType(val)}
+                        options={IP_TYPE_OPTIONS}
+                      />
                     </div>
                     <div>
                       <label for="edit-ip-whitelisted-brokers" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Whitelisted Brokers
                       </label>
-                      <select
+                      <ThemedSelect
                         id="edit-ip-whitelisted-brokers"
+                        aria-label="Whitelisted Brokers"
                         value={editWhitelistedBrokers()}
-                        onChange={(e) => setEditWhitelistedBrokers(e.currentTarget.value)}
-                        style={{
-                          width: '100%',
-                          padding: '0.55rem 0.75rem',
-                          border: '1px solid var(--color-border)',
-                          'border-radius': '6px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          'box-sizing': 'border-box',
-                          'font-size': '0.875rem',
-                        }}
-                      >
-                        <option value="Zerodha">Zerodha</option>
-                        <option value="TestBroker">TestBroker</option>
-                        <option value="Zerodha, TestBroker">Zerodha, TestBroker</option>
-                        <option value="">All Brokers (Unrestricted)</option>
-                      </select>
+                        onChange={(val) => setEditWhitelistedBrokers(val)}
+                        options={getWhitelistedBrokerSelectOptions(editWhitelistedBrokers())}
+                      />
                     </div>
                   </div>
                 </Show>
@@ -1517,26 +1517,13 @@ export function AdminIPsPage() {
                       <label for="add-ip-plan" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Subscription Plan
                       </label>
-                      <select
+                      <ThemedSelect
                         id="add-ip-plan"
+                        aria-label="Subscription Plan"
                         value={addForm().plan}
-                        onChange={(e) => setAddForm({ ...addForm(), plan: e.currentTarget.value })}
-                        style={{
-                          width: '100%',
-                          padding: '0.55rem 0.75rem',
-                          border: '1px solid var(--color-border)',
-                          'border-radius': '6px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          'box-sizing': 'border-box',
-                          'font-size': '0.875rem',
-                        }}
-                      >
-                        <option value="MONTHLY">MONTHLY</option>
-                        <option value="QUARTERLY">QUARTERLY</option>
-                        <option value="HALF_YEARLY">HALF_YEARLY</option>
-                        <option value="YEARLY">YEARLY</option>
-                      </select>
+                        onChange={(val) => setAddForm({ ...addForm(), plan: val })}
+                        options={PLAN_OPTIONS}
+                      />
                     </div>
                   </div>
                   <div class="admin-form-grid-2col">
@@ -1544,49 +1531,25 @@ export function AdminIPsPage() {
                       <label for="add-ip-type" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         IP Type
                       </label>
-                      <select
+                      <ThemedSelect
                         id="add-ip-type"
+                        aria-label="IP Type"
                         value={addForm().type}
-                        onChange={(e) => setAddForm({ ...addForm(), type: e.currentTarget.value })}
-                        style={{
-                          width: '100%',
-                          padding: '0.55rem 0.75rem',
-                          border: '1px solid var(--color-border)',
-                          'border-radius': '6px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          'box-sizing': 'border-box',
-                          'font-size': '0.875rem',
-                        }}
-                      >
-                        <option value="IPV4">IPv4</option>
-                        <option value="IPV6">IPv6</option>
-                      </select>
+                        onChange={(val) => setAddForm({ ...addForm(), type: val })}
+                        options={IP_TYPE_OPTIONS}
+                      />
                     </div>
                     <div>
                       <label for="add-ip-whitelisted-brokers" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Whitelisted Brokers
                       </label>
-                      <select
+                      <ThemedSelect
                         id="add-ip-whitelisted-brokers"
+                        aria-label="Whitelisted Brokers"
                         value={addForm().whitelisted_brokers}
-                        onChange={(e) => setAddForm({ ...addForm(), whitelisted_brokers: e.currentTarget.value })}
-                        style={{
-                          width: '100%',
-                          padding: '0.55rem 0.75rem',
-                          border: '1px solid var(--color-border)',
-                          'border-radius': '6px',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          'box-sizing': 'border-box',
-                          'font-size': '0.875rem',
-                        }}
-                      >
-                        <option value="Zerodha">Zerodha</option>
-                        <option value="TestBroker">TestBroker</option>
-                        <option value="Zerodha, TestBroker">Zerodha, TestBroker</option>
-                        <option value="">All Brokers (Unrestricted)</option>
-                      </select>
+                        onChange={(val) => setAddForm({ ...addForm(), whitelisted_brokers: val })}
+                        options={getWhitelistedBrokerSelectOptions(addForm().whitelisted_brokers)}
+                      />
                     </div>
                   </div>
                 </Show>
