@@ -12,6 +12,7 @@ import {
 } from '../../api'
 import { SyncIcon, EditIcon, LogoutIcon } from '../../components/icons'
 import { Skeleton } from '../../components/Skeleton'
+import { ThemedSelect } from '../../components/ThemedSelect'
 
 export function AdminUsersPage() {
   const [users, setUsers] = createSignal<UserSummary[]>([])
@@ -323,40 +324,28 @@ export function AdminUsersPage() {
             }}
           />
           <div class="admin-users-selects">
-            <select
+            <ThemedSelect
               aria-label="Filter by role"
               value={roleFilter()}
-              onChange={(e) => setRoleFilter(e.currentTarget.value as any)}
-              style={{
-                padding: '0.45rem 0.6rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                'border-radius': '6px',
-                color: 'var(--color-text)',
-                'font-size': '0.85rem',
-              }}
-            >
-              <option value="all">All Roles</option>
-              <option value="admin">Administrators</option>
-              <option value="user">Traders (User)</option>
-            </select>
-            <select
+              onChange={(val) => setRoleFilter(val as any)}
+              style={{ 'min-width': '140px' }}
+              options={[
+                { value: 'all', label: 'All Roles' },
+                { value: 'admin', label: 'Administrators', badge: { text: 'Admin', variant: 'blue' } },
+                { value: 'user', label: 'Traders (User)', badge: { text: 'Trader', variant: 'emerald' } },
+              ]}
+            />
+            <ThemedSelect
               aria-label="Filter by status"
               value={statusFilter()}
-              onChange={(e) => setStatusFilter(e.currentTarget.value as any)}
-              style={{
-                padding: '0.45rem 0.6rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                'border-radius': '6px',
-                color: 'var(--color-text)',
-                'font-size': '0.85rem',
-              }}
-            >
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="suspended">Suspended</option>
-            </select>
+              onChange={(val) => setStatusFilter(val as any)}
+              style={{ 'min-width': '130px' }}
+              options={[
+                { value: 'all', label: 'All Status' },
+                { value: 'active', label: 'Active', badge: { text: 'Active', variant: 'emerald' } },
+                { value: 'suspended', label: 'Suspended', badge: { text: 'Suspended', variant: 'amber' } },
+              ]}
+            />
           </div>
           <span class="admin-users-count" style={{ 'font-size': '0.85rem', color: 'var(--color-text-secondary)', 'white-space': 'nowrap' }}>
             Total Users: {total()}
@@ -617,14 +606,15 @@ export function AdminUsersPage() {
                   <label style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
                     Platform Role
                   </label>
-                  <select
+                  <ThemedSelect
+                    aria-label="Platform Role"
                     value={createForm().role}
-                    onChange={(e) => setCreateForm({ ...createForm(), role: e.currentTarget.value })}
-                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
-                  >
-                    <option value="user">User / Trader</option>
-                    <option value="admin">Administrator</option>
-                  </select>
+                    onChange={(val) => setCreateForm({ ...createForm(), role: val })}
+                    options={[
+                      { value: 'user', label: 'User / Trader', badge: { text: 'Trader', variant: 'emerald' } },
+                      { value: 'admin', label: 'Administrator', badge: { text: 'Admin', variant: 'blue' } },
+                    ]}
+                  />
                 </div>
               </div>
               <div class="modal-footer">
@@ -669,14 +659,15 @@ export function AdminUsersPage() {
                   <label style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
                     Role
                   </label>
-                  <select
+                  <ThemedSelect
+                    aria-label="Role"
                     value={selectedRole()}
-                    onChange={(e) => setSelectedRole(e.currentTarget.value)}
-                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
-                  >
-                    <option value="user">User / Trader</option>
-                    <option value="admin">Administrator</option>
-                  </select>
+                    onChange={(val) => setSelectedRole(val)}
+                    options={[
+                      { value: 'user', label: 'User / Trader', badge: { text: 'Trader', variant: 'emerald' } },
+                      { value: 'admin', label: 'Administrator', badge: { text: 'Admin', variant: 'blue' } },
+                    ]}
+                  />
                 </div>
               </div>
               <div class="modal-footer">

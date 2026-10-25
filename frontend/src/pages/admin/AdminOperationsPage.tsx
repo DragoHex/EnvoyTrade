@@ -216,7 +216,7 @@ export function AdminOperationsPage() {
 
             <div style={{ display: 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', 'margin-bottom': '1rem' }}>
               <div class="telemetry-stat-row">
-                <span class="telemetry-stat-label">Master Zerodha Token</span>
+                <span class="telemetry-stat-label">Master Broker Session</span>
                 <span class="telemetry-stat-val">
                   <span class={readiness()?.masterReady ? 'badge badge-success' : 'badge badge-danger'}>
                     {readiness()?.masterReady ? 'Ready' : 'Expired / Action Needed'}

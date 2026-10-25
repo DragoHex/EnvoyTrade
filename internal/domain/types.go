@@ -315,6 +315,7 @@ type GroupSummary struct {
 	FollowerCount   int
 	Status          string
 	Active          bool
+	HasImbalance    bool
 }
 
 // GroupFollower is one follower row inside a GroupDetail with its summary metrics.
@@ -343,6 +344,7 @@ type GroupDetail struct {
 	MasterAccountID            string
 	MasterName                 string
 	MasterActive               bool
+	HasImbalance               bool
 	MasterNetQty               int
 	MasterOpenPositionsCount   int
 	MasterClosedPositionsCount int

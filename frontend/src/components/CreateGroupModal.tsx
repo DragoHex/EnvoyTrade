@@ -1,5 +1,6 @@
-import { createEffect, createSignal, For, Show } from 'solid-js'
+import { createEffect, createSignal, Show } from 'solid-js'
 import type { Account } from '../api'
+import { ThemedSelect } from './ThemedSelect'
 
 export function CreateGroupModal(props: {
   open: boolean
@@ -70,23 +71,21 @@ export function CreateGroupModal(props: {
             </label>
             <label>
               Master Account
-              <select
+              <ThemedSelect
+                aria-label="Master Account"
                 value={masterId()}
-                onChange={(e) => setMasterId(e.currentTarget.value)}
+                onChange={(val) => setMasterId(val)}
                 disabled={props.masters.length === 0}
                 required
-              >
-                <option value="" disabled>
-                  {props.masters.length === 0 ? 'no master accounts available' : 'select master account'}
-                </option>
-                <For each={props.masters}>
-                  {(m) => (
-                    <option value={m.id}>
-                      {m.name ? `${m.name} (${m.brokerAccountId})` : m.brokerAccountId}
-                    </option>
-                  )}
-                </For>
-              </select>
+                options={
+                  props.masters.length === 0
+                    ? [{ value: '', label: 'no master accounts available', disabled: true }]
+                    : props.masters.map((m) => ({
+                        value: m.id,
+                        label: m.name ? `${m.name} (${m.brokerAccountId})` : m.brokerAccountId,
+                      }))
+                }
+              />
             </label>
             <Show when={error()}>{(msg) => <p role="alert" style={{ color: "#e53e3e", margin: "0.5rem 0" }}>{msg()}</p>}</Show>
             <div class="confirm-modal-actions" style={{ "margin-top": "1rem" }}>

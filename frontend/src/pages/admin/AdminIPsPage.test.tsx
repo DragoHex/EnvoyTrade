@@ -667,7 +667,16 @@ describe('AdminIPsPage', () => {
 
     const addBrokerSelect = screen.getByLabelText(/^Whitelisted Brokers$/i) as HTMLSelectElement
     expect(addBrokerSelect.value).toBe('Zerodha') // default
-    fireEvent.change(addBrokerSelect, { target: { value: 'TestBroker' } })
+    
+    // Positive & Negative assertions on available options:
+    const addOptions = Array.from(addBrokerSelect.options).map((o) => o.text)
+    expect(addOptions).toContain('Dhan')
+    expect(addOptions).toContain('Zerodha')
+    expect(addOptions).toContain('TestBroker')
+    expect(addOptions).toContain('All Brokers (Unrestricted)')
+    expect(addOptions).not.toContain('Zerodha, TestBroker')
+
+    fireEvent.change(addBrokerSelect, { target: { value: 'Dhan' } })
 
     const ipInput = screen.getByPlaceholderText(/e\.g\. 103\.21\.58\.10/i)
     fireEvent.input(ipInput, { target: { value: '148.113.41.99' } })
@@ -687,7 +696,7 @@ describe('AdminIPsPage', () => {
     await waitFor(() => {
       expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({
         ip: '148.113.41.99',
-        whitelisted_brokers: 'TestBroker',
+        whitelisted_brokers: 'Dhan',
       }))
     })
 
@@ -701,16 +710,50 @@ describe('AdminIPsPage', () => {
 
     const editBrokerSelect = screen.getByLabelText(/^Whitelisted Brokers$/i) as HTMLSelectElement
     expect(editBrokerSelect.value).toBe('Zerodha')
-    fireEvent.change(editBrokerSelect, { target: { value: 'Zerodha, TestBroker' } })
+    
+    const editOptions = Array.from(editBrokerSelect.options).map((o) => o.text)
+    expect(editOptions).toContain('Dhan')
+    expect(editOptions).not.toContain('Zerodha, TestBroker')
+
+    fireEvent.change(editBrokerSelect, { target: { value: 'Dhan' } })
 
     const saveEditBtn = screen.getByRole('button', { name: 'Save Changes' })
     fireEvent.click(saveEditBtn)
 
     await waitFor(() => {
       expect(putSpy).toHaveBeenCalledWith('148.113.41.42', expect.objectContaining({
-        whitelisted_brokers: 'Zerodha, TestBroker',
+        whitelisted_brokers: 'Dhan',
       }))
     })
+  })
+
+  it('edit modal gracefully handles legacy multi-broker whitelisted_brokers value', async () => {
+    const legacyIPsResponse: api.AdminProxyIPsResponse = {
+      ips: [
+        {
+          ...mockIPsResponse.ips[0],
+          ipAddress: '148.113.41.90',
+          whitelistedBrokers: 'Zerodha, TestBroker',
+        },
+      ],
+      stats: mockIPsResponse.stats,
+    }
+    vi.spyOn(api, 'getAdminProxyIPs').mockResolvedValue(legacyIPsResponse)
+    renderIPsPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('148.113.41.90')).toBeInTheDocument()
+    })
+
+    const editBtn = screen.getByRole('button', { name: /Edit \/ Renew IP/i })
+    fireEvent.click(editBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Edit Proxy IP: 148.113.41.90/i)).toBeInTheDocument()
+    })
+
+    const editBrokerSelect = screen.getByLabelText(/^Whitelisted Brokers$/i) as HTMLSelectElement
+    expect(editBrokerSelect.value).toBe('Zerodha, TestBroker')
   })
 })
 

@@ -287,4 +287,46 @@ describe('AccountsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('cannot swap master: master has open positions')
     expect(screen.getByRole('dialog', { name: 'Edit Group' })).toBeInTheDocument()
   })
+
+  it('newly added follower account displays group name instead of raw UUID immediately without refresh', async () => {
+    const group = { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 0, status: 'ok' as const }
+    vi.spyOn(api, 'getGroups').mockResolvedValue([group])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
+    vi.spyOn(api, 'createAccount').mockResolvedValue({
+      id: 'f99',
+      name: 'New Follower',
+      role: 'follower',
+      broker: 'kite',
+      brokerAccountId: 'ZY9999',
+      groupId: 'g1',
+      masterId: 'm1',
+      cloneFactor: '1.0',
+      maxQtyPerOrder: null,
+      enabled: true,
+      active: true,
+      status: 'ok',
+    })
+
+    renderPage('/accounts?tab=accounts')
+    expect(await screen.findByText('ZX1234')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add Account' }))
+    expect(screen.getByRole('dialog', { name: 'Add Account' })).toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText('Name'), 'New Follower')
+    await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZY9999')
+    await userEvent.type(screen.getByLabelText('API Key'), 'key')
+    await userEvent.type(screen.getByLabelText('API Secret'), 'secret')
+    await userEvent.type(screen.getByLabelText(/IP Address/), '192.168.1.50')
+    await userEvent.selectOptions(screen.getByLabelText(/Group/), 'g1')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.getByText('Account created successfully.')).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'Add Account' })).not.toBeInTheDocument()
+
+    expect(await screen.findByText('New Follower')).toBeInTheDocument()
+    expect(screen.getByText('Alpha Group')).toBeInTheDocument()
+    expect(screen.queryByText('g1')).not.toBeInTheDocument()
+  })
 })

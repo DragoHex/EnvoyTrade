@@ -191,7 +191,31 @@ describe('App authentication & navigation', () => {
     expect(banner).toHaveTextContent(/Instant circuit breaker tripped/i)
   })
 
-  it('does not poll kill switch periodically on admin routes', async () => {
+  it('polls kill switch periodically only on Dashboard route (/)', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(api, 'getMe').mockResolvedValue({ user: fakeUser })
+    const ksSpy = vi.spyOn(api, 'getKillSwitchStatus').mockResolvedValue({ engaged: false })
+
+    window.history.pushState({}, '', '/')
+    const { unmount } = render(() => <App />)
+
+    // Initial check on mount for dashboard
+    await vi.advanceTimersByTimeAsync(100)
+    expect(ksSpy).toHaveBeenCalledTimes(1)
+
+    // Advance 30 seconds: should poll on dashboard
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ksSpy).toHaveBeenCalledTimes(2)
+
+    // Advance another 30 seconds: should poll again
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ksSpy).toHaveBeenCalledTimes(3)
+
+    unmount()
+    vi.useRealTimers()
+  })
+
+  it('does not poll kill switch on non-dashboard routes (/accounts, /analytics, /settings, /admin)', async () => {
     vi.useFakeTimers()
     const adminUser = { ...fakeUser, role: 'admin' }
     vi.spyOn(api, 'getMe').mockResolvedValue({ user: adminUser })
@@ -205,16 +229,23 @@ describe('App authentication & navigation', () => {
       systemResources: { cpuPercent: 1, heapAllocMb: 20, sysMemoryMb: 50, goroutineCount: 15, gcCycles: 5 },
     })
 
-    window.history.pushState({}, '', '/admin/status')
-    render(() => <App />)
+    const nonDashboardRoutes = ['/accounts', '/analytics', '/settings', '/admin/status']
 
-    // Initial check on mount
-    await vi.advanceTimersByTimeAsync(100)
-    expect(ksSpy).toHaveBeenCalledTimes(1)
+    for (const route of nonDashboardRoutes) {
+      ksSpy.mockClear()
+      window.history.pushState({}, '', route)
+      const { unmount } = render(() => <App />)
 
-    // Advance 60 seconds (2 intervals of 30s) — should NOT poll because route is /admin/*
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(ksSpy).toHaveBeenCalledTimes(1)
+      // Initial check should NOT run on non-dashboard routes
+      await vi.advanceTimersByTimeAsync(100)
+      expect(ksSpy).toHaveBeenCalledTimes(0)
+
+      // Advance 60 seconds (2 intervals) — must NOT poll
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(ksSpy).toHaveBeenCalledTimes(0)
+
+      unmount()
+    }
 
     vi.useRealTimers()
   })

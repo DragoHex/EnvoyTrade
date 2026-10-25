@@ -240,4 +240,80 @@ describe('GroupManagePage', () => {
     expect(options).toContain('m3')
   })
 
+  it('clicking account dropdown on group page displays unattached follower accounts and allows selection', async () => {
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [],
+    })
+    vi.spyOn(api, 'getAccounts').mockImplementation((ids?: string[]) => {
+      return Promise.resolve(ids ? [master] : [master, unattached])
+    })
+
+    renderPage()
+    await screen.findByText('ZX1234')
+
+    // Add Follower card should have group-add-card class to prevent dropdown clipping
+    const addCard = screen.getByText('Add Follower to Group').closest('.accounts-card')
+    expect(addCard).toHaveClass('group-add-card')
+
+    // Initially "Add to group" button should be disabled because no account is selected
+    const addBtn = screen.getByRole('button', { name: 'Add to group' })
+    expect(addBtn).toBeDisabled()
+
+    const trigger = screen.getByRole('button', { name: /select an account/i })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).toHaveTextContent('Select an Account')
+    expect(trigger.querySelector('span')).toHaveStyle({ color: 'var(--color-text-secondary, #9da3ae)' })
+
+    await userEvent.click(trigger)
+
+    const listbox = screen.getByRole('listbox', { name: 'Account' })
+    expect(listbox).toBeInTheDocument()
+
+    const options = within(listbox).getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(options[0].textContent).toContain('Unattached Follower (ZZ0000)')
+
+    // Click the unattached follower option to select it
+    await userEvent.click(options[0])
+
+    // Dropdown listbox closes and trigger updates with standard text color
+    expect(screen.queryByRole('listbox', { name: 'Account' })).not.toBeInTheDocument()
+    const selectedTrigger = screen.getByRole('button', { name: /Unattached Follower \(ZZ0000\)/i })
+    expect(selectedTrigger).toBeInTheDocument()
+    expect(selectedTrigger.querySelector('span')).toHaveStyle({ color: 'var(--color-text, #f0f0f2)' })
+
+    // Add to group button is now enabled
+    expect(addBtn).not.toBeDisabled()
+  })
+
+  it('when no unattached follower accounts exist, account dropdown and add button are disabled with helpful message', async () => {
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower Account', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+    })
+    // Only master and follower (already attached to group) exist — no unattached followers
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, follower])
+
+    renderPage()
+    await screen.findByText('ZX1234')
+
+    const trigger = screen.getByRole('button', { name: /no unassigned follower accounts available/i })
+    expect(trigger).toBeInTheDocument()
+
+    // Clicking disabled trigger does not open listbox
+    await userEvent.click(trigger)
+    expect(screen.queryByRole('listbox', { name: 'Account' })).not.toBeInTheDocument()
+
+    const addBtn = screen.getByRole('button', { name: 'Add to group' })
+    expect(addBtn).toBeDisabled()
+  })
 })

@@ -669,3 +669,89 @@ func TestUpdateGroup_SwapMasterBlockedWithOpenPositions(t *testing.T) {
 		t.Fatalf("UpdateGroup after closing positions: %v", err)
 	}
 }
+
+func TestSetGroupImbalance_UpdatesDatabaseAndReflectsInQueries(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	master1 := seedAccountWithoutGroup(t, s, "master")
+	master2 := seedAccountWithoutGroup(t, s, "master")
+	g1 := uuid.New()
+	g2 := uuid.New()
+
+	if err := s.CreateGroup(ctx, g1, "Alpha Group", master1); err != nil {
+		t.Fatalf("CreateGroup g1: %v", err)
+	}
+	if err := s.CreateGroup(ctx, g2, "Beta Group", master2); err != nil {
+		t.Fatalf("CreateGroup g2: %v", err)
+	}
+
+	// 1. Initial state: both groups must have has_imbalance = false
+	groups, err := s.Groups(ctx)
+	if err != nil {
+		t.Fatalf("Groups initial: %v", err)
+	}
+	for _, g := range groups {
+		if g.HasImbalance {
+			t.Errorf("group %s should initially have HasImbalance false, got true", g.Name)
+		}
+	}
+	detail1, err := s.GroupDetail(ctx, g1)
+	if err != nil {
+		t.Fatalf("GroupDetail g1: %v", err)
+	}
+	if detail1.HasImbalance {
+		t.Errorf("detail1 should have HasImbalance false, got true")
+	}
+
+	// 2. Set imbalance = true using canonical group ID g1
+	if err := s.SetGroupImbalance(ctx, g1, true); err != nil {
+		t.Fatalf("SetGroupImbalance(g1, true): %v", err)
+	}
+
+	// Verify group 1 is now true, group 2 remains false (isolation)
+	groups, err = s.Groups(ctx)
+	if err != nil {
+		t.Fatalf("Groups after set true: %v", err)
+	}
+	for _, g := range groups {
+		if g.ID == g1 && !g.HasImbalance {
+			t.Errorf("group 1 (%s) expected HasImbalance true, got false", g.Name)
+		}
+		if g.ID == g2 && g.HasImbalance {
+			t.Errorf("group 2 (%s) expected HasImbalance false (isolation), got true", g.Name)
+		}
+	}
+	detail1, err = s.GroupDetail(ctx, g1)
+	if err != nil {
+		t.Fatalf("GroupDetail g1: %v", err)
+	}
+	if !detail1.HasImbalance {
+		t.Errorf("detail1 expected HasImbalance true, got false")
+	}
+
+	// 3. Set imbalance = false using master1 ID (WHERE id = $1 OR master_id = $1)
+	if err := s.SetGroupImbalance(ctx, master1, false); err != nil {
+		t.Fatalf("SetGroupImbalance(master1, false): %v", err)
+	}
+	detail1, err = s.GroupDetail(ctx, g1)
+	if err != nil {
+		t.Fatalf("GroupDetail g1 after master update: %v", err)
+	}
+	if detail1.HasImbalance {
+		t.Errorf("detail1 expected HasImbalance false after setting via masterID, got true")
+	}
+
+	// 4. Set imbalance = true using master1 ID
+	if err := s.SetGroupImbalance(ctx, master1, true); err != nil {
+		t.Fatalf("SetGroupImbalance(master1, true): %v", err)
+	}
+	detail1, err = s.GroupDetail(ctx, g1)
+	if err != nil {
+		t.Fatalf("GroupDetail g1 after master update true: %v", err)
+	}
+	if !detail1.HasImbalance {
+		t.Errorf("detail1 expected HasImbalance true after setting via masterID, got false")
+	}
+}
+

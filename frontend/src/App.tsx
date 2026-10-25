@@ -30,11 +30,11 @@ function TopNav(props: { children?: JSX.Element }) {
   const location = useLocation()
 
   const [killSwitch, setKillSwitch] = createSignal<KillSwitchStatus | null>(null)
+  const isDashboardRoute = () => location.pathname === '/'
   const isAdminRoute = () => location.pathname.startsWith('/admin')
 
   const checkKillSwitch = async () => {
-    if (!isAuthenticated()) {
-      setKillSwitch(null)
+    if (!isAuthenticated() || !isDashboardRoute()) {
       return
     }
     try {
@@ -48,11 +48,11 @@ function TopNav(props: { children?: JSX.Element }) {
   let intervalId: ReturnType<typeof setInterval> | null = null
 
   const startPolling = () => {
-    if (isAdminRoute()) return
+    if (!isDashboardRoute()) return
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
     if (intervalId === null) {
       intervalId = setInterval(() => {
-        if (!isAdminRoute() && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (isDashboardRoute() && typeof document !== 'undefined' && document.visibilityState === 'visible') {
           checkKillSwitch()
         }
       }, 30_000)
@@ -67,7 +67,10 @@ function TopNav(props: { children?: JSX.Element }) {
   }
 
   onMount(() => {
-    checkKillSwitch()
+    if (isDashboardRoute()) {
+      checkKillSwitch()
+      startPolling()
+    }
 
     // Listen for instant kill switch toggle events from AdminStatusPage
     const onKillSwitchChange = (e: Event) => {
@@ -80,12 +83,10 @@ function TopNav(props: { children?: JSX.Element }) {
       window.addEventListener('killswitch:change', onKillSwitchChange)
     }
 
-    startPolling()
-
     const onVisibilityChange = () => {
       if (typeof document !== 'undefined') {
         if (document.visibilityState === 'visible') {
-          if (!isAdminRoute()) {
+          if (isDashboardRoute()) {
             checkKillSwitch()
             startPolling()
           }
@@ -111,9 +112,8 @@ function TopNav(props: { children?: JSX.Element }) {
   })
 
   createEffect(() => {
-    if (isAdminRoute()) {
-      stopPolling()
-    } else if (isAuthenticated() && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    if (isDashboardRoute() && isAuthenticated() && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      checkKillSwitch()
       startPolling()
     } else {
       stopPolling()
@@ -121,9 +121,7 @@ function TopNav(props: { children?: JSX.Element }) {
   })
 
   createEffect(() => {
-    if (isAuthenticated()) {
-      checkKillSwitch()
-    } else {
+    if (!isAuthenticated()) {
       setKillSwitch(null)
     }
   })

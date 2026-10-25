@@ -75,6 +75,12 @@ export function AccountsPage() {
   const handleCreate = async (body: CreateAccountRequest) => {
     try {
       const created = await createAccount(body)
+      if (!created.groupName && (created.groupId || created.masterId)) {
+        const matched = groups()?.find((g) => g.id === created.groupId || (created.masterId && g.masterId === created.masterId))
+        if (matched) {
+          created.groupName = matched.name
+        }
+      }
       showToast({ kind: 'success', message: 'Account created successfully.' })
       mutateAccounts((prev) => (prev ? [...prev, created] : [created]))
       refetchGroups()
@@ -336,6 +342,7 @@ export function AccountsPage() {
             <h2>Master Accounts</h2>
             <AccountsTable
               accounts={masterAccounts()}
+              groups={groups() ?? []}
               emptyMessage="No master accounts."
               onToggleActive={handleToggleActive}
               onEdit={openEdit}
@@ -347,6 +354,7 @@ export function AccountsPage() {
             <h2>Follower Accounts</h2>
             <AccountsTable
               accounts={followerAccounts()}
+              groups={groups() ?? []}
               emptyMessage="No follower accounts."
               onToggleActive={handleToggleActive}
               onEdit={openEdit}

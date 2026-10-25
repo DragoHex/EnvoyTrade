@@ -168,7 +168,8 @@ const groupInfo = `-- name: GroupInfo :one
 SELECT g.id, g.name, g.master_id,
        a.broker_user_id AS master_broker_user_id,
        a.name AS master_name,
-       a.active AS master_active
+       a.active AS master_active,
+       g.has_imbalance
 FROM groups g
 JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 WHERE (g.id = $1 OR g.master_id = $1)
@@ -188,6 +189,7 @@ type GroupInfoRow struct {
 	MasterBrokerUserID string
 	MasterName         string
 	MasterActive       bool
+	HasImbalance       bool
 }
 
 func (q *Queries) GroupInfo(ctx context.Context, arg GroupInfoParams) (GroupInfoRow, error) {
@@ -200,6 +202,7 @@ func (q *Queries) GroupInfo(ctx context.Context, arg GroupInfoParams) (GroupInfo
 		&i.MasterBrokerUserID,
 		&i.MasterName,
 		&i.MasterActive,
+		&i.HasImbalance,
 	)
 	return i, err
 }
@@ -211,12 +214,13 @@ SELECT g.id, g.name, g.master_id,
        a.broker,
        a.status,
        a.active,
+       g.has_imbalance,
        COUNT(f.follower_id)::int AS follower_count
 FROM groups g
 JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 LEFT JOIN follow_links f ON f.group_id = g.id
 WHERE $1::uuid IS NULL OR g.user_id = $1::uuid
-GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active
+GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active, g.has_imbalance
 ORDER BY LOWER(g.name) ASC, g.id ASC
 `
 
@@ -229,6 +233,7 @@ type GroupsRow struct {
 	Broker             string
 	Status             string
 	Active             bool
+	HasImbalance       bool
 	FollowerCount      int32
 }
 
@@ -250,6 +255,7 @@ func (q *Queries) Groups(ctx context.Context, userID *uuid.UUID) ([]GroupsRow, e
 			&i.Broker,
 			&i.Status,
 			&i.Active,
+			&i.HasImbalance,
 			&i.FollowerCount,
 		); err != nil {
 			return nil, err
@@ -260,6 +266,23 @@ func (q *Queries) Groups(ctx context.Context, userID *uuid.UUID) ([]GroupsRow, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const setGroupImbalance = `-- name: SetGroupImbalance :execrows
+UPDATE groups SET has_imbalance = $2, updated_at = now() WHERE id = $1 OR master_id = $1
+`
+
+type SetGroupImbalanceParams struct {
+	ID           uuid.UUID
+	HasImbalance bool
+}
+
+func (q *Queries) SetGroupImbalance(ctx context.Context, arg SetGroupImbalanceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setGroupImbalance, arg.ID, arg.HasImbalance)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateGroupMaster = `-- name: UpdateGroupMaster :execrows

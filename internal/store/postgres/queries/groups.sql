@@ -5,24 +5,29 @@ SELECT g.id, g.name, g.master_id,
        a.broker,
        a.status,
        a.active,
+       g.has_imbalance,
        COUNT(f.follower_id)::int AS follower_count
 FROM groups g
 JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 LEFT JOIN follow_links f ON f.group_id = g.id
 WHERE sqlc.narg('user_id')::uuid IS NULL OR g.user_id = sqlc.narg('user_id')::uuid
-GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active
+GROUP BY g.id, g.name, g.master_id, a.broker_user_id, a.name, a.broker, a.status, a.active, g.has_imbalance
 ORDER BY LOWER(g.name) ASC, g.id ASC;
 
 -- name: GroupInfo :one
 SELECT g.id, g.name, g.master_id,
        a.broker_user_id AS master_broker_user_id,
        a.name AS master_name,
-       a.active AS master_active
+       a.active AS master_active,
+       g.has_imbalance
 FROM groups g
 JOIN accounts a ON a.id = g.master_id AND a.deleted_at IS NULL
 WHERE (g.id = $1 OR g.master_id = $1)
   AND (sqlc.narg('user_id')::uuid IS NULL OR g.user_id = sqlc.narg('user_id')::uuid)
 LIMIT 1;
+
+-- name: SetGroupImbalance :execrows
+UPDATE groups SET has_imbalance = $2, updated_at = now() WHERE id = $1 OR master_id = $1;
 
 -- name: GroupFollowerRows :many
 SELECT a.id, a.name, a.broker_user_id, f.enabled, a.status

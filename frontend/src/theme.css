@@ -611,8 +611,13 @@ tr[data-testid='master-row'] td {
   border-radius: 8px;
   padding: 1rem 1.25rem;
   margin: 0 1.5rem 1.5rem;
-  overflow-x: hidden;
+  overflow: visible;
   box-sizing: border-box;
+}
+
+.accounts-card:has(.group-add-form),
+.group-add-card {
+  overflow: visible !important;
 }
 
 .accounts-card h2,
@@ -730,6 +735,9 @@ tr[data-testid='master-row'] td {
 .group-add-form select:focus {
   border-color: var(--color-accent);
 }
+.group-add-form .themed-select-container {
+  min-width: 220px;
+}
 
 /* Account Detail Drawer */
 .drawer-overlay {
@@ -832,6 +840,12 @@ tr[data-testid='master-row'] td {
 .drawer-form select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.drawer-form input::-webkit-calendar-picker-indicator {
+  display: none !important;
+  -webkit-appearance: none;
+  opacity: 0;
+  pointer-events: none;
 }
 .drawer-actions {
   display: flex;
@@ -2796,6 +2810,11 @@ nav a.user-badge-link.active:hover,
     max-width: calc(100vw - 1.7rem) !important;
     box-sizing: border-box;
     overflow-x: hidden;
+  }
+
+  .accounts-card:has(.group-add-form),
+  .group-add-card {
+    overflow: visible !important;
   }
 
   /* 3. Smooth Horizontal Table Scrolling with Preserved Readability */

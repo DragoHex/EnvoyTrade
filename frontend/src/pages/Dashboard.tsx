@@ -1,4 +1,4 @@
-import { createResource, For, Show, onMount, onCleanup } from 'solid-js'
+import { createResource, createEffect, For, Show, onMount, onCleanup } from 'solid-js'
 import {
   getGroupDetail,
   getGroupRebalanceDiff,
@@ -16,12 +16,29 @@ import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components
 import { EmptyState } from '../components/EmptyState'
 import { registerSyncSubscriber, triggerSyncNow } from '../utils/syncBus'
 
-function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
+function GroupCardLoader(props: { id: string; status: 'ok' | 'error'; hasImbalance?: boolean }) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
+
+  const isImbalanced = () => {
+    if (detail() !== undefined && detail()?.hasImbalance !== undefined) {
+      return !!detail()?.hasImbalance
+    }
+    return !!props.hasImbalance
+  }
+
   const [diff, { refetch: refetchDiff }] = createResource(
-    () => props.id,
+    () => (isImbalanced() ? props.id : null),
     (groupId) => getGroupRebalanceDiff(groupId).catch(() => null)
   )
+
+  createEffect(() => {
+    if (isImbalanced()) {
+      const timer = setInterval(() => {
+        refetchDiff()
+      }, 30_000)
+      onCleanup(() => clearInterval(timer))
+    }
+  })
 
   onMount(() => {
     const unregister = registerSyncSubscriber(() => {
@@ -42,21 +59,24 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error' }) {
   }
 
   const hasActiveImbalance = () => {
-    const dList = diff()?.drifts ?? []
-    const followers = detail()?.followers ?? []
-    const enabledMap = new Map<string, boolean>()
-    for (const f of followers) {
-      enabledMap.set(f.accountId, f.enabled)
-    }
-    for (const d of dList) {
-      if ((d.symbols ?? []).length > 0) {
-        const isEnabled = enabledMap.has(d.account_id) ? enabledMap.get(d.account_id)! : d.enabled
-        if (isEnabled) {
-          return true
+    if (diff()) {
+      const dList = diff()?.drifts ?? []
+      const followers = detail()?.followers ?? []
+      const enabledMap = new Map<string, boolean>()
+      for (const f of followers) {
+        enabledMap.set(f.accountId, f.enabled)
+      }
+      for (const d of dList) {
+        if ((d.symbols ?? []).length > 0) {
+          const isEnabled = enabledMap.has(d.account_id) ? enabledMap.get(d.account_id)! : d.enabled
+          if (isEnabled) {
+            return true
+          }
         }
       }
+      return false
     }
-    return false
+    return isImbalanced()
   }
 
   const onToggleCopy = async (accountId: string, next: boolean) => {
@@ -165,7 +185,7 @@ export function Dashboard() {
             </div>
           }
         >
-          <For each={groups()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} />}</For>
+          <For each={groups()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} hasImbalance={g.hasImbalance} />}</For>
         </Show>
       </Show>
     </div>

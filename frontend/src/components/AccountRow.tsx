@@ -1,4 +1,4 @@
-import { createResource, createSignal, createEffect, onCleanup, Show } from 'solid-js'
+import { createSignal, createEffect, onCleanup, Show } from 'solid-js'
 import { CopyToggle } from './CopyToggle'
 import { ConfirmActionModal } from './ConfirmActionModal'
 import { SquareOffModal } from './SquareOffModal'
@@ -9,7 +9,7 @@ import { BlockIcon, CropSquareIcon, LogoutIcon, PlayCircleIcon, ChevronDownIcon,
 import { AccountOrderDetails } from './AccountOrderDetails'
 import { MtmBreakdownPopover } from './MtmBreakdownPopover'
 import { MarginBreakdownPopover } from './MarginBreakdownPopover'
-import { getAccountOrders, type GroupFollower, type AccountSummaryMetrics } from '../api'
+import type { GroupFollower, AccountSummaryMetrics } from '../api'
 
 type DestructiveAction = 'square_off' | 'exit_open_orders' | 'rebalance' | null
 const TOAST_DISMISS_MS = 4000
@@ -50,15 +50,10 @@ export function AccountRow(props: {
     }
   })
 
-  // Fetch account orders/metrics on row expansion or if already expanded
-  const [ordersData] = createResource(
-    () => (expanded() ? props.follower.accountId : null),
-    (accId) => getAccountOrders(accId, 'open_positions'),
-  )
-
+  // Live summary metrics piped from child <AccountOrderDetails onSummaryChange={...} />
   const summary = () => {
     if (!expanded()) return null
-    return liveSummary() ?? ordersData()?.summary
+    return liveSummary()
   }
 
   const currentBreakdown = () => {

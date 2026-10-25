@@ -302,6 +302,8 @@ func NormalizeWhitelistedBrokers(raw string) string {
 		switch lower {
 		case "zerodha", "kite":
 			normalized = append(normalized, "Zerodha")
+		case "dhan":
+			normalized = append(normalized, "Dhan")
 		case "testbroker", "test_broker":
 			normalized = append(normalized, "TestBroker")
 		default:
@@ -338,4 +340,19 @@ func (p ProxyIP) MatchesBroker(broker string) bool {
 	}
 	return false
 }
+
+// BrokerPriority returns the candidate priority of this proxy IP for the given broker:
+// - 0: Incompatible (not whitelisted for this broker; must be excluded)
+// - 1: Broker-specialized (explicitly whitelisted for this broker)
+// - 2: All brokers / unrestricted (whitelisted_brokers is empty; fallback)
+func (p ProxyIP) BrokerPriority(broker string) int {
+	if !p.MatchesBroker(broker) {
+		return 0
+	}
+	if strings.TrimSpace(p.WhitelistedBrokers) != "" {
+		return 1
+	}
+	return 2
+}
+
 

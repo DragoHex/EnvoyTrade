@@ -1,5 +1,5 @@
 import { Show, createSignal } from 'solid-js'
-import type { Account } from '../api'
+import type { Account, GroupSummary } from '../api'
 import { DataTable, type Column } from './DataTable'
 import { StatusDot } from './StatusDot'
 import { ChevronDownIcon, EditIcon, TrashIcon, UserMinusIcon } from './icons'
@@ -12,6 +12,7 @@ import { AccountHoldingsRow } from './AccountHoldingsRow'
 // edit/remove/delete buttons (docs/plans/UI-PLAN.md §3).
 export function AccountsTable(props: {
   accounts: Account[]
+  groups?: GroupSummary[]
   emptyMessage?: string
   onEdit: (account: Account) => void
   onRemoveFromGroup?: (account: Account) => void
@@ -20,6 +21,23 @@ export function AccountsTable(props: {
 }) {
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
   const [expandedId, setExpandedId] = createSignal<string | null>(null)
+
+  const resolveGroupName = (a: Account): string | null => {
+    if (a.groupName && a.groupName.trim() !== '') {
+      return a.groupName
+    }
+    if (props.groups && props.groups.length > 0) {
+      if (a.groupId) {
+        const matched = props.groups.find((g) => g.id === a.groupId)
+        if (matched) return matched.name
+      }
+      if (a.masterId) {
+        const matched = props.groups.find((g) => g.masterId === a.masterId || g.id === a.masterId)
+        if (matched) return matched.name
+      }
+    }
+    return null
+  }
 
   const handleToggle = async (a: Account, next: boolean) => {
     if (!props.onToggleActive) return
@@ -87,11 +105,14 @@ export function AccountsTable(props: {
       header: 'Group',
       headerClass: 'col-group',
       cellClass: 'col-group',
-      cell: (a) => (
-        <Show when={a.groupName || a.groupId || a.masterId} fallback={<span>—</span>}>
-          <span>{a.groupName || a.groupId || a.masterId}</span>
-        </Show>
-      ),
+      cell: (a) => {
+        const name = resolveGroupName(a)
+        return (
+          <Show when={name} fallback={<span>—</span>}>
+            <span>{name}</span>
+          </Show>
+        )
+      },
     },
     {
       header: 'Clone Factor',

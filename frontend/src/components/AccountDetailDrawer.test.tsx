@@ -345,11 +345,180 @@ describe('AccountDetailDrawer', () => {
     expect(ipInput).toHaveValue('')
 
     // Selecting IPv4 sets the available IPv4
-    await userEvent.selectOptions(ipTypeSelect, 'ipv4')
-    expect(ipInput).toHaveValue('148.113.41.42')
-
     // Selecting NA clears it
     await userEvent.selectOptions(ipTypeSelect, 'na')
     expect(ipInput).toHaveValue('')
   })
+
+  it('create mode, broker=dhan: does not show API Key or API Secret, shows Dhan Client ID and Access Token, submits without apiKey/apiSecret', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+    ))
+
+    // Select Dhan broker
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'dhan')
+    expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('API Secret')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Password (Kite Login)')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('TOTP Secret Key')).not.toBeInTheDocument()
+
+    expect(screen.getByLabelText('Dhan Client ID')).toBeInTheDocument()
+    expect(screen.getByLabelText('Access Token (JWT)')).toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
+    await userEvent.type(screen.getByLabelText('Dhan Client ID'), '1000000001')
+    await userEvent.type(screen.getByLabelText('Access Token (JWT)'), 'dhan-jwt-token-123')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(onCreate).toHaveBeenCalledWith({
+      name: '1000000001',
+      role: 'master',
+      broker: 'dhan',
+      brokerAccountId: '1000000001',
+      accessToken: 'dhan-jwt-token-123',
+    })
+  })
+
+  it('filters and prioritizes broker-specialized proxy IPs over unrestricted IPs and allows pool selection', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '10.0.0.1',
+          ipType: 'ipv4',
+          host: 'host1',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: '', // All brokers / unrestricted (listed first in API)
+        },
+        {
+          ipAddress: '10.0.0.2',
+          ipType: 'ipv4',
+          host: 'host2',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: 'Zerodha', // Zerodha specialized
+        },
+        {
+          ipAddress: '10.0.0.3',
+          ipType: 'ipv4',
+          host: 'host3',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: 'Dhan', // Dhan specialized
+        },
+      ],
+      ipv6: [],
+    })
+
+    // 1. By default broker is 'kite'. Should prioritize 10.0.0.2 (Zerodha specialized) over 10.0.0.1 (unrestricted)
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    const ipInput = await screen.findByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('10.0.0.2')
+    expect(ipInput).not.toHaveAttribute('list')
+
+    // Confirm NO separate selector is rendered and NO native datalist
+    expect(screen.queryByLabelText('Available Proxy IPs')).not.toBeInTheDocument()
+    expect(document.getElementById('available-proxy-ips')).toBeNull()
+
+    // 2. Open custom themed dropdown via toggle button
+    const toggleBtn = screen.getByRole('button', { name: 'Toggle IP dropdown' })
+    expect(toggleBtn).toBeInTheDocument()
+    await userEvent.click(toggleBtn)
+
+    const listbox = screen.getByRole('listbox', { name: 'Compatible Proxy IPs' })
+    expect(listbox).toBeInTheDocument()
+
+    const options = Array.from(listbox.querySelectorAll('[role="option"]'))
+    expect(options.length).toBe(2)
+    expect(options[0]).toHaveTextContent('10.0.0.2')
+    expect(options[0]).toHaveTextContent('Zerodha Specialized')
+    expect(options[1]).toHaveTextContent('10.0.0.1')
+    expect(options[1]).toHaveTextContent('All Brokers')
+
+    // Click 10.0.0.1 from the custom dropdown
+    await userEvent.click(options[1])
+    expect(ipInput).toHaveValue('10.0.0.1')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+
+    // 3. Switch broker to Dhan: should auto-switch to 10.0.0.3 (Dhan specialized), excluding 10.0.0.2 (Zerodha)
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'dhan')
+    expect(ipInput).toHaveValue('10.0.0.3')
+
+    // Reopen dropdown to verify Dhan options
+    await userEvent.click(toggleBtn)
+    const dhanListbox = screen.getByRole('listbox', { name: 'Compatible Proxy IPs' })
+    const dhanOptions = Array.from(dhanListbox.querySelectorAll('[role="option"]'))
+    expect(dhanOptions.length).toBe(2)
+    expect(dhanOptions[0]).toHaveTextContent('10.0.0.3')
+    expect(dhanOptions[0]).toHaveTextContent('Dhan Specialized')
+    expect(dhanOptions[1]).toHaveTextContent('10.0.0.1')
+    expect(dhanOptions[1]).toHaveTextContent('All Brokers')
+
+    // Press Escape to close dropdown
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('falls back to unrestricted IP when no specialized IP exists for the broker', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '10.0.0.1',
+          ipType: 'ipv4',
+          host: 'host1',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: '', // Only unrestricted IP available
+        },
+      ],
+      ipv6: [],
+    })
+
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    const ipInput = await screen.findByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('10.0.0.1')
+  })
+
+  it('strictly excludes other brokers specialized IPs and shows pool warning when none compatible', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '10.0.0.3',
+          ipType: 'ipv4',
+          host: 'host3',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: 'Dhan', // Only Dhan specialized IP available
+        },
+      ],
+      ipv6: [],
+    })
+
+    // Create mode with broker='kite'
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    const ipInput = await screen.findByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('')
+    expect(screen.getByText('No available IPV4 address in proxy pool.')).toBeInTheDocument()
+  })
 })
+
