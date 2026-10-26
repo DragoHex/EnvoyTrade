@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"envoytrade/internal/domain"
-	"envoytrade/internal/kite"
 
 	"github.com/DragoHex/godhan"
 	"github.com/DragoHex/godhan/models"
@@ -42,18 +41,7 @@ type PortfolioSyncer struct {
 func defaultAPIFactory(clientID, token string, proxyCfg *ProxyConfig) (SyncAPI, error) {
 	opts := []godhan.Option{}
 	if proxyCfg != nil && proxyCfg.Host != "" {
-		kpCfg := kite.ProxyConfig{
-			Scheme:       proxyCfg.Scheme,
-			Host:         proxyCfg.Host,
-			Port:         proxyCfg.Port,
-			ClientID:     proxyCfg.ClientID,
-			ClientSecret: proxyCfg.ClientSecret,
-		}
-		proxyClient, err := kite.RESTClientFor(kpCfg)
-		if err != nil {
-			return nil, fmt.Errorf("dhan: proxy client setup failed: %w", err)
-		}
-		opts = append(opts, godhan.WithHTTPClient(proxyClient))
+		opts = append(opts, godhan.WithProxy(*proxyCfg))
 	}
 	return godhan.NewClient(clientID, token, opts...), nil
 }
