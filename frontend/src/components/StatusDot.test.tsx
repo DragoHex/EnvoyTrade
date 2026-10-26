@@ -30,4 +30,11 @@ describe('StatusDot', () => {
     expect(dot).toHaveAttribute('data-status', 'error')
     expect(dot.style.background).toBe('rgb(229, 72, 77)') // #e5484d in rgb
   })
+
+  it('renders spinning loader when status is "pending"', () => {
+    render(() => <StatusDot status="pending" />)
+    const dot = screen.getByTestId('status-dot')
+    expect(dot).toHaveAttribute('data-status', 'pending')
+    expect(dot.querySelector('svg')).toBeInTheDocument()
+  })
 })

@@ -130,11 +130,15 @@ export function AccountsTable(props: {
       header: 'Status',
       headerClass: 'col-status',
       cellClass: 'col-status',
-      cell: (a) => (
-        <span class="status-cell-centered" title={a.status}>
-          <StatusDot status={a.status} />
-        </span>
-      ),
+      cell: (a) => {
+        const s = a.status === 'error' || a.authStatus === 'error' ? 'error' : (a.status === 'pending' || a.authStatus === 'pending' ? 'pending' : a.status)
+        const tooltip = s === 'error' ? (a.authError || 'Account error') : (s === 'pending' ? 'Connecting / Syncing...' : 'Active')
+        return (
+          <span class="status-cell-centered" title={tooltip}>
+            <StatusDot status={s} />
+          </span>
+        )
+      },
     },
     {
       header: '',

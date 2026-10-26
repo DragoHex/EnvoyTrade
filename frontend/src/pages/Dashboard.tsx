@@ -20,7 +20,7 @@ import { registerSyncSubscriber, triggerSyncNow } from '../utils/syncBus'
 
 function GroupCardLoader(props: {
   id: string
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
   hasImbalance?: boolean
   onDetailLoaded?: (detail: GroupDetail) => void
 }) {

@@ -52,7 +52,7 @@ export interface GroupSummary {
   masterName?: string
   broker: string
   followerCount: number
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
   active?: boolean
   hasImbalance?: boolean
 }
@@ -70,7 +70,7 @@ export interface GroupFollower {
   name: string
   brokerAccountId: string
   enabled: boolean
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
   netQty?: number
   openPositionsCount?: number
   closedPositionsCount?: number
@@ -113,7 +113,7 @@ export interface Account {
   apiKey?: string | null
   apiSecret?: string | null
   ip?: string | null
-  authStatus?: 'unauthenticated' | 'authenticated' | 'error' | null
+  authStatus?: 'unauthenticated' | 'authenticated' | 'error' | 'pending' | null
   authError?: string | null
   groupId?: string | null
   groupName?: string | null
@@ -122,7 +122,7 @@ export interface Account {
   maxQtyPerOrder: number | null
   enabled: boolean
   active: boolean
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
 }
 
 export interface CreateAccountRequest {

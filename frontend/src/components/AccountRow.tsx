@@ -148,7 +148,9 @@ export function AccountRow(props: {
           </div>
         </td>
         <td class="col-status">
-          <StatusDot status={props.follower.status} />
+          <span title={props.follower.status === 'error' ? 'Account error' : (props.follower.status === 'pending' || props.follower.status === 'syncing' ? 'Connecting / Syncing...' : 'Active')}>
+            <StatusDot status={props.follower.status} />
+          </span>
         </td>
         <td class="col-actions">
           <div class="row-actions-group">
