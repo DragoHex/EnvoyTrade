@@ -250,7 +250,13 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 			qty    int
 			reason domain.SizingReason
 		)
-		if link.CloneFactor.Equal(one) {
+		if link.Status == "error" || link.AuthStatus == "error" {
+			qty = 0
+			reason = domain.ReasonFollowerInError
+		} else if link.Status == "pending" || link.AuthStatus == "pending" {
+			qty = 0
+			reason = domain.ReasonFollowerPending
+		} else if link.CloneFactor.Equal(one) {
 			qty = fill.FilledQuantity
 			if link.MaxQtyPerOrder > 0 && qty > link.MaxQtyPerOrder {
 				qty = link.MaxQtyPerOrder

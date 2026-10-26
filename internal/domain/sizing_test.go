@@ -157,3 +157,23 @@ func TestSizeOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestSizingReason_String(t *testing.T) {
+	cases := []struct {
+		reason domain.SizingReason
+		want   string
+	}{
+		{domain.ReasonOK, "ok"},
+		{domain.ReasonBelowOneLot, "below_one_lot"},
+		{domain.ReasonCapped, "capped"},
+		{domain.ReasonBadInstrument, "bad_instrument"},
+		{domain.ReasonInvalidRatio, "invalid_ratio"},
+		{domain.ReasonFollowerInError, "follower_in_error"},
+		{domain.ReasonFollowerPending, "follower_pending"},
+	}
+	for _, tc := range cases {
+		if got := tc.reason.String(); got != tc.want {
+			t.Errorf("reason.String() = %q, want %q", got, tc.want)
+		}
+	}
+}
