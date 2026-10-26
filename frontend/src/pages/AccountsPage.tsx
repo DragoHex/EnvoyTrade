@@ -278,7 +278,7 @@ export function AccountsPage() {
                         <tr
                           class="clickable-row"
                           data-testid="group-row"
-                          onClick={() => navigate(`/accounts/groups/${g().id || g().masterId}`)}
+                          onClick={() => navigate(`/accounts/groups/${g().id || g().masterId}`, { state: { name: g().name } })}
                         >
                           <td class="col-name">{g().name || '—'}</td>
                           <td class="col-master">
