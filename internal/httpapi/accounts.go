@@ -202,9 +202,13 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "brokerAccountId is required")
 		return
 	}
+	req.BrokerAccountID = strings.TrimSpace(req.BrokerAccountID)
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		req.Name = req.BrokerAccountID
 	}
+	req.ApiKey = strings.TrimSpace(req.ApiKey)
+	req.ApiSecret = strings.TrimSpace(req.ApiSecret)
 
 	var rawIP *string
 	if req.IP != nil {
@@ -338,6 +342,12 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	initialStatus := "ok"
+	if req.AccessToken == nil && encPass != "" && encTotp != "" {
+		initialStatus = "pending"
+		_ = h.store.SetAccountAccessToken(r.Context(), id, "", nil, "pending", "")
+	}
+
 	if h.syncer != nil && ((encPass != "" && encTotp != "") || (broker == "dhan" && req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "")) {
 		go func() {
 			_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
@@ -352,7 +362,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		BrokerAccountID: req.BrokerAccountID,
 		Enabled:         true,
 		Active:          true,
-		Status:          "ok",
+		Status:          initialStatus,
 	}
 	if req.ApiKey != "" {
 		resp.ApiKey = &req.ApiKey
@@ -668,17 +678,19 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		updated = true
 	}
 	if req.ApiKey != nil {
-		if writePatchStoreError(w, h.store.SetAccountAPIKey(r.Context(), id, *req.ApiKey)) {
+		trimmedKey := strings.TrimSpace(*req.ApiKey)
+		if writePatchStoreError(w, h.store.SetAccountAPIKey(r.Context(), id, trimmedKey)) {
 			return
 		}
-		resp["apiKey"] = *req.ApiKey
+		resp["apiKey"] = trimmedKey
 		updated = true
 	}
 	if req.ApiSecret != nil {
-		if writePatchStoreError(w, h.store.SetAccountAPISecret(r.Context(), id, *req.ApiSecret)) {
+		trimmedSec := strings.TrimSpace(*req.ApiSecret)
+		if writePatchStoreError(w, h.store.SetAccountAPISecret(r.Context(), id, trimmedSec)) {
 			return
 		}
-		resp["apiSecret"] = *req.ApiSecret
+		resp["apiSecret"] = trimmedSec
 		updated = true
 	}
 	if req.Password != nil || req.TotpSecret != nil {
@@ -702,11 +714,6 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		if writePatchStoreError(w, h.store.SetAccountEncryptedCredentials(r.Context(), id, encPass, encTotp)) {
 			return
 		}
-		if h.syncer != nil && (encPass != "" || encTotp != "") {
-			go func() {
-				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
-			}()
-		}
 		resp["credentials"] = "updated"
 		updated = true
 	}
@@ -716,17 +723,12 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			exp := time.Now().UTC().Add(24 * time.Hour)
 			expiresAt = &exp
 		}
-		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, *req.AccessToken, expiresAt, "authenticated", "")) {
+		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), expiresAt, "authenticated", "")) {
 			return
 		}
 		role, _ := h.store.AccountRole(r.Context(), id)
 		if role == "follower" && h.followerRegistrar != nil {
 			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
-		}
-		if h.syncer != nil {
-			go func() {
-				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
-			}()
 		}
 		resp["accessToken"] = "updated"
 		updated = true
@@ -735,6 +737,11 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 	if req.IP != nil || req.ApiKey != nil || req.ApiSecret != nil || req.Password != nil || req.TotpSecret != nil || req.AccessToken != nil {
 		if h.brokerEvicter != nil {
 			h.brokerEvicter.Evict(id)
+		}
+		if h.syncer != nil {
+			go func() {
+				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
+			}()
 		}
 	}
 

@@ -973,6 +973,13 @@ func accountFromRow(r sqlcgen.AccountsRow, now time.Time) domain.Account {
 		}
 	}
 
+	status := statusFromAccountStatus(r.Status)
+	if authStatus == "error" || r.Status == "error" {
+		status = "error"
+	} else if authStatus == "pending" || r.Status == "pending" || (authStatus == "unauthenticated" && !r.TokenExpiresAt.Valid) {
+		status = "pending"
+	}
+
 	a := domain.Account{
 		ID:              r.ID,
 		Name:            r.Name,
@@ -982,7 +989,7 @@ func accountFromRow(r sqlcgen.AccountsRow, now time.Time) domain.Account {
 		ApiKey:          r.ApiKey,
 		ApiSecret:       r.ApiSecret,
 		Active:          r.Active,
-		Status:          statusFromAccountStatus(r.Status),
+		Status:          status,
 		IPAddress:       r.IpAddress,
 		AuthStatus:      authStatus,
 		AuthError:       authError,

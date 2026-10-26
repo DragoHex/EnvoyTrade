@@ -26,6 +26,10 @@ type PortfolioStore interface {
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
 }
 
+type accountStatusSetter interface {
+	SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error
+}
+
 // PortfolioSyncer orchestrates login, token verification, and data fetching.
 type PortfolioSyncer struct {
 	Store            PortfolioStore
@@ -112,6 +116,9 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		newToken, loginErr := loginFn(ctx, authInfo.BrokerAccountID, password, totpSecret, authInfo.ApiKey, authInfo.ApiSecret)
 		if loginErr != nil {
 			_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, "error", loginErr.Error())
+			if setter, ok := s.Store.(accountStatusSetter); ok {
+				_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
+			}
 			return fmt.Errorf("headless login: %w", loginErr)
 		}
 
@@ -240,6 +247,10 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	}
 	if err := s.Store.SyncAccountMargins(ctx, accountID, marginParam); err != nil {
 		return fmt.Errorf("sync margins: %w", err)
+	}
+
+	if setter, ok := s.Store.(accountStatusSetter); ok {
+		_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusActive)
 	}
 
 	return nil

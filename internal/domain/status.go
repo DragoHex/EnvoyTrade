@@ -12,19 +12,22 @@ import (
 type AccountStatus string
 
 const (
-	AccountStatusActive AccountStatus = "active"
-	AccountStatusError  AccountStatus = "error"
+	AccountStatusActive  AccountStatus = "active"
+	AccountStatusError   AccountStatus = "error"
+	AccountStatusPending AccountStatus = "pending"
 )
 
 // ErrInvalidAccountStatus is returned when an unrecognized account status is provided.
-var ErrInvalidAccountStatus = errors.New("invalid account status: must be 'active', 'ok', or 'error'")
+var ErrInvalidAccountStatus = errors.New("invalid account status: must be 'active', 'ok', 'pending', or 'error'")
 
 // ParseAccountStatus parses and validates an account status string.
-// Accepts "active", "ok", or "error". Both "active" and "ok" are normalized to AccountStatusActive.
+// Accepts "active", "ok", "pending", or "error". Both "active" and "ok" are normalized to AccountStatusActive.
 func ParseAccountStatus(s string) (AccountStatus, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "active", "ok":
 		return AccountStatusActive, nil
+	case "pending":
+		return AccountStatusPending, nil
 	case "error":
 		return AccountStatusError, nil
 	default:
@@ -34,13 +37,16 @@ func ParseAccountStatus(s string) (AccountStatus, error) {
 
 // IsValid checks if an AccountStatus is a recognized valid status.
 func (s AccountStatus) IsValid() bool {
-	return s == AccountStatusActive || s == AccountStatusError
+	return s == AccountStatusActive || s == AccountStatusError || s == AccountStatusPending
 }
 
-// ToAPI returns the client-facing API representation ("ok" or "error").
+// ToAPI returns the client-facing API representation ("ok", "pending", or "error").
 func (s AccountStatus) ToAPI() string {
 	if s == AccountStatusActive {
 		return "ok"
+	}
+	if s == AccountStatusPending {
+		return "pending"
 	}
 	return "error"
 }
