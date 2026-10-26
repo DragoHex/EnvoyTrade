@@ -236,6 +236,13 @@ export function AccountDetailDrawer(props: {
         return
       }
 
+      const trimmedBroker = broker()
+      const trimmedApiSecret = apiSecret().trim()
+      if ((trimmedBroker === 'kite' || trimmedBroker === 'zerodha') && trimmedApiSecret && trimmedApiSecret.length > 20 && trimmedApiSecret.length !== 32) {
+        setError(`Zerodha API Secret must be exactly 32 characters (currently ${trimmedApiSecret.length} characters).`)
+        return
+      }
+
       if (isEdit()) {
         const a = props.account!
         const patch: Record<string, unknown> = {}
@@ -421,8 +428,21 @@ export function AccountDetailDrawer(props: {
               </label>
               <label>
                 API Secret
-                <input value={apiSecret()} onInput={(e) => setApiSecret(e.currentTarget.value)} />
+                <input value={apiSecret()} onInput={(e) => setApiSecret(e.currentTarget.value.trim())} />
               </label>
+              <Show when={(broker() === 'kite' || broker() === 'zerodha') && apiSecret().trim().length > 0}>
+                <span
+                  style={{
+                    'font-size': '0.75rem',
+                    color: apiSecret().trim().length === 32 ? 'var(--color-accent)' : '#e5484d',
+                    'margin-top': '0.25rem',
+                    'margin-bottom': '0.5rem',
+                    display: 'block',
+                  }}
+                >
+                  {apiSecret().trim().length}/32 characters{apiSecret().trim().length !== 32 ? ' (must be 32)' : ' (valid length)'}
+                </span>
+              </Show>
               <label>
                 Password (Kite Login)
                 <input

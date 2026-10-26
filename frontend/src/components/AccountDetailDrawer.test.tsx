@@ -208,6 +208,22 @@ describe('AccountDetailDrawer', () => {
     expect(onCreate).not.toHaveBeenCalled()
   })
 
+  it('create mode, broker=kite: shows validation error when API secret is 31 characters', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+    ))
+
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
+    await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZX9999')
+    await userEvent.type(screen.getByLabelText('API Key'), 'key1234567890123')
+    await userEvent.type(screen.getByLabelText('API Secret'), '1234567890123456789012345678901') // 31 chars
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Zerodha API Secret must be exactly 32 characters (currently 31 characters).')
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
   it('edit mode: role is locked, submits changed IP and cloneFactor via onSave', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     render(() => (
