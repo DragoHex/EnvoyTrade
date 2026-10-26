@@ -685,17 +685,21 @@ func (m *multiBrokerSyncer) SyncAccountPortfolio(ctx context.Context, accountID 
 	if m.syncAccount != nil {
 		return m.syncAccount(ctx, brokerName, accountID)
 	}
+	var syncErr error
 	switch brokerName {
 	case "dhan":
 		if m.dhanSyncer != nil {
-			return m.dhanSyncer.SyncAccountPortfolio(ctx, accountID)
+			syncErr = m.dhanSyncer.SyncAccountPortfolio(ctx, accountID)
 		}
 	default:
 		if m.kiteSyncer != nil {
-			return m.kiteSyncer.SyncAccountPortfolio(ctx, accountID)
+			syncErr = m.kiteSyncer.SyncAccountPortfolio(ctx, accountID)
 		}
 	}
-	return nil
+	if syncErr != nil {
+		slog.Default().Error("portfolio sync failed", "account_id", accountID, "broker", brokerName, "error", syncErr)
+	}
+	return syncErr
 }
 
 type serverBrokerResolver struct {
