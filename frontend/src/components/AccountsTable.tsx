@@ -7,6 +7,7 @@ import { BrokerLogo } from './BrokerLogo'
 import { CopyToggle } from './CopyToggle'
 import { RoleIcon } from './RoleIcon'
 import { AccountHoldingsRow } from './AccountHoldingsRow'
+import { formatAuthError } from '../utils/authError'
 
 // AccountsTable lists accounts with quick-action toggles and row-level
 // edit/remove/delete buttons (docs/plans/UI-PLAN.md §3).
@@ -132,9 +133,19 @@ export function AccountsTable(props: {
       cellClass: 'col-status',
       cell: (a) => {
         const s = a.status === 'error' || a.authStatus === 'error' ? 'error' : (a.status === 'pending' || a.authStatus === 'pending' ? 'pending' : a.status)
-        const tooltip = s === 'error' ? (a.authError || 'Account error') : (s === 'pending' ? 'Connecting / Syncing...' : 'Active')
+        const tooltip = s === 'error' ? (a.authError ? `${formatAuthError(a.authError)} (click to edit)` : 'Account error - click to edit') : (s === 'pending' ? 'Connecting / Syncing...' : 'Active')
         return (
-          <span class="status-cell-centered" title={tooltip}>
+          <span
+            class="status-cell-centered"
+            title={tooltip}
+            style={{ cursor: s === 'error' ? 'pointer' : 'default' }}
+            onClick={(e) => {
+              if (s === 'error') {
+                e.stopPropagation()
+                props.onEdit(a)
+              }
+            }}
+          >
             <StatusDot status={s} />
           </span>
         )

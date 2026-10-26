@@ -1347,10 +1347,18 @@ it('locks column header widths with fixed table layout so headers do not shift a
 
     // Test error alert on failure
     postActionSpy.mockRejectedValueOnce(new Error('Broker session expired'))
-    await userEvent.click(syncBtn)
+    const onEditCredentialsSpy = vi.fn()
+    render(() => <AccountOrderDetails accountId="acc-sync-fail" onEditCredentials={onEditCredentialsSpy} />)
+    const syncBtns = await screen.findAllByRole('button', { name: 'Sync from Kite' })
+    await userEvent.click(syncBtns[syncBtns.length - 1])
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Broker session expired')
+
+    const updateCredsBtn = within(alert).getByRole('button', { name: 'Update Credentials' })
+    expect(updateCredsBtn).toBeInTheDocument()
+    await userEvent.click(updateCredsBtn)
+    expect(onEditCredentialsSpy).toHaveBeenCalled()
 
     // Dismiss error alert
     const dismissBtn = within(alert).getByRole('button', { name: 'Dismiss error' })

@@ -37,6 +37,7 @@ interface AccountOrderDetailsProps {
   accountName?: string
   brokerAccountId?: string
   onClose?: () => void
+  onEditCredentials?: () => void
   isExpanded?: boolean
   onSummaryChange?: (summary: AccountSummaryMetrics) => void
 }
@@ -543,24 +544,60 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
               display: 'flex',
               'align-items': 'center',
               'justify-content': 'space-between',
+              gap: '12px',
             }}
           >
             <span>{msg()}</span>
-            <button
-              type="button"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#ef4444',
-                cursor: 'pointer',
-                'font-size': '14px',
-                padding: '0 4px',
-              }}
-              onClick={() => setSyncError(null)}
-              aria-label="Dismiss error"
-            >
-              ×
-            </button>
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+              <Show when={props.onEditCredentials}>
+                <button
+                  type="button"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #ef4444',
+                    'border-radius': '3px',
+                    color: '#ef4444',
+                    cursor: 'pointer',
+                    'font-size': '11px',
+                    padding: '2px 8px',
+                  }}
+                  onClick={() => props.onEditCredentials?.()}
+                >
+                  Update Credentials
+                </button>
+              </Show>
+              <button
+                type="button"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #ef4444',
+                  'border-radius': '3px',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  'font-size': '11px',
+                  padding: '2px 8px',
+                }}
+                disabled={syncing()}
+                onClick={handleSync}
+              >
+                Retry Sync
+              </button>
+              <button
+                type="button"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  'font-size': '14px',
+                  padding: '0 4px',
+                }}
+                onClick={() => setSyncError(null)}
+                aria-label="Dismiss error"
+              >
+                ×
+              </button>
+            </div>
           </div>
         )}
       </Show>
