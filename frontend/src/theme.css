@@ -3157,6 +3157,321 @@ nav a.user-badge-link.active:hover,
   }
 }
 
+/* 12. Dashboard Hero Container & Shareable Card */
+.dashboard-hero-container {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+  margin: 0 1.5rem 1.5rem;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+/* Left Partition: Social Shareable Card (ideal 16:9 aspect ratio for Twitter/X) */
+.hero-shareable-card {
+  flex: 0 0 520px;
+  max-width: 520px;
+  aspect-ratio: 16 / 9;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-shareable-card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+}
+
+.shareable-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.hero-brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hero-brand-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.hero-user-cluster {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.hero-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.hero-user-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.hero-user-fullname {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.hero-user-handle {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.shareable-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.35rem;
+  flex: 1;
+  margin: 0.5rem 0;
+}
+
+.hero-mtm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-border) 45%, transparent);
+  border: 1px solid var(--color-border);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.hero-mtm-pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent, #06d896);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.hero-mtm-value {
+  font-size: 2.35rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.hero-mtm-value.positive {
+  color: var(--color-accent, #06d896);
+}
+
+.hero-mtm-value.negative {
+  color: #ef4444;
+}
+
+.hero-mtm-value.neutral {
+  color: var(--color-text);
+}
+
+.hero-mtm-subtext {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.25rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* Footer Row: Verified Badge on Left, Timestamp on Right */
+.shareable-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
+  padding-top: 0.65rem;
+  width: 100%;
+}
+
+.hero-verified-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  opacity: 0.85;
+  user-select: none;
+}
+
+.hero-verified-icon {
+  color: var(--color-accent, #06d896);
+  flex-shrink: 0;
+}
+
+.hero-timestamp {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+/* Right Partition: Controls Panel */
+.hero-controls-panel {
+  flex: 1 1 280px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.25rem;
+  transition: border-color 0.15s ease;
+  overflow: visible;
+}
+
+.hero-controls-panel:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+}
+
+.hero-controls-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hero-controls-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text);
+  opacity: 0.6;
+  letter-spacing: 0.03em;
+}
+
+.hero-select-container {
+  width: 100%;
+}
+
+.hero-telemetry-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hero-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.hero-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent, #06d896);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* Mobile Responsiveness for Hero Card */
+@media (max-width: 768px) {
+  .dashboard-hero-container {
+    flex-direction: column !important;
+    margin: 0 0.85rem 1rem !important;
+    gap: 0.75rem !important;
+  }
+
+  .hero-controls-panel {
+    order: -1 !important;
+    padding: 0.85rem 1rem !important;
+    gap: 0.75rem !important;
+    flex: initial !important;
+  }
+
+  .hero-controls-panel .hero-telemetry-section {
+    display: none !important;
+  }
+
+  .hero-shareable-card {
+    flex: initial !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    aspect-ratio: auto !important;
+    min-height: 190px !important;
+    padding: 1.15rem !important;
+  }
+
+  .hero-mtm-value {
+    font-size: 1.75rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .shareable-card-header {
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .hero-identity-divider {
+    display: none;
+  }
+
+  .hero-mtm-value {
+    font-size: 1.5rem !important;
+  }
+}
+
+
 
 
 

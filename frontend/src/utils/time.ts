@@ -88,3 +88,47 @@ export function formatISTTime(input: string | Date | undefined | null): string {
 
   return `${hour}:${p.minute}:${p.second}`
 }
+
+/**
+ * Formats a timestamp for the Dashboard Hero Shareable Card in IST:
+ * "Taken @ D MMM YYYY, h:mm A" (e.g. "Taken @ 25 Oct 2026, 11:50 AM")
+ */
+export function formatHeroTimestamp(input?: Date | string | number | null): string {
+  let d: Date
+  if (!input) {
+    d = new Date()
+  } else if (typeof input === 'string' || typeof input === 'number') {
+    d = new Date(input)
+  } else {
+    d = input
+  }
+
+  if (isNaN(d.getTime())) {
+    d = new Date()
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-IN', {
+    timeZone: IST_TIMEZONE,
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+
+  const parts = formatter.formatToParts(d)
+  const p: Record<string, string> = {}
+  for (const part of parts) {
+    p[part.type] = part.value
+  }
+
+  let period = (p.dayPeriod || '').toUpperCase()
+  if (!period) {
+    const h = d.getHours()
+    period = h >= 12 ? 'PM' : 'AM'
+  }
+
+  return `Taken @ ${p.day} ${p.month} ${p.year}, ${p.hour}:${p.minute} ${period}`
+}
+
