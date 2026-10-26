@@ -498,26 +498,51 @@ describe('GroupManagePage', () => {
     })
   })
 
-  it('renders Broker column with BrokerLogo for members in the table', async () => {
+  it('renders Broker column with BrokerLogo in broker-cell-centered without overlapping Role column', async () => {
+    const testbrokerFollower: api.Account = {
+      ...follower,
+      id: 'f-tb',
+      name: 'Mock Follower',
+      broker: 'testbroker',
+      brokerAccountId: 'TB1234',
+    }
     vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
       id: 'm1',
       name: 'Group 1',
       masterId: 'm1',
       masterAccountId: 'ZX1234',
       masterActive: true,
-      followers: [{ accountId: 'f1', name: 'Follower Account', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' }],
+      followers: [
+        { accountId: 'f1', name: 'Follower Account', brokerAccountId: 'ZY5678', enabled: true, status: 'ok' },
+        { accountId: 'f-tb', name: 'Mock Follower', brokerAccountId: 'TB1234', enabled: true, status: 'ok' },
+      ],
     })
-    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, follower])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, follower, testbrokerFollower])
 
     renderPage()
-    await screen.findByText('ZY5678')
+    await screen.findByText('TB1234')
 
-    // Broker column header is present
-    expect(screen.getByRole('columnheader', { name: 'Broker' })).toBeInTheDocument()
+    // Broker and Role column headers have distinct column classes
+    const brokerHeader = screen.getByRole('columnheader', { name: 'Broker' })
+    const roleHeader = screen.getByRole('columnheader', { name: 'Role' })
+    expect(brokerHeader).toBeInTheDocument()
+    expect(brokerHeader).toHaveClass('col-broker')
+    expect(roleHeader).toBeInTheDocument()
+    expect(roleHeader).toHaveClass('col-role')
 
-    // Member rows have broker logos
-    const brokerLogos = screen.getAllByLabelText('Zerodha Kite')
-    expect(brokerLogos.length).toBeGreaterThanOrEqual(1)
+    // Table rows have broker-cell-centered and role-cell-centered wrappers
+    const brokerCells = document.querySelectorAll('td.col-broker .broker-cell-centered')
+    const roleCells = document.querySelectorAll('td.col-role .role-cell-centered')
+    expect(brokerCells.length).toBe(3)
+    expect(roleCells.length).toBe(3)
+
+    // Zerodha Kite SVG logo rendered for kite accounts
+    const kiteLogos = screen.getAllByLabelText('Zerodha Kite')
+    expect(kiteLogos.length).toBeGreaterThanOrEqual(1)
+
+    // TestBroker fallback badge rendered for mock broker
+    expect(screen.getByText('TEST')).toBeInTheDocument()
+    expect(screen.getByLabelText('Test Broker (Mock)')).toBeInTheDocument()
   })
 
   it('disables Edit Group button while group detail is loading', async () => {

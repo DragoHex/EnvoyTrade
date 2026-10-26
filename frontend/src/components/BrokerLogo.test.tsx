@@ -69,6 +69,24 @@ describe('BrokerLogo', () => {
     expect(screen.getByText('Zerodha Kite')).toBeInTheDocument()
   })
 
+  it('renders testbroker with natural width and badge styling', () => {
+    render(() => <BrokerLogo broker="testbroker" />)
+    const logoEl = screen.getByLabelText('Test Broker (Mock)')
+    expect(logoEl).toBeInTheDocument()
+    expect(logoEl).toHaveStyle({ width: 'auto' })
+    const badge = screen.getByText('TEST')
+    expect(badge).toHaveClass('broker-logo-fallback')
+    expect(badge).toHaveStyle({ 'text-overflow': 'ellipsis', overflow: 'hidden' })
+  })
+
+  it('renders fallback for unknown brokers with auto width without overflowing', () => {
+    render(() => <BrokerLogo broker="custom_test_broker" />)
+    const logoEl = screen.getByLabelText('Custom_test_broker')
+    expect(logoEl).toHaveStyle({ width: 'auto' })
+    const badge = screen.getByText('Custom_test_broker')
+    expect(badge).toHaveStyle({ 'text-overflow': 'ellipsis', overflow: 'hidden' })
+  })
+
   it('getBrokerConfig returns registered and fallback configs', () => {
     expect(getBrokerConfig('kite').name).toBe('Zerodha Kite')
     expect(getBrokerConfig('KITE').name).toBe('Zerodha Kite')

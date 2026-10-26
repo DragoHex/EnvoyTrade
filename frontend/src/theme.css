@@ -982,7 +982,7 @@ tr[data-testid='master-row'] td {
 }
 
 .group-members-table .col-toggle {
-  width: 5%;
+  width: 4%;
   min-width: 44px;
   text-align: center;
 }
@@ -996,32 +996,32 @@ tr[data-testid='master-row'] td {
 
 .group-members-table .col-broker-id {
   width: 15%;
-  min-width: 100px;
+  min-width: 105px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .group-members-table .col-broker {
-  width: 8%;
-  min-width: 60px;
+  width: 10%;
+  min-width: 80px;
   text-align: center;
 }
 
 .group-members-table .col-role {
-  width: 8%;
+  width: 7%;
   min-width: 60px;
   text-align: center;
 }
 
 .group-members-table .col-clone-factor {
-  width: 13%;
-  min-width: 80px;
+  width: 12%;
+  min-width: 75px;
   text-align: center;
 }
 
 .group-members-table .col-max-qty {
-  width: 13%;
-  min-width: 80px;
+  width: 12%;
+  min-width: 75px;
   text-align: center;
 }
 
@@ -1032,11 +1032,12 @@ tr[data-testid='master-row'] td {
 }
 
 .group-members-table .col-actions {
-  width: 12%;
+  width: 14%;
   min-width: 76px;
   text-align: center;
 }
 
+.broker-cell-centered,
 .status-cell-centered {
   display: flex;
   align-items: center;
@@ -1236,6 +1237,9 @@ tr[data-testid='master-row'] td {
   color: var(--color-text);
   font-weight: 500;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .broker-logo-name {

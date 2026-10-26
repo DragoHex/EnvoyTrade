@@ -406,7 +406,9 @@ export function GroupManagePage() {
                         <td class="col-name">{a().name || '—'}</td>
                         <td class="col-broker-id">{a().brokerAccountId}</td>
                         <td class="col-broker">
-                          <BrokerLogo broker={a().broker} />
+                          <span class="broker-cell-centered">
+                            <BrokerLogo broker={a().broker} />
+                          </span>
                         </td>
                         <td class="col-role">
                           <span class="role-cell-centered">
