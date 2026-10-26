@@ -113,9 +113,24 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 			}
 		}
 
-		newToken, loginErr := loginFn(ctx, authInfo.BrokerAccountID, password, totpSecret, authInfo.ApiKey, authInfo.ApiSecret)
+		var newToken string
+		var loginErr error
+		const maxRetries = 5
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			newToken, loginErr = loginFn(ctx, authInfo.BrokerAccountID, password, totpSecret, authInfo.ApiKey, authInfo.ApiSecret)
+			if loginErr == nil {
+				break
+			}
+			if attempt < maxRetries {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(attempt) * 50 * time.Millisecond):
+				}
+			}
+		}
 		if loginErr != nil {
-			_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, "error", loginErr.Error())
+			_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, "error", domain.SanitizeAuthError(loginErr.Error()))
 			if setter, ok := s.Store.(accountStatusSetter); ok {
 				_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
 			}

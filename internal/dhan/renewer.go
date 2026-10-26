@@ -150,7 +150,7 @@ func (r *Renewer) RenewAll(ctx context.Context) error {
 		}
 
 		if lastErr != nil {
-			_ = r.Store.SetAccountAccessToken(ctx, a.ID, authInfo.AccessToken, authInfo.TokenExpiresAt, "error", lastErr.Error())
+			_ = r.Store.SetAccountAccessToken(ctx, a.ID, authInfo.AccessToken, authInfo.TokenExpiresAt, "error", domain.SanitizeAuthError(lastErr.Error()))
 		}
 	}
 	return nil

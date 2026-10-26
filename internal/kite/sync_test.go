@@ -25,6 +25,7 @@ func init() {
 type mockSyncStore struct {
 	authInfo      domain.AccountAuthInfo
 	authInfoErr   error
+	status        domain.AccountStatus
 	setTokenCalls []struct {
 		Token      string
 		ExpiresAt  *time.Time
@@ -74,6 +75,11 @@ func (m *mockSyncStore) SyncAccountPositions(ctx context.Context, accountID uuid
 
 func (m *mockSyncStore) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, margin domain.MarginSyncParam) error {
 	m.syncedMargins = &margin
+	return nil
+}
+
+func (m *mockSyncStore) SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error {
+	m.status = status
 	return nil
 }
 
@@ -350,6 +356,48 @@ func TestSyncAccountPortfolio_TokenRejectedUpstream_ReloginsAndRetries(t *testin
 	}
 	if len(store.setTokenCalls) != 1 || store.setTokenCalls[0].Token != "fresh_token_888" {
 		t.Fatalf("expected setTokenCall with fresh_token_888, got: %+v", store.setTokenCalls)
+	}
+}
+
+func TestSyncAccountPortfolio_LoginFailure_RetriesUpToFiveTimes(t *testing.T) {
+	accID := uuid.New()
+	encPass, _ := crypto.Encrypt("mypassword")
+	encTotp, _ := crypto.Encrypt("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+
+	store := &mockSyncStore{
+		authInfo: domain.AccountAuthInfo{
+			ID:                  accID,
+			Role:                "master",
+			Broker:              "kite",
+			BrokerAccountID:     "TEST01",
+			ApiKey:              "test_api_key",
+			ApiSecret:           "test_api_secret",
+			EncryptedPassword:   encPass,
+			EncryptedTotpSecret: encTotp,
+			AccessToken:         "",
+			AuthStatus:          "unauthenticated",
+		},
+	}
+
+	attempts := 0
+	syncer := &kite.PortfolioSyncer{
+		Store: store,
+		LoginFunc: func(ctx context.Context, userID, password, totpSecret, apiKey, apiSecret string) (string, error) {
+			attempts++
+			return "", errors.New("upstream timeout 504")
+		},
+	}
+
+	err := syncer.SyncAccountPortfolio(context.Background(), accID)
+	if err == nil {
+		t.Fatalf("expected error after retries exhausted")
+	}
+
+	if attempts != 5 {
+		t.Errorf("expected 5 login attempts, got %d", attempts)
+	}
+	if store.status != domain.AccountStatusError {
+		t.Errorf("expected AccountStatusError, got %v", store.status)
 	}
 }
 

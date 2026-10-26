@@ -10,6 +10,7 @@ import {
 import { BrokerLogo, SUPPORTED_BROKERS } from './BrokerLogo'
 import { ThemedSelect } from './ThemedSelect'
 import { isValidIP } from '../utils/ip'
+import { formatAuthError } from '../utils/authError'
 
 export function isCompatibleIP(ipBrokers: string | undefined, brokerVal: string): boolean {
   if (!ipBrokers || !ipBrokers.trim()) return true
@@ -354,7 +355,7 @@ export function AccountDetailDrawer(props: {
                   'font-size': '0.875rem',
                 }}
               >
-                <strong>Authentication required:</strong> {props.account?.authError || 'Failed to authenticate with broker.'}
+                <strong>Authentication required:</strong> {formatAuthError(props.account?.authError) || 'Failed to authenticate with broker.'}
                 <br />
                 {broker() === 'dhan'
                   ? 'Please enter your Dhan Access Token below to reconnect.'
