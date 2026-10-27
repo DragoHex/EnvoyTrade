@@ -8,6 +8,8 @@ export interface User {
   name: string
   role: string
   active?: boolean
+  maxIPs?: number
+  brokerIPLimits?: Record<string, number>
   phone?: string
   address?: string
   gstNumber?: string
@@ -696,6 +698,8 @@ export interface UserSummary {
   name: string
   role: string
   active: boolean
+  maxIPs?: number
+  brokerIPLimits?: Record<string, number>
   phone?: string
   accountCount: number
   sessionCount: number
@@ -808,7 +812,12 @@ export function postAdminUser(user: {
 
 export function patchAdminUser(
   id: string,
-  update: { role?: string; active?: boolean },
+  update: {
+    role?: string
+    active?: boolean
+    maxIPs?: number
+    brokerIPLimits?: Record<string, number>
+  },
 ): Promise<{ status: string }> {
   return apiFetch(`${BASE}/admin/users/${id}`, {
     method: 'PATCH',
