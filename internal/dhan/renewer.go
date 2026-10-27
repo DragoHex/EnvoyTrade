@@ -49,12 +49,7 @@ type Renewer struct {
 
 // RenewToken calls DhanHQ API via godhan.Client to refresh an active access token.
 func RenewToken(ctx context.Context, clientID, token string, proxyCfg *ProxyConfig, extraOpts ...godhan.Option) (string, time.Time, error) {
-	opts := []godhan.Option{}
-	if proxyCfg != nil && proxyCfg.Host != "" {
-		opts = append(opts, godhan.WithProxy(*proxyCfg))
-	}
-	opts = append(opts, extraOpts...)
-
+	opts := BuildClientOptions(proxyCfg, extraOpts...)
 	client := godhan.NewClient(clientID, token, opts...)
 	resp, err := client.RenewToken(ctx)
 	if err != nil {

@@ -43,10 +43,7 @@ type PortfolioSyncer struct {
 
 // defaultAPIFactory constructs a real godhan.Client with optional static proxy routing.
 func defaultAPIFactory(clientID, token string, proxyCfg *ProxyConfig) (SyncAPI, error) {
-	opts := []godhan.Option{}
-	if proxyCfg != nil && proxyCfg.Host != "" {
-		opts = append(opts, godhan.WithProxy(*proxyCfg))
-	}
+	opts := BuildClientOptions(proxyCfg)
 	return godhan.NewClient(clientID, token, opts...), nil
 }
 
