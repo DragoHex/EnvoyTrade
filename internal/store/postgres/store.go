@@ -314,6 +314,8 @@ func (s *Store) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]d
 			MaxQtyPerOrder: int(r.MaxQtyPerOrder),
 			Enabled:        r.Enabled,
 			EffectiveFrom:  r.EffectiveFrom.Time.In(domain.IST),
+			Status:         r.Status,
+			AuthStatus:     r.AuthStatus,
 		})
 	}
 	return links, nil
@@ -960,9 +962,18 @@ func accountFromRow(r sqlcgen.AccountsRow, now time.Time) domain.Account {
 	authStatus := r.AuthStatus
 	authError := r.AuthError
 
-	// Dynamically evaluate token expiration: if token is expired or not recorded,
-	// an account with status 'authenticated' is actually in error state.
-	if authStatus == "authenticated" && (!r.TokenExpiresAt.Valid || !r.TokenExpiresAt.Time.After(now)) {
+	// Dynamically evaluate token expiration:
+	// If a token expiration time is recorded, check if it has passed.
+	// For brokers requiring mandatory daily sessions (e.g. Zerodha/Kite), missing expiry also implies inactive session.
+	// For other brokers (e.g. Dhan, testbroker), an authenticated session without explicit expiry is valid.
+	tokenExpired := false
+	if r.TokenExpiresAt.Valid {
+		tokenExpired = !r.TokenExpiresAt.Time.After(now)
+	} else if domain.RequiresDailySession(r.Broker) {
+		tokenExpired = true
+	}
+
+	if authStatus == "authenticated" && tokenExpired {
 		authStatus = "error"
 		if authError == "" {
 			if r.TokenExpiresAt.Valid {
@@ -971,6 +982,16 @@ func accountFromRow(r sqlcgen.AccountsRow, now time.Time) domain.Account {
 				authError = "Token expired / session inactive"
 			}
 		}
+	}
+	if authError != "" {
+		authError = domain.SanitizeAuthError(authError)
+	}
+
+	status := statusFromAccountStatus(r.Status)
+	if authStatus == "error" || r.Status == "error" {
+		status = "error"
+	} else if authStatus == "pending" || r.Status == "pending" || (authStatus == "unauthenticated" && domain.RequiresDailySession(r.Broker) && !r.TokenExpiresAt.Valid) {
+		status = "pending"
 	}
 
 	a := domain.Account{
@@ -982,7 +1003,7 @@ func accountFromRow(r sqlcgen.AccountsRow, now time.Time) domain.Account {
 		ApiKey:          r.ApiKey,
 		ApiSecret:       r.ApiSecret,
 		Active:          r.Active,
-		Status:          statusFromAccountStatus(r.Status),
+		Status:          status,
 		IPAddress:       r.IpAddress,
 		AuthStatus:      authStatus,
 		AuthError:       authError,
@@ -1219,7 +1240,7 @@ func (s *Store) PendingFollowerOrders(ctx context.Context, cutoff time.Time) ([]
 // BrokerReadiness evaluates live pre-market readiness of all active master and follower accounts.
 func (s *Store) BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSummary, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, broker_user_id, role, auth_status, auth_error, token_expires_at
+		SELECT id, name, broker_user_id, role, auth_status, auth_error, token_expires_at, broker
 		FROM accounts
 		WHERE deleted_at IS NULL AND active = true
 		ORDER BY role ASC, name ASC
@@ -1242,8 +1263,9 @@ func (s *Store) BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSumm
 			authStatus     string
 			authError      string
 			tokenExpiresAt pgtype.Timestamptz
+			broker         string
 		)
-		if err := rows.Scan(&id, &name, &brokerUserID, &role, &authStatus, &authError, &tokenExpiresAt); err != nil {
+		if err := rows.Scan(&id, &name, &brokerUserID, &role, &authStatus, &authError, &tokenExpiresAt, &broker); err != nil {
 			return domain.BrokerReadinessSummary{}, fmt.Errorf("scan broker readiness: %w", err)
 		}
 
@@ -1253,7 +1275,14 @@ func (s *Store) BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSumm
 			expiresAt = &t
 		}
 
-		isReady := authStatus == "authenticated" && tokenExpiresAt.Valid && tokenExpiresAt.Time.After(now)
+		tokenExpired := false
+		if tokenExpiresAt.Valid {
+			tokenExpired = !tokenExpiresAt.Time.After(now)
+		} else if domain.RequiresDailySession(broker) {
+			tokenExpired = true
+		}
+
+		isReady := authStatus == "authenticated" && !tokenExpired
 
 		if role == "master" {
 			if isReady {
@@ -1279,6 +1308,9 @@ func (s *Store) BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSumm
 						effectiveAuthError = "Token expired / session inactive"
 					}
 				}
+			}
+			if effectiveAuthError != "" {
+				effectiveAuthError = domain.SanitizeAuthError(effectiveAuthError)
 			}
 
 			summary.AttentionAccounts = append(summary.AttentionAccounts, domain.AttentionAccount{

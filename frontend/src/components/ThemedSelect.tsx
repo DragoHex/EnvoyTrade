@@ -152,6 +152,7 @@ export function ThemedSelect<T extends string = string>(props: ThemedSelectProps
         role="button"
         aria-haspopup="listbox"
         aria-expanded={isOpen()}
+        aria-disabled={props.disabled}
         tabIndex={props.disabled ? -1 : 0}
         onClick={(e) => {
           e.stopPropagation()

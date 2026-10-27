@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, Index, onCleanup, Show } from 'solid-js'
+import { createMemo, createResource, createSignal, Index, onCleanup, onMount, Show } from 'solid-js'
 import { useNavigate, useSearchParams } from '@solidjs/router'
 import {
   getGroups,
@@ -25,6 +25,8 @@ import { LoadingTimeout, TableSkeleton } from '../components/Skeleton'
 import { StatusDot } from '../components/StatusDot'
 import { BrokerLogo } from '../components/BrokerLogo'
 import { EditIcon, TrashIcon } from '../components/icons'
+import { useAuth } from '../context/AuthContext'
+import { AccountQuotaPopover } from '../components/AccountQuotaPopover'
 
 const TOAST_DISMISS_MS = 4000
 
@@ -47,12 +49,41 @@ export function AccountsPage() {
 
   const [groups, { refetch: refetchGroups, mutate: mutateGroups }] = createResource(getGroups)
   const [accounts, { refetch: refetchAccounts, mutate: mutateAccounts }] = createResource(() => getAccounts())
+  let userFn: () => any = () => null
+  try {
+    const auth = useAuth()
+    userFn = auth.user
+  } catch {
+    userFn = () => null
+  }
+  const currentUser = userFn
+  const maxAccounts = () => currentUser()?.maxIPs ?? -1
+  const brokerLimits = () => currentUser()?.brokerIPLimits ?? {}
+  const usedAccounts = () => accounts()?.length ?? 0
+  const brokerUsed = createMemo(() => {
+    const list = accounts() ?? []
+    const counts: Record<string, number> = {}
+    for (const a of list) {
+      const b = (a.broker || 'kite').toLowerCase()
+      counts[b] = (counts[b] || 0) + 1
+    }
+    return counts
+  })
   const [drawerOpen, setDrawerOpen] = createSignal(false)
   const [createGroupOpen, setCreateGroupOpen] = createSignal(false)
   const [editingGroup, setEditingGroup] = createSignal<GroupSummary | null>(null)
   const [editing, setEditing] = createSignal<Account | null>(null)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
   const [pendingAction, setPendingAction] = createSignal<PendingAction>(null)
+
+  onMount(() => {
+    try {
+      const a = useAuth()
+      a?.refetchUser?.()
+    } catch {
+      // not in AuthProvider
+    }
+  })
 
   let dismissTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => clearTimeout(dismissTimer))
@@ -219,7 +250,14 @@ export function AccountsPage() {
   return (
     <div class="page">
       <div class="accounts-header">
-        <div class="accounts-header-left" />
+        <div class="accounts-header-left">
+          <AccountQuotaPopover
+            maxAccounts={maxAccounts()}
+            usedAccounts={usedAccounts()}
+            brokerLimits={brokerLimits()}
+            brokerUsed={brokerUsed()}
+          />
+        </div>
         <div class="accounts-header-center">
           <div role="tablist" class="tab-group">
             <button
@@ -278,7 +316,7 @@ export function AccountsPage() {
                         <tr
                           class="clickable-row"
                           data-testid="group-row"
-                          onClick={() => navigate(`/accounts/groups/${g().id || g().masterId}`)}
+                          onClick={() => navigate(`/accounts/groups/${g().id || g().masterId}`, { state: { name: g().name } })}
                         >
                           <td class="col-name">{g().name || '—'}</td>
                           <td class="col-master">
@@ -392,6 +430,9 @@ export function AccountsPage() {
         open={drawerOpen()}
         account={editing()}
         groups={groups() ?? []}
+        existingAccounts={accounts() ?? []}
+        maxAccounts={maxAccounts()}
+        brokerLimits={brokerLimits()}
         onClose={() => setDrawerOpen(false)}
         onCreate={handleCreate}
         onSave={handleSave}

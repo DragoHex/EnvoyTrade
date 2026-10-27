@@ -1,4 +1,4 @@
-import { createResource, createEffect, For, Show, onMount, onCleanup } from 'solid-js'
+import { createResource, createEffect, createSignal, For, Show, onMount, onCleanup } from 'solid-js'
 import {
   getGroupDetail,
   getGroupRebalanceDiff,
@@ -10,14 +10,28 @@ import {
   rebalanceGroup,
   rebalanceAccount,
   type ActionType,
+  type GroupDetail,
 } from '../api'
 import { GroupCard } from '../components/GroupCard'
+import { DashboardHeroCard } from '../components/DashboardHeroCard'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
 import { EmptyState } from '../components/EmptyState'
 import { registerSyncSubscriber, triggerSyncNow } from '../utils/syncBus'
 
-function GroupCardLoader(props: { id: string; status: 'ok' | 'error'; hasImbalance?: boolean }) {
+function GroupCardLoader(props: {
+  id: string
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
+  hasImbalance?: boolean
+  onDetailLoaded?: (detail: GroupDetail) => void
+}) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
+
+  createEffect(() => {
+    const d = detail()
+    if (d && props.onDetailLoaded) {
+      props.onDetailLoaded(d)
+    }
+  })
 
   const isImbalanced = () => {
     if (detail() !== undefined && detail()?.hasImbalance !== undefined) {
@@ -170,10 +184,43 @@ function GroupCardLoader(props: { id: string; status: 'ok' | 'error'; hasImbalan
 
 export function Dashboard() {
   const [groups] = createResource(getGroups)
+  const [groupDetailsMap, setGroupDetailsMap] = createSignal<Record<string, GroupDetail>>({})
+  let pendingDetails: Record<string, GroupDetail> = {}
+  let microtaskScheduled = false
+
+  const handleDetailLoaded = (detail: GroupDetail) => {
+    pendingDetails[detail.id] = detail
+    if (!microtaskScheduled) {
+      microtaskScheduled = true
+      queueMicrotask(() => {
+        microtaskScheduled = false
+        setGroupDetailsMap((prev) => {
+          let hasDiff = false
+          for (const id in pendingDetails) {
+            if (prev[id] !== pendingDetails[id]) {
+              hasDiff = true
+              break
+            }
+          }
+          if (!hasDiff) {
+            pendingDetails = {}
+            return prev
+          }
+          const next = { ...prev, ...pendingDetails }
+          pendingDetails = {}
+          return next
+        })
+      })
+    }
+  }
 
   return (
     <div class="page">
-      <h1>Dashboard</h1>
+      <DashboardHeroCard
+        groups={groups() ?? []}
+        groupDetails={groupDetailsMap()}
+        isLoading={groups.loading}
+      />
       <Show when={groups()} fallback={<LoadingTimeout><GroupsSkeleton /></LoadingTimeout>}>
         <Show
           when={(groups()?.length ?? 0) > 0}
@@ -185,7 +232,16 @@ export function Dashboard() {
             </div>
           }
         >
-          <For each={groups()}>{(g) => <GroupCardLoader id={g.id || g.masterId} status={g.status} hasImbalance={g.hasImbalance} />}</For>
+          <For each={groups()}>
+            {(g) => (
+              <GroupCardLoader
+                id={g.id || g.masterId}
+                status={g.status}
+                hasImbalance={g.hasImbalance}
+                onDetailLoaded={handleDetailLoaded}
+              />
+            )}
+          </For>
         </Show>
       </Show>
     </div>

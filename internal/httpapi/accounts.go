@@ -41,6 +41,7 @@ type AccountsStore interface {
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
+	CheckAccountQuota(ctx context.Context, userID uuid.UUID, broker string) error
 }
 
 type accountResponse struct {
@@ -82,7 +83,7 @@ func toAccountResponse(a domain.Account) accountResponse {
 		resp.AuthStatus = &st
 	}
 	if a.AuthError != "" {
-		ae := a.AuthError
+		ae := domain.SanitizeAuthError(a.AuthError)
 		resp.AuthError = &ae
 	}
 	if a.ApiKey != "" {
@@ -202,8 +203,23 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "brokerAccountId is required")
 		return
 	}
+	req.BrokerAccountID = strings.TrimSpace(req.BrokerAccountID)
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		req.Name = req.BrokerAccountID
+	}
+	req.ApiKey = strings.TrimSpace(req.ApiKey)
+	req.ApiSecret = strings.TrimSpace(req.ApiSecret)
+
+	if u, ok := domain.UserFromContext(r.Context()); ok && u != nil {
+		if err := h.store.CheckAccountQuota(r.Context(), u.ID, broker); err != nil {
+			if errors.Is(err, domain.ErrAccountQuotaExceeded) || errors.Is(err, domain.ErrBrokerAccountQuotaExceeded) {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to check account quota: "+err.Error())
+			return
+		}
 	}
 
 	var rawIP *string
@@ -326,19 +342,29 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	id = resolvedID
 
+	initialStatus := "ok"
 	if req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "" {
 		var expiresAt *time.Time
+		authStatus := "authenticated"
 		if broker == "dhan" {
 			exp := time.Now().UTC().Add(24 * time.Hour)
 			expiresAt = &exp
+			authStatus = "pending"
+			initialStatus = "pending"
 		}
-		if err := h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), expiresAt, "authenticated", ""); err != nil {
+		if err := h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), expiresAt, authStatus, ""); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to set access token")
 			return
 		}
+	} else if encPass != "" && encTotp != "" {
+		initialStatus = "pending"
+		_ = h.store.SetAccountAccessToken(r.Context(), id, "", nil, "pending", "")
+	} else if broker == "testbroker" {
+		initialStatus = "pending"
+		_ = h.store.SetAccountAccessToken(r.Context(), id, "", nil, "pending", "")
 	}
 
-	if h.syncer != nil && ((encPass != "" && encTotp != "") || (broker == "dhan" && req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "")) {
+	if h.syncer != nil && ((encPass != "" && encTotp != "") || (broker == "dhan" && req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "") || broker == "testbroker") {
 		go func() {
 			_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
 		}()
@@ -352,7 +378,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		BrokerAccountID: req.BrokerAccountID,
 		Enabled:         true,
 		Active:          true,
-		Status:          "ok",
+		Status:          initialStatus,
 	}
 	if req.ApiKey != "" {
 		resp.ApiKey = &req.ApiKey
@@ -668,17 +694,19 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		updated = true
 	}
 	if req.ApiKey != nil {
-		if writePatchStoreError(w, h.store.SetAccountAPIKey(r.Context(), id, *req.ApiKey)) {
+		trimmedKey := strings.TrimSpace(*req.ApiKey)
+		if writePatchStoreError(w, h.store.SetAccountAPIKey(r.Context(), id, trimmedKey)) {
 			return
 		}
-		resp["apiKey"] = *req.ApiKey
+		resp["apiKey"] = trimmedKey
 		updated = true
 	}
 	if req.ApiSecret != nil {
-		if writePatchStoreError(w, h.store.SetAccountAPISecret(r.Context(), id, *req.ApiSecret)) {
+		trimmedSec := strings.TrimSpace(*req.ApiSecret)
+		if writePatchStoreError(w, h.store.SetAccountAPISecret(r.Context(), id, trimmedSec)) {
 			return
 		}
-		resp["apiSecret"] = *req.ApiSecret
+		resp["apiSecret"] = trimmedSec
 		updated = true
 	}
 	if req.Password != nil || req.TotpSecret != nil {
@@ -702,39 +730,39 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 		if writePatchStoreError(w, h.store.SetAccountEncryptedCredentials(r.Context(), id, encPass, encTotp)) {
 			return
 		}
-		if h.syncer != nil && (encPass != "" || encTotp != "") {
-			go func() {
-				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
-			}()
-		}
 		resp["credentials"] = "updated"
 		updated = true
 	}
 	if req.AccessToken != nil {
 		var expiresAt *time.Time
+		authStatus := "authenticated"
 		if accs, err := h.store.Accounts(r.Context(), []uuid.UUID{id}); err == nil && len(accs) > 0 && strings.ToLower(accs[0].Broker) == "dhan" {
 			exp := time.Now().UTC().Add(24 * time.Hour)
 			expiresAt = &exp
+			authStatus = "pending"
 		}
-		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, *req.AccessToken, expiresAt, "authenticated", "")) {
+		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), expiresAt, authStatus, "")) {
 			return
 		}
 		role, _ := h.store.AccountRole(r.Context(), id)
 		if role == "follower" && h.followerRegistrar != nil {
 			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 		}
-		if h.syncer != nil {
-			go func() {
-				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
-			}()
-		}
 		resp["accessToken"] = "updated"
+		if authStatus == "pending" {
+			resp["status"] = "pending"
+		}
 		updated = true
 	}
 
 	if req.IP != nil || req.ApiKey != nil || req.ApiSecret != nil || req.Password != nil || req.TotpSecret != nil || req.AccessToken != nil {
 		if h.brokerEvicter != nil {
 			h.brokerEvicter.Evict(id)
+		}
+		if h.syncer != nil {
+			go func() {
+				_ = h.syncer.SyncAccountPortfolio(context.Background(), id)
+			}()
 		}
 	}
 

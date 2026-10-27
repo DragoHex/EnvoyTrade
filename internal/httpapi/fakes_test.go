@@ -125,6 +125,10 @@ type stubStore struct {
 	brokerReadinessErr error
 	orderIssues        []domain.OrderIssue
 	orderIssuesErr     error
+
+	checkAccountQuotaErr    error
+	lastUpdatedMaxIPs       *int
+	lastUpdatedBrokerLimits map[string]int
 }
 
 type createAccountCall struct {
@@ -509,10 +513,16 @@ func (s *stubStore) ListUsers(_ context.Context, limit, offset int) ([]domain.Us
 }
 
 
-func (s *stubStore) UpdateUserRoleAndStatus(_ context.Context, userID uuid.UUID, role string, active *bool) error {
+func (s *stubStore) CheckAccountQuota(_ context.Context, _ uuid.UUID, _ string) error {
+	return s.checkAccountQuotaErr
+}
+
+func (s *stubStore) UpdateUserRoleAndStatus(_ context.Context, userID uuid.UUID, role string, active *bool, maxIPs *int, brokerIPLimits map[string]int) error {
 	if s.updateUserErr != nil {
 		return s.updateUserErr
 	}
+	s.lastUpdatedMaxIPs = maxIPs
+	s.lastUpdatedBrokerLimits = brokerIPLimits
 	return nil
 }
 

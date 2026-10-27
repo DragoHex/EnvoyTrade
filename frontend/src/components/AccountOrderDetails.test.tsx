@@ -1309,6 +1309,62 @@ it('locks column header widths with fixed table layout so headers do not shift a
     expect(within(dialog).getByText('Total')).toBeInTheDocument()
     expect(within(dialog).getByText('₹1,800.00')).toBeInTheDocument()
   })
+
+  it('clicking Sync from Kite button calls postAction and handles errors', async () => {
+    const postActionSpy = vi.spyOn(api, 'postAction').mockResolvedValue({ type: 'sync_positions', status: 'accepted' })
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      accountId: 'acc-sync-test',
+      summary: {
+        netQty: 10,
+        totalMtm: 0,
+        realizedPnl: 0,
+        accountValue: 10000,
+        status: 'online',
+      },
+      counts: {
+        openPositions: 0,
+        closedPositions: 0,
+        holdings: 0,
+        openOrders: 0,
+        closedOrders: 0,
+        rejectedOrders: 0,
+      },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => <AccountOrderDetails accountId="acc-sync-test" />)
+
+    const syncBtn = await screen.findByRole('button', { name: 'Sync from Kite' })
+    expect(syncBtn).toBeInTheDocument()
+
+    await userEvent.click(syncBtn)
+    expect(postActionSpy).toHaveBeenCalledWith('acc-sync-test', 'sync_positions')
+
+    // Test error alert on failure
+    postActionSpy.mockRejectedValueOnce(new Error('Broker session expired'))
+    const onEditCredentialsSpy = vi.fn()
+    render(() => <AccountOrderDetails accountId="acc-sync-fail" onEditCredentials={onEditCredentialsSpy} />)
+    const syncBtns = await screen.findAllByRole('button', { name: 'Sync from Kite' })
+    await userEvent.click(syncBtns[syncBtns.length - 1])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Broker session expired')
+
+    const updateCredsBtn = within(alert).getByRole('button', { name: 'Update Credentials' })
+    expect(updateCredsBtn).toBeInTheDocument()
+    await userEvent.click(updateCredsBtn)
+    expect(onEditCredentialsSpy).toHaveBeenCalled()
+
+    // Dismiss error alert
+    const dismissBtn = within(alert).getByRole('button', { name: 'Dismiss error' })
+    await userEvent.click(dismissBtn)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 });
 
 

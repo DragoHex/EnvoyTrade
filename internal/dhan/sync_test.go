@@ -15,13 +15,15 @@ import (
 )
 
 type fakeSyncStore struct {
-	authInfo      domain.AccountAuthInfo
-	authInfoErr   error
-	syncedPos     []domain.PositionSyncParam
-	syncedHold    []domain.HoldingSyncParam
-	syncedMargin  domain.MarginSyncParam
-	statusUpdated string
-	errorUpdated  string
+	authInfo             domain.AccountAuthInfo
+	authInfoErr          error
+	syncedPos            []domain.PositionSyncParam
+	syncedHold           []domain.HoldingSyncParam
+	syncedMargin         domain.MarginSyncParam
+	statusUpdated        string
+	errorUpdated         string
+	expiresAtUpdated     *time.Time
+	accountStatusUpdated domain.AccountStatus
 }
 
 func (s *fakeSyncStore) AccountAuthInfo(ctx context.Context, id uuid.UUID) (domain.AccountAuthInfo, error) {
@@ -34,6 +36,12 @@ func (s *fakeSyncStore) AccountAuthInfo(ctx context.Context, id uuid.UUID) (doma
 func (s *fakeSyncStore) SetAccountAccessToken(ctx context.Context, id uuid.UUID, token string, expiresAt *time.Time, authStatus, authError string) error {
 	s.statusUpdated = authStatus
 	s.errorUpdated = authError
+	s.expiresAtUpdated = expiresAt
+	return nil
+}
+
+func (s *fakeSyncStore) SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error {
+	s.accountStatusUpdated = status
 	return nil
 }
 
@@ -206,4 +214,94 @@ func TestPortfolioSyncer_SyncAccountPortfolio_Negative_AuthError(t *testing.T) {
 	if store.statusUpdated != "error" {
 		t.Errorf("statusUpdated = %s, want error", store.statusUpdated)
 	}
+}
+
+func TestPortfolioSyncer_SyncAccountPortfolio_PreservesOrComputesExpiry(t *testing.T) {
+	// Case 1: nil TokenExpiresAt -> computes 24h expiry
+	t.Run("nil TokenExpiresAt computes 24h expiry", func(t *testing.T) {
+		accountID := uuid.New()
+		store := &fakeSyncStore{
+			authInfo: domain.AccountAuthInfo{
+				ID:              accountID,
+				Broker:          "dhan",
+				BrokerAccountID: "1000000001",
+				AccessToken:     "valid-token",
+				AuthStatus:      "pending",
+				TokenExpiresAt:  nil,
+			},
+		}
+
+		api := &fakeDhanSyncAPI{
+			funds: models.FundLimitResponse{
+				AvailableBalance: decimal.NewFromInt(10000),
+			},
+		}
+
+		syncer := &dhan.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(clientID, token string, proxyCfg *dhan.ProxyConfig) (dhan.SyncAPI, error) {
+				return api, nil
+			},
+		}
+
+		err := syncer.SyncAccountPortfolio(context.Background(), accountID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if store.statusUpdated != "authenticated" {
+			t.Errorf("statusUpdated = %s, want authenticated", store.statusUpdated)
+		}
+		if store.accountStatusUpdated != domain.AccountStatusActive {
+			t.Errorf("accountStatusUpdated = %v, want active", store.accountStatusUpdated)
+		}
+		if store.expiresAtUpdated == nil {
+			t.Fatalf("expiresAtUpdated is nil, want non-nil 24h expiry")
+		}
+		if !store.expiresAtUpdated.After(time.Now().Add(23 * time.Hour)) {
+			t.Errorf("expected expiresAtUpdated to be ~24h in future, got %v", store.expiresAtUpdated)
+		}
+	})
+
+	// Case 2: existing future TokenExpiresAt -> preserved
+	t.Run("existing future TokenExpiresAt is preserved", func(t *testing.T) {
+		accountID := uuid.New()
+		futureExpiry := time.Now().UTC().Add(18 * time.Hour).Truncate(time.Second)
+		store := &fakeSyncStore{
+			authInfo: domain.AccountAuthInfo{
+				ID:              accountID,
+				Broker:          "dhan",
+				BrokerAccountID: "1000000001",
+				AccessToken:     "valid-token",
+				AuthStatus:      "pending",
+				TokenExpiresAt:  &futureExpiry,
+			},
+		}
+
+		api := &fakeDhanSyncAPI{
+			funds: models.FundLimitResponse{
+				AvailableBalance: decimal.NewFromInt(10000),
+			},
+		}
+
+		syncer := &dhan.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(clientID, token string, proxyCfg *dhan.ProxyConfig) (dhan.SyncAPI, error) {
+				return api, nil
+			},
+		}
+
+		err := syncer.SyncAccountPortfolio(context.Background(), accountID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if store.statusUpdated != "authenticated" {
+			t.Errorf("statusUpdated = %s, want authenticated", store.statusUpdated)
+		}
+		if store.accountStatusUpdated != domain.AccountStatusActive {
+			t.Errorf("accountStatusUpdated = %v, want active", store.accountStatusUpdated)
+		}
+		if store.expiresAtUpdated == nil || !store.expiresAtUpdated.Equal(futureExpiry) {
+			t.Errorf("expiresAtUpdated = %v, want %v", store.expiresAtUpdated, futureExpiry)
+		}
+	})
 }

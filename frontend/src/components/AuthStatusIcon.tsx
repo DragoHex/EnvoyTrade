@@ -1,4 +1,5 @@
 import { Show } from 'solid-js'
+import { formatAuthError } from '../utils/authError'
 
 export interface AuthStatusIconProps {
   status?: 'authenticated' | 'error' | 'unauthenticated' | null | string
@@ -15,7 +16,7 @@ export function AuthStatusIcon(props: AuthStatusIconProps) {
     if (status() === 'authenticated') return 'Authenticated - Active Broker Session'
     if (status() === 'error') {
       return props.error
-        ? `Authentication Error: ${props.error}`
+        ? `Authentication Error: ${formatAuthError(props.error)}`
         : 'Authentication Error - Token Expired'
     }
     return 'Unauthenticated - No Active Broker Session'

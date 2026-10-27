@@ -12,19 +12,22 @@ import (
 type AccountStatus string
 
 const (
-	AccountStatusActive AccountStatus = "active"
-	AccountStatusError  AccountStatus = "error"
+	AccountStatusActive  AccountStatus = "active"
+	AccountStatusError   AccountStatus = "error"
+	AccountStatusPending AccountStatus = "pending"
 )
 
 // ErrInvalidAccountStatus is returned when an unrecognized account status is provided.
-var ErrInvalidAccountStatus = errors.New("invalid account status: must be 'active', 'ok', or 'error'")
+var ErrInvalidAccountStatus = errors.New("invalid account status: must be 'active', 'ok', 'pending', or 'error'")
 
 // ParseAccountStatus parses and validates an account status string.
-// Accepts "active", "ok", or "error". Both "active" and "ok" are normalized to AccountStatusActive.
+// Accepts "active", "ok", "pending", or "error". Both "active" and "ok" are normalized to AccountStatusActive.
 func ParseAccountStatus(s string) (AccountStatus, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "active", "ok":
 		return AccountStatusActive, nil
+	case "pending":
+		return AccountStatusPending, nil
 	case "error":
 		return AccountStatusError, nil
 	default:
@@ -34,15 +37,98 @@ func ParseAccountStatus(s string) (AccountStatus, error) {
 
 // IsValid checks if an AccountStatus is a recognized valid status.
 func (s AccountStatus) IsValid() bool {
-	return s == AccountStatusActive || s == AccountStatusError
+	return s == AccountStatusActive || s == AccountStatusError || s == AccountStatusPending
 }
 
-// ToAPI returns the client-facing API representation ("ok" or "error").
+// ToAPI returns the client-facing API representation ("ok", "pending", or "error").
 func (s AccountStatus) ToAPI() string {
 	if s == AccountStatusActive {
 		return "ok"
 	}
+	if s == AccountStatusPending {
+		return "pending"
+	}
 	return "error"
+}
+
+// RequiresDailySession returns true for brokers whose access tokens strictly expire every day
+// at a fixed cutoff (e.g. Zerodha Kite Connect at 06:00 AM IST).
+// For such brokers, missing token_expires_at implies an inactive daily session.
+// For other brokers (e.g. Dhan with 24h JWTs, long-lived API tokens, or testbroker),
+// an authenticated session without an explicit expiration timestamp is not treated as expired.
+func RequiresDailySession(broker string) bool {
+	b := strings.ToLower(strings.TrimSpace(broker))
+	return b == "zerodha" || b == "kite"
+}
+
+// SanitizeAuthError cleans and formats an authentication error message for user-facing display.
+// It guarantees that no backend API calls, URLs, HTTP endpoints, method signatures,
+// or internal payload dumps are ever exposed to the user.
+func SanitizeAuthError(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(raw)
+
+	// Check if the message contains backend API traces
+	hasBackendAPITraces := strings.Contains(lower, "http://") ||
+		strings.Contains(lower, "https://") ||
+		strings.Contains(lower, "post ") ||
+		strings.Contains(lower, "get ") ||
+		strings.Contains(lower, "/api/") ||
+		strings.Contains(lower, "connect/login") ||
+		strings.Contains(lower, "session/token") ||
+		strings.Contains(lower, "sess_id") ||
+		strings.Contains(lower, "dial tcp") ||
+		strings.Contains(lower, "get dhan") ||
+		strings.Contains(lower, "dhan api error") ||
+		strings.Contains(lower, "kite web login") ||
+		strings.Contains(lower, "dhan sync failed") ||
+		strings.Contains(lower, "connect login") ||
+		strings.Contains(lower, "kite login error") ||
+		strings.Contains(lower, "kite 2fa error")
+
+	// If no backend API traces and already a clean user-facing message, preserve it
+	if !hasBackendAPITraces {
+		return raw
+	}
+
+	// Translate technical / backend API errors into clear, safe user-facing explanations
+	switch {
+	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") ||
+		strings.Contains(lower, "token expired") || strings.Contains(lower, "invalid token") ||
+		strings.Contains(lower, "token revoked"):
+		return "Broker session expired or token invalid"
+
+	case strings.Contains(lower, "totp") || strings.Contains(lower, "2fa") ||
+		strings.Contains(lower, "twofa") || strings.Contains(lower, "external totp"):
+		return "Invalid 2FA TOTP code or external TOTP not enabled"
+
+	case strings.Contains(lower, "password") || strings.Contains(lower, "credentials") ||
+		strings.Contains(lower, "user id") || strings.Contains(lower, "user_id") ||
+		strings.Contains(lower, "login error"):
+		return "Invalid broker credentials or password"
+
+	case strings.Contains(lower, "500") || strings.Contains(lower, "502") ||
+		strings.Contains(lower, "503") || strings.Contains(lower, "504") ||
+		strings.Contains(lower, "gateway") || strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "dial") || strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "econnrefused") || strings.Contains(lower, "dh-1111") ||
+		strings.Contains(lower, "server error") || strings.Contains(lower, "service unavailable"):
+		return "Broker server temporarily unavailable"
+
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "too many requests"):
+		return "Broker rate limit exceeded"
+
+	case strings.Contains(lower, "missing") || strings.Contains(lower, "required"):
+		return "Missing broker API key or credentials"
+
+	default:
+		return "Authentication failed with broker"
+	}
 }
 
 // TickerStatus represents the operational status of a master account's WebSocket ticker.

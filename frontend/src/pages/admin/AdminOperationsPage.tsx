@@ -12,6 +12,7 @@ import { SyncIcon } from '../../components/icons'
 import { Skeleton } from '../../components/Skeleton'
 import { RoleIcon } from '../../components/RoleIcon'
 import { AuthStatusIcon } from '../../components/AuthStatusIcon'
+import { formatAuthError } from '../../utils/authError'
 
 type OperationsSubTab = 'readiness' | 'feed' | 'issues'
 
@@ -275,12 +276,12 @@ export function AdminOperationsPage() {
                               <span class="auth-status-cell-centered">
                                 <AuthStatusIcon
                                   status={acc.authStatus === 'authenticated' ? 'error' : (acc.authStatus || 'error')}
-                                  error={acc.authError || 'Token expired / session inactive'}
+                                  error={formatAuthError(acc.authError) || 'Token expired / session inactive'}
                                 />
                               </span>
                             </td>
                             <td style={{ 'font-size': '0.85rem', color: '#ef4444' }}>
-                              {acc.authError || 'Token expired / session inactive'}
+                              {formatAuthError(acc.authError) || 'Token expired / session inactive'}
                             </td>
                           </tr>
                         )}

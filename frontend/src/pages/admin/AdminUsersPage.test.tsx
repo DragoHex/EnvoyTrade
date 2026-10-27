@@ -271,4 +271,229 @@ describe('AdminUsersPage', () => {
       expect(screen.getByText(/password updated successfully/i)).toBeInTheDocument()
     })
   })
+
+  it('opens edit modal with Total IPs and broker inputs, validates broker sum, and saves with button text Save', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    const patchSpy = vi.spyOn(api, 'patchAdminUser').mockResolvedValue({ status: 'ok' })
+
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('traderuser')).toBeInTheDocument()
+    })
+
+    const editBtns = screen.getAllByRole('button', { name: /Edit Platform Role|Edit User/i })
+    expect(editBtns.length).toBeGreaterThan(1)
+    fireEvent.click(editBtns[1]) // traderuser
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Edit User/i })).toBeInTheDocument()
+    })
+
+    const totalInput = screen.getByLabelText(/Total Allowed IPs/i)
+    const generalInput = screen.getByLabelText(/Generalist Allowed IPs/i)
+    const kiteInput = screen.getByLabelText(/Zerodha Kite Allowed IPs/i)
+    const dhanInput = screen.getByLabelText(/Dhan Allowed IPs/i)
+    const testbrokerInput = screen.getByLabelText(/Test Broker Allowed IPs/i)
+    const saveBtn = screen.getByRole('button', { name: /^Save$/i })
+
+    // Negative case: Total 6, sum 5 (general 2 + kite 2 + dhan 1 + testbroker 0) -> mismatch, save disabled
+    fireEvent.input(totalInput, { target: { value: '6' } })
+    fireEvent.input(generalInput, { target: { value: '2' } })
+    fireEvent.input(kiteInput, { target: { value: '2' } })
+    fireEvent.input(dhanInput, { target: { value: '1' } })
+    fireEvent.input(testbrokerInput, { target: { value: '0' } })
+
+    expect(saveBtn).toBeDisabled()
+    expect(screen.getByText(/Sum of broker accounts \(5\) must match total \(6\)/i)).toBeInTheDocument()
+
+    // Positive case: Total 6, sum 6 (2 + 2 + 1 + 1) -> valid, save enabled
+    fireEvent.input(testbrokerInput, { target: { value: '1' } })
+    expect(saveBtn).not.toBeDisabled()
+
+    fireEvent.click(saveBtn)
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith('22222222-2222-2222-2222-222222222222', {
+        role: 'user',
+        maxIPs: 6,
+        brokerIPLimits: { general: 2, kite: 2, dhan: 1, testbroker: 1 },
+      })
+    })
+  })
+
+  it('allows saving when Total IPs is -1 (unlimited) without requiring broker sum match', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    const patchSpy = vi.spyOn(api, 'patchAdminUser').mockResolvedValue({ status: 'ok' })
+
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('traderuser')).toBeInTheDocument()
+    })
+
+    const editBtns = screen.getAllByRole('button', { name: /Edit Platform Role|Edit User/i })
+    fireEvent.click(editBtns[1])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Edit User/i })).toBeInTheDocument()
+    })
+
+    const totalInput = screen.getByLabelText(/Total Allowed IPs/i)
+    const kiteInput = screen.getByLabelText(/Zerodha Kite Allowed IPs/i)
+    const saveBtn = screen.getByRole('button', { name: /^Save$/i })
+
+    // Total -1, Kite 2 -> No mismatch check because Total is -1 (unlimited)
+    fireEvent.input(totalInput, { target: { value: '-1' } })
+    fireEvent.input(kiteInput, { target: { value: '2' } })
+
+    expect(saveBtn).not.toBeDisabled()
+    fireEvent.click(saveBtn)
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith('22222222-2222-2222-2222-222222222222', {
+        role: 'user',
+        maxIPs: -1,
+        brokerIPLimits: { kite: 2 },
+      })
+    })
+  })
+
+  it('enforces broker sum match when Total IPs is 0 (0 allocation)', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    const patchSpy = vi.spyOn(api, 'patchAdminUser').mockResolvedValue({ status: 'ok' })
+
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('traderuser')).toBeInTheDocument()
+    })
+
+    const editBtns = screen.getAllByRole('button', { name: /Edit Platform Role|Edit User/i })
+    fireEvent.click(editBtns[1])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Edit User/i })).toBeInTheDocument()
+    })
+
+    const totalInput = screen.getByLabelText(/Total Allowed IPs/i)
+    const kiteInput = screen.getByLabelText(/Zerodha Kite Allowed IPs/i)
+    const saveBtn = screen.getByRole('button', { name: /^Save$/i })
+
+    // Total 0, Kite 2 -> Mismatch because broker sum (2) != total (0)
+    fireEvent.input(totalInput, { target: { value: '0' } })
+    fireEvent.input(kiteInput, { target: { value: '2' } })
+
+    expect(saveBtn).toBeDisabled()
+    expect(screen.getByText(/Sum of broker accounts \(2\) must match total \(0\)/i)).toBeInTheDocument()
+
+    // When Kite is 0 -> Matches total (0)
+    fireEvent.input(kiteInput, { target: { value: '0' } })
+    expect(saveBtn).not.toBeDisabled()
+    fireEvent.click(saveBtn)
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith('22222222-2222-2222-2222-222222222222', {
+        role: 'user',
+        maxIPs: 0,
+        brokerIPLimits: {},
+      })
+    })
+  })
+
+  it('closes create user modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('adminuser')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /\+ Create User/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Create Platform User/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Create Platform User/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes edit user modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('traderuser')).toBeInTheDocument()
+    })
+
+    const editBtns = screen.getAllByRole('button', { name: /Edit Platform Role|Edit User/i })
+    fireEvent.click(editBtns[1])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Edit User/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Edit User/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes user sessions modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    vi.spyOn(api, 'getAdminUserSessions').mockResolvedValue({
+      sessions: [
+        {
+          id: 1,
+          userId: '22222222-2222-2222-2222-222222222222',
+          tokenHash: 'abc',
+          ipAddress: '127.0.0.1',
+          userAgent: 'Mozilla/5.0',
+          createdAt: '2026-10-01T00:00:00Z',
+          expiresAt: '2026-11-01T00:00:00Z',
+          lastSeenAt: '2026-10-01T00:00:00Z',
+        },
+      ],
+    })
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('traderuser')).toBeInTheDocument()
+    })
+
+    const sessionBtns = screen.getAllByRole('button', { name: /Inspect Sessions/i })
+    fireEvent.click(sessionBtns[1])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Active User Sessions/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Active User Sessions/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes reset password modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminUsers').mockResolvedValue(mockUsersResponse)
+    renderUsersPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('traderuser')).toBeInTheDocument()
+    })
+
+    const resetBtns = screen.getAllByRole('button', { name: /Reset Password/i })
+    fireEvent.click(resetBtns[1])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Reset Password/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Reset Password/i })).not.toBeInTheDocument()
+    })
+  })
 })

@@ -25,6 +25,10 @@ const (
 	ReasonBadInstrument
 	// ReasonInvalidRatio: clone_factor is not a usable positive value.
 	ReasonInvalidRatio
+	// ReasonFollowerInError: follower account is in error status and skipped.
+	ReasonFollowerInError
+	// ReasonFollowerPending: follower account is in pending/syncing status and skipped.
+	ReasonFollowerPending
 )
 
 // String returns the string representation of a SizingReason.
@@ -40,6 +44,10 @@ func (r SizingReason) String() string {
 		return "bad_instrument"
 	case ReasonInvalidRatio:
 		return "invalid_ratio"
+	case ReasonFollowerInError:
+		return "follower_in_error"
+	case ReasonFollowerPending:
+		return "follower_pending"
 	default:
 		return "unknown"
 	}

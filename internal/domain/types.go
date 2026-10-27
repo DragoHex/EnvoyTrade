@@ -57,6 +57,8 @@ type FollowLink struct {
 	MaxQtyPerOrder int
 	Enabled        bool
 	EffectiveFrom  time.Time
+	Status         string
+	AuthStatus     string
 }
 
 // TerminalStatus values a follower_order can settle into. Broker-native

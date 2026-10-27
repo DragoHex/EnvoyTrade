@@ -519,5 +519,72 @@ describe('Dashboard', () => {
       expect(statusDot).toHaveAttribute('data-status', 'ok')
     })
   })
+
+  it('renders DashboardHeroCard displaying EnvoyTrade branding and updates MTM from group details', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Alpha Traders', masterId: 'm1', masterAccountId: 'AT001', broker: 'zerodha', followerCount: 1, status: 'ok' },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Alpha Traders',
+      masterId: 'm1',
+      masterAccountId: 'AT001',
+      masterActive: true,
+      masterTotalMtm: 4500.5,
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'FO100', enabled: true, status: 'ok', totalMtm: 1200 }],
+    })
+
+    render(() => <Dashboard />)
+
+    // Hero card renders
+    const heroCard = await screen.findByTestId('dashboard-hero-card')
+    expect(heroCard).toBeInTheDocument()
+    expect(within(heroCard).getByText('EnvoyTrade')).toBeInTheDocument()
+
+    // Default scope is all masters: masterTotalMtm = 4500.50
+    await waitFor(() => {
+      expect(within(heroCard).getByText('+₹4,500.50')).toBeInTheDocument()
+    })
+  })
+
+  it('batches concurrent group details across multiple groups and reflects aggregated MTM in Hero Card', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Alpha Traders', masterId: 'm1', masterAccountId: 'AT001', broker: 'zerodha', followerCount: 1, status: 'ok', active: true },
+      { id: 'g2', name: 'Beta Traders', masterId: 'm2', masterAccountId: 'BT002', broker: 'zerodha', followerCount: 1, status: 'ok', active: true },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockImplementation(async (id: string) => {
+      if (id === 'g1') {
+        return {
+          id: 'g1',
+          name: 'Alpha Traders',
+          masterId: 'm1',
+          masterAccountId: 'AT001',
+          masterActive: true,
+          masterTotalMtm: 3000,
+          followers: [],
+        }
+      }
+      return {
+        id: 'g2',
+        name: 'Beta Traders',
+        masterId: 'm2',
+        masterAccountId: 'BT002',
+        masterActive: true,
+        masterTotalMtm: 4000,
+        followers: [],
+      }
+    })
+
+    render(() => <Dashboard />)
+
+    const heroCard = await screen.findByTestId('dashboard-hero-card')
+    expect(heroCard).toBeInTheDocument()
+
+    // Aggregates both masters: 3000 + 4000 = 7000
+    await waitFor(() => {
+      expect(within(heroCard).getByText('+₹7,000.00')).toBeInTheDocument()
+    })
+  })
 })
+
 

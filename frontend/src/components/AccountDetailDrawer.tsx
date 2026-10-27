@@ -7,9 +7,10 @@ import {
   type GroupSummary,
   type ProxyIP,
 } from '../api'
-import { BrokerLogo, SUPPORTED_BROKERS } from './BrokerLogo'
+import { BrokerLogo, SUPPORTED_BROKERS, getBrokerConfig } from './BrokerLogo'
 import { ThemedSelect } from './ThemedSelect'
 import { isValidIP } from '../utils/ip'
+import { formatAuthError } from '../utils/authError'
 
 export function isCompatibleIP(ipBrokers: string | undefined, brokerVal: string): boolean {
   if (!ipBrokers || !ipBrokers.trim()) return true
@@ -40,6 +41,9 @@ export function AccountDetailDrawer(props: {
   open: boolean
   account: Account | null
   groups: GroupSummary[]
+  existingAccounts?: Account[]
+  maxAccounts?: number
+  brokerLimits?: Record<string, number>
   onClose: () => void
   onCreate: (body: CreateAccountRequest) => Promise<void>
   onSave: (id: string, patch: Record<string, unknown>) => Promise<void>
@@ -59,7 +63,6 @@ export function AccountDetailDrawer(props: {
   const [cloneFactor, setCloneFactor] = createSignal('1')
   const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
   const [groupId, setGroupId] = createSignal('')
-  const [status, setStatus] = createSignal('ok')
   const [error, setError] = createSignal<string | null>(null)
   const [saving, setSaving] = createSignal(false)
   const [isDropdownOpen, setIsDropdownOpen] = createSignal(false)
@@ -106,7 +109,6 @@ export function AccountDetailDrawer(props: {
         setCloneFactor(a?.cloneFactor ?? '1')
         setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
         setGroupId(a?.groupId ?? '')
-        setStatus(a?.status ?? 'ok')
         setError(null)
 
         // Synchronous initial IP state
@@ -144,6 +146,61 @@ export function AccountDetailDrawer(props: {
   const isFollower = () => role() === 'follower'
   const isEdit = () => props.account != null
 
+  const isGlobalQuotaExhausted = createMemo(() => {
+    if (isEdit()) return false
+    if (props.maxAccounts === undefined || props.maxAccounts === -1) return false
+    const used = props.existingAccounts?.length ?? 0
+    return used >= props.maxAccounts
+  })
+
+  const currentBroker = () => broker().toLowerCase()
+
+  const generalLimit = createMemo(() => {
+    return props.brokerLimits?.['general'] ?? 0
+  })
+
+  const brokerUsed = createMemo(() => {
+    const list = props.existingAccounts ?? []
+    return list.filter((a) => (a.broker || 'kite').toLowerCase() === currentBroker()).length
+  })
+
+  // Calculate excess accounts consuming generalist capacity across all brokers
+  const generalUsed = createMemo(() => {
+    const limits = props.brokerLimits
+    if (!limits) return 0
+    const accounts = props.existingAccounts ?? []
+    const counts: Record<string, number> = {}
+    for (const a of accounts) {
+      const b = (a.broker || 'kite').toLowerCase()
+      counts[b] = (counts[b] || 0) + 1
+    }
+    let excessSum = 0
+    for (const [b, count] of Object.entries(counts)) {
+      const dedicated = limits[b] ?? 0
+      if (count > dedicated) {
+        excessSum += count - dedicated
+      }
+    }
+    return excessSum
+  })
+
+  const checkBrokerExhausted = (brokerName: string) => {
+    if (isEdit()) return false
+    if (props.maxAccounts === -1) return false
+    const limits = props.brokerLimits
+    if (!limits || Object.keys(limits).length === 0) return false
+    const b = brokerName.toLowerCase()
+    const bLimit = limits[b] ?? 0
+    const bUsed = (props.existingAccounts ?? []).filter((a) => (a.broker || 'kite').toLowerCase() === b).length
+    if (bUsed < bLimit) return false
+    const genRemaining = generalLimit() - generalUsed()
+    return genRemaining <= 0
+  }
+
+  const isBrokerQuotaExhausted = createMemo(() => {
+    return checkBrokerExhausted(broker())
+  })
+
   const compatibleIPs = createMemo(() => {
     const pool = availableIPs()
     const list = ipType() === 'ipv6' ? (pool.ipv6 || []) : (pool.ipv4 || [])
@@ -152,6 +209,10 @@ export function AccountDetailDrawer(props: {
 
   const handleBrokerChange = (newBroker: string) => {
     setBroker(newBroker)
+    if (!isEdit() && checkBrokerExhausted(newBroker)) {
+      setIp('')
+      return
+    }
     if (!isEdit() && isFollower()) {
       const pool = availableIPs()
       const currentList = ipType() === 'ipv6' ? (pool.ipv6 || []) : (pool.ipv4 || [])
@@ -236,6 +297,13 @@ export function AccountDetailDrawer(props: {
         return
       }
 
+      const trimmedBroker = broker()
+      const trimmedApiSecret = apiSecret().trim()
+      if ((trimmedBroker === 'kite' || trimmedBroker === 'zerodha') && trimmedApiSecret && trimmedApiSecret.length > 20 && trimmedApiSecret.length !== 32) {
+        setError(`Zerodha API Secret must be exactly 32 characters (currently ${trimmedApiSecret.length} characters).`)
+        return
+      }
+
       if (isEdit()) {
         const a = props.account!
         const patch: Record<string, unknown> = {}
@@ -270,7 +338,6 @@ export function AccountDetailDrawer(props: {
             if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
           }
         }
-        if (status() !== a.status) patch.status = status()
         if (Object.keys(patch).length > 0) await props.onSave(a.id, patch)
       } else {
         const body: CreateAccountRequest = {
@@ -332,7 +399,24 @@ export function AccountDetailDrawer(props: {
               ×
             </button>
           </div>
-          <form onSubmit={handleSubmit} class="drawer-form">
+          <Show
+            when={!isGlobalQuotaExhausted()}
+            fallback={
+              <div style={{ padding: '2.5rem 1.5rem', 'text-align': 'center' }}>
+                <div style={{ 'font-size': '1.15rem', 'font-weight': 700, 'margin-bottom': '0.5rem', color: 'var(--color-text)' }}>
+                  Account Quota Exhausted
+                </div>
+                <div style={{ color: 'var(--color-text-secondary)', 'font-size': '0.875rem', 'line-height': 1.5, 'margin-bottom': '1.5rem' }}>
+                  You have reached the maximum allowed accounts for your plan ({props.maxAccounts} accounts used).
+                  Please contact support or upgrade your subscription to add more trading accounts.
+                </div>
+                <button type="button" class="btn-secondary" onClick={props.onClose}>
+                  Close Drawer
+                </button>
+              </div>
+            }
+          >
+            <form onSubmit={handleSubmit} class="drawer-form">
             <Show when={props.account?.authStatus === 'error'}>
               <div
                 class="auth-error-banner"
@@ -347,7 +431,7 @@ export function AccountDetailDrawer(props: {
                   'font-size': '0.875rem',
                 }}
               >
-                <strong>Authentication required:</strong> {props.account?.authError || 'Failed to authenticate with broker.'}
+                <strong>Authentication required:</strong> {formatAuthError(props.account?.authError) || 'Failed to authenticate with broker.'}
                 <br />
                 {broker() === 'dhan'
                   ? 'Please enter your Dhan Access Token below to reconnect.'
@@ -370,6 +454,26 @@ export function AccountDetailDrawer(props: {
                   }))}
                 />
               </div>
+              <Show when={isBrokerQuotaExhausted()}>
+                <div
+                  style={{
+                    padding: '0.75rem',
+                    'border-radius': '6px',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid var(--color-error, #ef4444)',
+                    color: 'var(--color-error, #ef4444)',
+                    'font-size': '0.825rem',
+                    'margin-top': '0.5rem',
+                    'margin-bottom': '0.75rem',
+                    'line-height': 1.4,
+                  }}
+                >
+                  <strong>Account quota for {getBrokerConfig(broker()).name} is exhausted ({brokerUsed()} accounts used).</strong>
+                  <div style={{ 'margin-top': '0.2rem' }}>
+                    Please choose another broker or contact support to increase your account quota.
+                  </div>
+                </div>
+              </Show>
             </label>
             <label>
               Role
@@ -421,8 +525,21 @@ export function AccountDetailDrawer(props: {
               </label>
               <label>
                 API Secret
-                <input value={apiSecret()} onInput={(e) => setApiSecret(e.currentTarget.value)} />
+                <input value={apiSecret()} onInput={(e) => setApiSecret(e.currentTarget.value.trim())} />
               </label>
+              <Show when={(broker() === 'kite' || broker() === 'zerodha') && apiSecret().trim().length > 0}>
+                <span
+                  style={{
+                    'font-size': '0.75rem',
+                    color: apiSecret().trim().length === 32 ? 'var(--color-accent)' : '#e5484d',
+                    'margin-top': '0.25rem',
+                    'margin-bottom': '0.5rem',
+                    display: 'block',
+                  }}
+                >
+                  {apiSecret().trim().length}/32 characters{apiSecret().trim().length !== 32 ? ' (must be 32)' : ' (valid length)'}
+                </span>
+              </Show>
               <label>
                 Password (Kite Login)
                 <input
@@ -443,8 +560,9 @@ export function AccountDetailDrawer(props: {
                 />
               </label>
             </Show>
-            <label>
-              IP Type {isFollower() ? '*' : ''}
+            <Show when={!isBrokerQuotaExhausted()}>
+              <label>
+                IP Type {isFollower() ? '*' : ''}
               <ThemedSelect
                 aria-label="IP Type"
                 value={ipType()}
@@ -674,6 +792,7 @@ export function AccountDetailDrawer(props: {
                 </span>
               </Show>
             </label>
+            </Show>
             <Show when={isFollower()}>
               <label>
                 Group (Optional)
@@ -705,32 +824,23 @@ export function AccountDetailDrawer(props: {
                 </label>
               </Show>
             </Show>
-            <Show when={isEdit()}>
-              <label>
-                Status
-                <ThemedSelect
-                  aria-label="Status"
-                  value={status()}
-                  onChange={(val) => setStatus(val)}
-                  options={[
-                    { value: 'ok', label: 'ok', badge: { text: 'OK', variant: 'emerald' } },
-                    { value: 'error', label: 'error', badge: { text: 'Error', variant: 'amber' } },
-                  ]}
-                />
-              </label>
-            </Show>
             <Show when={error()}>{(msg) => <p role="alert">{msg()}</p>}</Show>
             <div class="drawer-actions">
               <button type="button" class="drawer-btn-cancel" onClick={props.onClose}>
                 Cancel
               </button>
-              <button type="submit" class="drawer-btn-save" disabled={saving()}>
-                Save
+              <button
+                type="submit"
+                class="drawer-btn-save"
+                disabled={saving() || isBrokerQuotaExhausted()}
+              >
+                {isBrokerQuotaExhausted() ? 'Account Quota Exhausted' : saving() ? 'Saving...' : 'Save'}
               </button>
             </div>
           </form>
-        </div>
+        </Show>
       </div>
-    </Show>
+    </div>
+  </Show>
   )
 }

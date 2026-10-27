@@ -8,6 +8,8 @@ export interface User {
   name: string
   role: string
   active?: boolean
+  maxIPs?: number
+  brokerIPLimits?: Record<string, number>
   phone?: string
   address?: string
   gstNumber?: string
@@ -52,7 +54,7 @@ export interface GroupSummary {
   masterName?: string
   broker: string
   followerCount: number
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
   active?: boolean
   hasImbalance?: boolean
 }
@@ -70,7 +72,7 @@ export interface GroupFollower {
   name: string
   brokerAccountId: string
   enabled: boolean
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
   netQty?: number
   openPositionsCount?: number
   closedPositionsCount?: number
@@ -113,7 +115,7 @@ export interface Account {
   apiKey?: string | null
   apiSecret?: string | null
   ip?: string | null
-  authStatus?: 'unauthenticated' | 'authenticated' | 'error' | null
+  authStatus?: 'unauthenticated' | 'authenticated' | 'error' | 'pending' | null
   authError?: string | null
   groupId?: string | null
   groupName?: string | null
@@ -122,7 +124,7 @@ export interface Account {
   maxQtyPerOrder: number | null
   enabled: boolean
   active: boolean
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
 }
 
 export interface CreateAccountRequest {
@@ -696,6 +698,8 @@ export interface UserSummary {
   name: string
   role: string
   active: boolean
+  maxIPs?: number
+  brokerIPLimits?: Record<string, number>
   phone?: string
   accountCount: number
   sessionCount: number
@@ -808,7 +812,12 @@ export function postAdminUser(user: {
 
 export function patchAdminUser(
   id: string,
-  update: { role?: string; active?: boolean },
+  update: {
+    role?: string
+    active?: boolean
+    maxIPs?: number
+    brokerIPLimits?: Record<string, number>
+  },
 ): Promise<{ status: string }> {
   return apiFetch(`${BASE}/admin/users/${id}`, {
     method: 'PATCH',

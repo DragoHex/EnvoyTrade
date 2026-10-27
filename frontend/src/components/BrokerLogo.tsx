@@ -58,7 +58,9 @@ function FallbackBrokerLogo(props: { name: string; size?: number }) {
     <span
       class="broker-logo-fallback"
       style={{
-        width: `${width()}px`,
+        width: 'auto',
+        'min-width': `${width()}px`,
+        'max-width': '100%',
         height: `${height()}px`,
         'font-size': `${Math.max(10, Math.round(height() * 0.65))}px`,
         'line-height': `${height()}px`,
@@ -67,7 +69,9 @@ function FallbackBrokerLogo(props: { name: string; size?: number }) {
         'align-items': 'center',
         'justify-content': 'center',
         'box-sizing': 'border-box',
-        padding: '0 2px',
+        padding: '0 5px',
+        overflow: 'hidden',
+        'text-overflow': 'ellipsis',
       }}
     >
       {props.name}
@@ -123,6 +127,10 @@ export function BrokerLogo(props: {
   class?: string
 }) {
   const config = () => getBrokerConfig(props.broker)
+  const isSvg = () => {
+    const k = (props.broker ?? '').toLowerCase().trim()
+    return k === 'kite' || k === 'zerodha' || k === 'dhan'
+  }
   const height = () => props.size ?? 18
   const width = () => Math.round(height() * 1.5)
 
@@ -133,9 +141,10 @@ export function BrokerLogo(props: {
       title={config().name}
       aria-label={config().name}
       style={{
-        width: props.showName ? 'auto' : `${width()}px`,
+        width: props.showName || !isSvg() ? 'auto' : `${width()}px`,
         height: `${height()}px`,
         'min-width': `${width()}px`,
+        'max-width': '100%',
         'flex-shrink': '0',
         display: 'inline-flex',
         'align-items': 'center',

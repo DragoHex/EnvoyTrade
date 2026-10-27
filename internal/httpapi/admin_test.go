@@ -545,6 +545,129 @@ func TestAdminUsersCRUDAndSessions(t *testing.T) {
 		t.Fatalf("expected 200 on patch user, got %d", rec.Code)
 	}
 
+	// 4c. PATCH /api/v1/admin/users/{id} - negative case: broker sum mismatch
+	mismatchMax := 5
+	mismatchBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &mismatchMax,
+		"brokerIPLimits": map[string]int{
+			"kite": 2,
+			"dhan": 1, // sum 3 != 5
+		},
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(mismatchBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for broker limits mismatch, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4d. PATCH /api/v1/admin/users/{id} - negative case: negative quota less than -1
+	negMax := -2
+	negBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &negMax,
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(negBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for maxIPs < -1, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4d-2. PATCH /api/v1/admin/users/{id} - positive case: -1 for unlimited
+	unlimitedMax := -1
+	unlimitedBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &unlimitedMax,
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(unlimitedBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for maxIPs -1 (unlimited), got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.lastUpdatedMaxIPs == nil || *store.lastUpdatedMaxIPs != -1 {
+		t.Fatalf("expected maxIPs -1, got %v", store.lastUpdatedMaxIPs)
+	}
+
+	// 4d-3. PATCH /api/v1/admin/users/{id} - negative case: 0 total with non-zero broker limit
+	zeroMax := 0
+	zeroMismatchBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &zeroMax,
+		"brokerIPLimits": map[string]int{
+			"kite": 1,
+		},
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(zeroMismatchBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for maxIPs 0 with broker limit sum 1, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4d-4. PATCH /api/v1/admin/users/{id} - positive case: 0 total with empty/zero broker limits
+	zeroValidBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &zeroMax,
+		"brokerIPLimits": map[string]int{},
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(zeroValidBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for maxIPs 0 with 0 broker limits, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.lastUpdatedMaxIPs == nil || *store.lastUpdatedMaxIPs != 0 {
+		t.Fatalf("expected maxIPs 0, got %v", store.lastUpdatedMaxIPs)
+	}
+
+	// 4e. PATCH /api/v1/admin/users/{id} - positive case: matching broker sum
+	validMax := 5
+	validQuotaBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &validMax,
+		"brokerIPLimits": map[string]int{
+			"kite": 3,
+			"dhan": 2, // sum 5 == 5
+		},
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(validQuotaBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on valid quota patch, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.lastUpdatedMaxIPs == nil || *store.lastUpdatedMaxIPs != 5 {
+		t.Fatalf("expected maxIPs 5, got %v", store.lastUpdatedMaxIPs)
+	}
+	if store.lastUpdatedBrokerLimits["kite"] != 3 || store.lastUpdatedBrokerLimits["dhan"] != 2 {
+		t.Fatalf("unexpected broker limits: %+v", store.lastUpdatedBrokerLimits)
+	}
+
+	// 4f. PATCH /api/v1/admin/users/{id} - positive case: matching broker sum with general and testbroker
+	genTestMax := 6
+	genTestQuotaBody, _ := json.Marshal(map[string]any{
+		"maxIPs": &genTestMax,
+		"brokerIPLimits": map[string]int{
+			"general":    2,
+			"kite":       2,
+			"dhan":       1,
+			"testbroker": 1, // sum 6 == 6
+		},
+	})
+	req = httptest.NewRequest("PATCH", "/api/v1/admin/users/"+u2.String(), bytes.NewReader(genTestQuotaBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on valid quota patch with general and testbroker, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.lastUpdatedBrokerLimits["general"] != 2 || store.lastUpdatedBrokerLimits["testbroker"] != 1 {
+		t.Fatalf("unexpected broker limits: %+v", store.lastUpdatedBrokerLimits)
+	}
+
 	// 5. GET /api/v1/admin/users/{id}/accounts
 	acctID := uuid.New()
 	store.accountsByUserID = map[uuid.UUID][]domain.Account{

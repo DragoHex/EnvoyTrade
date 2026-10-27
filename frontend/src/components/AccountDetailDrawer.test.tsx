@@ -129,6 +129,7 @@ describe('AccountDetailDrawer', () => {
     ))
 
     expect(screen.getByLabelText('Role')).toBeDisabled()
+    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
 
     await userEvent.clear(screen.getByLabelText('Clone Factor'))
     await userEvent.type(screen.getByLabelText('Clone Factor'), '0.75')
@@ -205,6 +206,22 @@ describe('AccountDetailDrawer', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid IP Address: must be a valid IPv4 or IPv6 address.')
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it('create mode, broker=kite: shows validation error when API secret is 31 characters', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={onCreate} onSave={vi.fn()} />
+    ))
+
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
+    await userEvent.type(screen.getByLabelText('Broker User ID'), 'ZX9999')
+    await userEvent.type(screen.getByLabelText('API Key'), 'key1234567890123')
+    await userEvent.type(screen.getByLabelText('API Secret'), '1234567890123456789012345678901') // 31 chars
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Zerodha API Secret must be exactly 32 characters (currently 31 characters).')
     expect(onCreate).not.toHaveBeenCalled()
   })
 
@@ -519,6 +536,158 @@ describe('AccountDetailDrawer', () => {
     const ipInput = await screen.findByLabelText(/IP Address/)
     expect(ipInput).toHaveValue('')
     expect(screen.getByText('No available IPV4 address in proxy pool.')).toBeInTheDocument()
+  })
+
+  it('shows full quota exhausted block state when global account quota is reached', async () => {
+    const onClose = vi.fn()
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={null}
+        groups={[mockGroup]}
+        existingAccounts={[master, follower]}
+        maxAccounts={2}
+        onClose={onClose}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+      />
+    ))
+
+    expect(screen.getByText('Account Quota Exhausted')).toBeInTheDocument()
+    expect(screen.getByText(/You have reached the maximum allowed accounts for your plan \(2 accounts used\)/i)).toBeInTheDocument()
+    // Must NOT state IP anywhere
+    expect(screen.queryByLabelText(/IP Address/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/API Key/i)).not.toBeInTheDocument()
+
+    const closeBtn = screen.getByRole('button', { name: /Close Drawer/i })
+    await userEvent.click(closeBtn)
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('shows broker-specific quota exhausted alert and hides IP section, but restores when switching broker', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [{ ipAddress: '10.0.0.1', ipType: 'ipv4', host: 'h1', port: 443, validFrom: '', validUntil: '', plan: 'P', whitelistedBrokers: '' }],
+      ipv6: [],
+    })
+
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={null}
+        groups={[mockGroup]}
+        existingAccounts={[master]} // 1 kite account already used
+        maxAccounts={5}
+        brokerLimits={{ kite: 1, dhan: 2 }} // kite limit reached (1/1), dhan free (0/2)
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+      />
+    ))
+
+    // Default broker is kite -> exhausted
+    expect(screen.getByText(/Account quota for Zerodha Kite is exhausted \(1 accounts used\)/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/IP Address/i)).not.toBeInTheDocument()
+    const submitBtn = screen.getByRole('button', { name: /Account Quota Exhausted/i })
+    expect(submitBtn).toBeDisabled()
+
+    // Switch broker to Dhan
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'dhan')
+
+    // Warning cleared, IP section restored, submit enabled
+    expect(screen.queryByText(/Account quota for Zerodha Kite is exhausted/i)).not.toBeInTheDocument()
+    expect(await screen.findByLabelText(/IP Address/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled()
+  })
+
+  it('allows broker creation using generalist capacity when dedicated limit is reached', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [{ ipAddress: '10.0.0.1', ipType: 'ipv4', host: 'h1', port: 443, validFrom: '', validUntil: '', plan: 'P', whitelistedBrokers: '' }],
+      ipv6: [],
+    })
+
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={null}
+        groups={[mockGroup]}
+        existingAccounts={[master]} // 1 kite account already used
+        maxAccounts={5}
+        brokerLimits={{ kite: 1, dhan: 1, general: 1 }} // kite dedicated reached (1/1), but general has 1 available!
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+      />
+    ))
+
+    // Default broker is kite: dedicated 1/1 is used, but generalist 1 is available -> NOT exhausted!
+    expect(screen.queryByText(/Account quota for Zerodha Kite is exhausted/i)).not.toBeInTheDocument()
+    expect(await screen.findByLabelText(/IP Address/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled()
+  })
+
+  it('shows full quota exhausted block state when user has 0 IP allocation', async () => {
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={null}
+        groups={[mockGroup]}
+        existingAccounts={[]}
+        maxAccounts={0} // newly created user with 0 quota
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+      />
+    ))
+
+    expect(screen.getByText('Account Quota Exhausted')).toBeInTheDocument()
+    expect(screen.getByText(/You have reached the maximum allowed accounts for your plan \(0 accounts used\)/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/IP Address/i)).not.toBeInTheDocument()
+  })
+
+  it('allows account creation when maxAccounts is -1 (unlimited)', async () => {
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={null}
+        groups={[mockGroup]}
+        existingAccounts={[master, follower]}
+        maxAccounts={-1} // unlimited
+        brokerLimits={{ kite: 0, dhan: 0 }} // maxAccounts -1 unrestricts all types
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+      />
+    ))
+
+    expect(screen.queryByText('Account Quota Exhausted')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Account quota for .* is exhausted/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Save$/i })).toBeInTheDocument()
+  })
+
+  it('treats 0 individual broker quota as 0 IP (exhausted) when maxAccounts is positive and no general capacity exists', async () => {
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={null}
+        groups={[mockGroup]}
+        existingAccounts={[]}
+        maxAccounts={5}
+        brokerLimits={{ kite: 5, dhan: 0, general: 0 }}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+      />
+    ))
+
+    // Default broker is kite (limit 5) -> NOT exhausted
+    expect(screen.queryByText(/Account quota for Zerodha Kite is exhausted/i)).not.toBeInTheDocument()
+
+    // Switch broker to Dhan (limit 0, general 0) -> 0 is 0 IP, exhausted!
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'dhan')
+
+    expect(screen.getByText(/Account quota for Dhan is exhausted \(0 accounts used\)/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/IP Address/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Account Quota Exhausted/i })).toBeDisabled()
   })
 })
 

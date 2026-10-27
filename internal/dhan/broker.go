@@ -9,7 +9,6 @@ import (
 
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
-	"envoytrade/internal/kite"
 
 	"github.com/DragoHex/godhan"
 	"github.com/DragoHex/godhan/models"
@@ -25,14 +24,8 @@ type API interface {
 	CancelOrder(ctx context.Context, orderID string) (*models.OrderStatusResponse, error)
 }
 
-// ProxyConfig holds proxy credentials for routing Dhan traffic.
-type ProxyConfig struct {
-	Scheme       string
-	Host         string
-	Port         int
-	ClientID     string
-	ClientSecret string
-}
+// ProxyConfig aliases godhan.ProxyConfig for native forward proxy routing.
+type ProxyConfig = godhan.ProxyConfig
 
 // Broker adapts DhanHQ API v2 Client to the broker-agnostic broker.Broker interface (PLAN.md §1).
 type Broker struct {
@@ -56,18 +49,7 @@ func NewLiveBroker(clientID, accessToken string, proxyCfg *ProxyConfig, resolver
 	proxied := false
 
 	if proxyCfg != nil && proxyCfg.Host != "" {
-		kpCfg := kite.ProxyConfig{
-			Scheme:       proxyCfg.Scheme,
-			Host:         proxyCfg.Host,
-			Port:         proxyCfg.Port,
-			ClientID:     proxyCfg.ClientID,
-			ClientSecret: proxyCfg.ClientSecret,
-		}
-		proxyClient, err := kite.RESTClientFor(kpCfg)
-		if err != nil {
-			return nil, fmt.Errorf("dhan: failed to create proxy client: %w", err)
-		}
-		opts = append(opts, godhan.WithHTTPClient(proxyClient))
+		opts = append(opts, godhan.WithProxy(*proxyCfg))
 		proxied = true
 	}
 

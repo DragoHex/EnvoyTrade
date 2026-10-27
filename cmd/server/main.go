@@ -513,6 +513,24 @@ func run(logger *slog.Logger) error {
 		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
 	}
 
+	// Scheduled Dhan token renewal (12:15 AM & 06:00 AM IST)
+	dhanRenewer := dhan.NewRenewer(store, logger.With("component", "dhan_renewer"))
+	dhanRenewer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+		evicter.Evict(accountID)
+		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("dhan renewer panicked", "panic", r)
+			}
+		}()
+		logger.Info("dhan token renewer started", "schedule", "12:15 AM & 06:00 AM IST")
+		if err := dhanRenewer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("dhan token renewer stopped unexpectedly", "error", err)
+		}
+	}()
+
 	// Periodic session expiration cleaner
 	go func() {
 		defer func() {
@@ -667,17 +685,21 @@ func (m *multiBrokerSyncer) SyncAccountPortfolio(ctx context.Context, accountID 
 	if m.syncAccount != nil {
 		return m.syncAccount(ctx, brokerName, accountID)
 	}
+	var syncErr error
 	switch brokerName {
 	case "dhan":
 		if m.dhanSyncer != nil {
-			return m.dhanSyncer.SyncAccountPortfolio(ctx, accountID)
+			syncErr = m.dhanSyncer.SyncAccountPortfolio(ctx, accountID)
 		}
 	default:
 		if m.kiteSyncer != nil {
-			return m.kiteSyncer.SyncAccountPortfolio(ctx, accountID)
+			syncErr = m.kiteSyncer.SyncAccountPortfolio(ctx, accountID)
 		}
 	}
-	return nil
+	if syncErr != nil {
+		slog.Default().Error("portfolio sync failed", "account_id", accountID, "broker", brokerName, "error", syncErr)
+	}
+	return syncErr
 }
 
 type serverBrokerResolver struct {

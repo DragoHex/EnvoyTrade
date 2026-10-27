@@ -18,6 +18,9 @@ import { SyncIcon, EditIcon, TrashIcon } from '../../components/icons'
 import { Skeleton } from '../../components/Skeleton'
 import { BrokerLogo } from '../../components/BrokerLogo'
 import { ThemedSelect } from '../../components/ThemedSelect'
+import { ThemedNumberInput } from '../../components/ThemedNumberInput'
+import { useEscapeKey } from '../../utils/useEscapeKey'
+
 
 export const WHITELISTED_BROKER_OPTIONS = [
   { value: 'Zerodha', label: 'Zerodha' },
@@ -132,6 +135,31 @@ export function AdminIPsPage() {
     whitelisted_brokers: 'Zerodha',
   })
   const [addSubmitting, setAddSubmitting] = createSignal(false)
+
+  // Escape key handlers for admin IP modals
+  useEscapeKey({
+    enabled: bulkModalOpen,
+    canDismiss: () => !bulkSubmitting(),
+    onEscape: () => setBulkModalOpen(false),
+  })
+
+  useEscapeKey({
+    enabled: () => editModalOpen() && !!editingIp(),
+    canDismiss: () => !editSubmitting(),
+    onEscape: () => setEditModalOpen(false),
+  })
+
+  useEscapeKey({
+    enabled: () => deleteModalOpen() && !!deletingIp(),
+    canDismiss: () => !deleteSubmitting(),
+    onEscape: () => setDeleteModalOpen(false),
+  })
+
+  useEscapeKey({
+    enabled: addModalOpen,
+    canDismiss: () => !addSubmitting(),
+    onEscape: () => setAddModalOpen(false),
+  })
 
   const [lastUpdated, setLastUpdated] = createSignal<string>('')
 
@@ -1028,9 +1056,9 @@ export function AdminIPsPage() {
                       <label for="edit-ip-port" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Port
                       </label>
-                      <input
+                      <ThemedNumberInput
                         id="edit-ip-port"
-                        type="number"
+                        aria-label="Port"
                         required
                         value={editPort()}
                         onInput={(e) => setEditPort(parseInt(e.currentTarget.value) || 443)}
@@ -1423,9 +1451,9 @@ export function AdminIPsPage() {
                       <label for="add-ip-port" style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, 'margin-bottom': '0.35rem', color: 'var(--color-text)' }}>
                         Port
                       </label>
-                      <input
+                      <ThemedNumberInput
                         id="add-ip-port"
-                        type="number"
+                        aria-label="Port"
                         required
                         value={addForm().port}
                         onInput={(e) => setAddForm({ ...addForm(), port: parseInt(e.currentTarget.value) || 443 })}

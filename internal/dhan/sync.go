@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"envoytrade/internal/domain"
-	"envoytrade/internal/kite"
 
 	"github.com/DragoHex/godhan"
 	"github.com/DragoHex/godhan/models"
@@ -32,6 +31,10 @@ type PortfolioStore interface {
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
 }
 
+type accountStatusSetter interface {
+	SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error
+}
+
 // PortfolioSyncer orchestrates Dhan account position, holding, and margin sync.
 type PortfolioSyncer struct {
 	Store      PortfolioStore
@@ -42,18 +45,7 @@ type PortfolioSyncer struct {
 func defaultAPIFactory(clientID, token string, proxyCfg *ProxyConfig) (SyncAPI, error) {
 	opts := []godhan.Option{}
 	if proxyCfg != nil && proxyCfg.Host != "" {
-		kpCfg := kite.ProxyConfig{
-			Scheme:       proxyCfg.Scheme,
-			Host:         proxyCfg.Host,
-			Port:         proxyCfg.Port,
-			ClientID:     proxyCfg.ClientID,
-			ClientSecret: proxyCfg.ClientSecret,
-		}
-		proxyClient, err := kite.RESTClientFor(kpCfg)
-		if err != nil {
-			return nil, fmt.Errorf("dhan: proxy client setup failed: %w", err)
-		}
-		opts = append(opts, godhan.WithHTTPClient(proxyClient))
+		opts = append(opts, godhan.WithProxy(*proxyCfg))
 	}
 	return godhan.NewClient(clientID, token, opts...), nil
 }
@@ -72,7 +64,10 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	token := strings.TrimSpace(authInfo.AccessToken)
 
 	if clientID == "" || token == "" {
-		_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "error", "missing dhan client id or access token")
+		_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "error", "Missing broker client ID or access token")
+		if setter, ok := s.Store.(accountStatusSetter); ok {
+			_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
+		}
 		return fmt.Errorf("%w: missing dhan client id or access token", domain.ErrAuthExpired)
 	}
 
@@ -100,10 +95,13 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	}
 
 	handleAuthFailure := func(err error) error {
-		msg := err.Error()
-		if strings.Contains(strings.ToLower(msg), "401") || strings.Contains(strings.ToLower(msg), "unauthorized") || strings.Contains(strings.ToLower(msg), "token") {
-			_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "error", "dhan session token expired or invalid")
-			return fmt.Errorf("%w: %v", domain.ErrAuthExpired, err)
+		authErrMsg := domain.SanitizeAuthError(err.Error())
+		if authErrMsg == "" {
+			authErrMsg = "Broker session expired or token invalid"
+		}
+		_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "error", authErrMsg)
+		if setter, ok := s.Store.(accountStatusSetter); ok {
+			_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
 		}
 		return err
 	}
@@ -111,7 +109,12 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// 1. Fetch & Sync Positions
 	positions, err := api.GetPositions(ctx)
 	if err != nil {
-		return handleAuthFailure(fmt.Errorf("get dhan positions: %w", err))
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no positions") || strings.Contains(msg, "no data") || strings.Contains(msg, "dh-1111") {
+			positions = []models.Position{}
+		} else {
+			return handleAuthFailure(fmt.Errorf("get dhan positions: %w", err))
+		}
 	}
 
 	posParams := make([]domain.PositionSyncParam, 0, len(positions))
@@ -147,7 +150,12 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// 2. Fetch & Sync Holdings
 	holdings, err := api.GetHoldings(ctx)
 	if err != nil {
-		return handleAuthFailure(fmt.Errorf("get dhan holdings: %w", err))
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no holdings") || strings.Contains(msg, "dh-1111") || strings.Contains(msg, "no data") {
+			holdings = []models.Holding{}
+		} else {
+			return handleAuthFailure(fmt.Errorf("get dhan holdings: %w", err))
+		}
 	}
 
 	holdParams := make([]domain.HoldingSyncParam, 0, len(holdings))
@@ -186,9 +194,17 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		return fmt.Errorf("sync margins to store: %w", err)
 	}
 
-	// Mark status as authenticated if previously unauthenticated or errored
-	if authInfo.AuthStatus != "authenticated" {
-		_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "authenticated", "")
+	// Mark status as authenticated and active, ensuring token expiration is set / preserved
+	expiresAt := authInfo.TokenExpiresAt
+	if expiresAt == nil || !expiresAt.After(time.Now().UTC()) {
+		exp := time.Now().UTC().Add(24 * time.Hour)
+		expiresAt = &exp
+	}
+	if authInfo.AuthStatus != "authenticated" || authInfo.TokenExpiresAt == nil {
+		_ = s.Store.SetAccountAccessToken(ctx, accountID, token, expiresAt, "authenticated", "")
+	}
+	if setter, ok := s.Store.(accountStatusSetter); ok {
+		_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusActive)
 	}
 
 	return nil

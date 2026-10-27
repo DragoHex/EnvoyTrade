@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ type AdminUserStore interface {
 	ListUsers(ctx context.Context, limit, offset int) ([]domain.UserSummary, int, error)
 	CreateUser(ctx context.Context, id uuid.UUID, email, username, name, passwordHash, role string) error
 	GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
-	UpdateUserRoleAndStatus(ctx context.Context, userID uuid.UUID, role string, active *bool) error
+	UpdateUserRoleAndStatus(ctx context.Context, userID uuid.UUID, role string, active *bool, maxIPs *int, brokerIPLimits map[string]int) error
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]domain.Session, error)
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	AccountsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Account, error)
@@ -41,8 +42,10 @@ type createAdminUserRequest struct {
 }
 
 type patchAdminUserRequest struct {
-	Role   *string `json:"role"`
-	Active *bool   `json:"active"`
+	Role           *string        `json:"role"`
+	Active         *bool          `json:"active"`
+	MaxIPs         *int           `json:"maxIPs"`
+	BrokerIPLimits map[string]int `json:"brokerIPLimits"`
 }
 
 // getAdminUsers handles GET /api/v1/admin/users.
@@ -171,12 +174,32 @@ func (h *handlers) patchAdminUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.MaxIPs != nil && *req.MaxIPs < -1 {
+		writeError(w, http.StatusBadRequest, "maxIPs must be -1 (unlimited) or non-negative")
+		return
+	}
+
+	if req.MaxIPs != nil && *req.MaxIPs >= 0 && req.BrokerIPLimits != nil {
+		sum := 0
+		for _, limit := range req.BrokerIPLimits {
+			if limit < 0 {
+				writeError(w, http.StatusBadRequest, "broker IP limits cannot be negative")
+				return
+			}
+			sum += limit
+		}
+		if sum != *req.MaxIPs {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("sum of broker IP limits (%d) does not match total max IPs (%d)", sum, *req.MaxIPs))
+			return
+		}
+	}
+
 	if targetUser.Role == domain.RoleAdmin && req.Active != nil && !*req.Active {
 		writeError(w, http.StatusBadRequest, "admin accounts cannot be suspended")
 		return
 	}
 
-	if err := h.store.UpdateUserRoleAndStatus(r.Context(), userID, roleVal, req.Active); err != nil {
+	if err := h.store.UpdateUserRoleAndStatus(r.Context(), userID, roleVal, req.Active, req.MaxIPs, req.BrokerIPLimits); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return

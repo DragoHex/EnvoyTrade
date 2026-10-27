@@ -4,7 +4,7 @@ import { StatusDot } from './StatusDot'
 
 export function GroupCard(props: {
   detail: GroupDetail
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'pending' | 'syncing' | string
   hasImbalance?: boolean
   imbalancedFollowerIds?: Set<string>
   onToggleCopy: (accountId: string, next: boolean) => Promise<void> | void

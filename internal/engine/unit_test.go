@@ -759,5 +759,80 @@ func TestHandleMasterFill_RecordsExecutionEvent(t *testing.T) {
 	}
 }
 
+func TestHandleMasterFill_SkipsFollowerInPendingOrErrorStatus(t *testing.T) {
+	masterID := uuid.New()
+	followerErrorID := uuid.New()
+	followerPendingID := uuid.New()
+
+	store := newMockEngineStore()
+	store.followLinks = []domain.FollowLink{
+		{
+			FollowerID:     followerErrorID,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromInt(1),
+			Enabled:        true,
+			Status:         "error",
+			AuthStatus:     "error",
+		},
+		{
+			FollowerID:     followerPendingID,
+			MasterID:       masterID,
+			CloneFactor:    decimal.NewFromInt(1),
+			Enabled:        true,
+			Status:         "pending",
+			AuthStatus:     "pending",
+		},
+	}
+
+	dispatcher := &mockDispatcher{}
+	eng := engine.New(store, dispatcher)
+
+	fill := domain.MasterFill{
+		ID:              123,
+		MasterID:        masterID,
+		BrokerOrderID:   "BO123",
+		Tradingsymbol:   "RELIANCE",
+		Exchange:        "NSE",
+		TransactionType: "BUY",
+		OrderType:       "MARKET",
+		Price:           decimal.NewFromInt(2500),
+		FilledQuantity:  50,
+		Status:          "COMPLETE",
+		OrderTimestamp:  time.Now(),
+	}
+
+	if err := eng.HandleMasterFill(context.Background(), fill); err != nil {
+		t.Fatalf("HandleMasterFill failed: %v", err)
+	}
+
+	// Neither follower should be dispatched
+	if len(dispatcher.dispatched) != 0 {
+		t.Fatalf("expected 0 dispatched jobs, got %d", len(dispatcher.dispatched))
+	}
+
+	// Verify both follower orders were inserted as skipped
+	if len(store.insertedOrders) != 2 {
+		t.Fatalf("expected 2 inserted follower orders, got %d", len(store.insertedOrders))
+	}
+
+	for _, o := range store.insertedOrders {
+		if o.FollowerID == followerErrorID {
+			if o.IntendedQty != 0 {
+				t.Errorf("follower in error: intended qty = %d, want 0", o.IntendedQty)
+			}
+			if o.SizingReason != domain.ReasonFollowerInError {
+				t.Errorf("follower in error: sizing reason = %v, want %v", o.SizingReason, domain.ReasonFollowerInError)
+			}
+		} else if o.FollowerID == followerPendingID {
+			if o.IntendedQty != 0 {
+				t.Errorf("follower in pending: intended qty = %d, want 0", o.IntendedQty)
+			}
+			if o.SizingReason != domain.ReasonFollowerPending {
+				t.Errorf("follower in pending: sizing reason = %v, want %v", o.SizingReason, domain.ReasonFollowerPending)
+			}
+		}
+	}
+}
+
 
 

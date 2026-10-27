@@ -50,7 +50,7 @@ func (q *Queries) DeleteFollowLink(ctx context.Context, followerID uuid.UUID) (i
 }
 
 const enabledFollowLinks = `-- name: EnabledFollowLinks :many
-SELECT f.follower_id, g.id AS group_id, g.master_id, f.clone_factor, COALESCE(f.max_qty_per_order, 0) AS max_qty_per_order, f.enabled, f.effective_from
+SELECT f.follower_id, g.id AS group_id, g.master_id, f.clone_factor, COALESCE(f.max_qty_per_order, 0) AS max_qty_per_order, f.enabled, f.effective_from, a.status, a.auth_status
 FROM follow_links f
 JOIN groups g ON g.id = f.group_id
 JOIN accounts a ON a.id = f.follower_id
@@ -65,6 +65,8 @@ type EnabledFollowLinksRow struct {
 	MaxQtyPerOrder int32
 	Enabled        bool
 	EffectiveFrom  pgtype.Timestamptz
+	Status         string
+	AuthStatus     string
 }
 
 func (q *Queries) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([]EnabledFollowLinksRow, error) {
@@ -84,6 +86,8 @@ func (q *Queries) EnabledFollowLinks(ctx context.Context, masterID uuid.UUID) ([
 			&i.MaxQtyPerOrder,
 			&i.Enabled,
 			&i.EffectiveFrom,
+			&i.Status,
+			&i.AuthStatus,
 		); err != nil {
 			return nil, err
 		}

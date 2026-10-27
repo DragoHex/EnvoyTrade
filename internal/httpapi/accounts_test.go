@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -425,6 +426,51 @@ func TestGetAccounts_ReturnsAllAsJSON(t *testing.T) {
 	}
 	if got[0]["masterId"] != nil || got[0]["cloneFactor"] != nil {
 		t.Errorf("master entry should have nil group fields, got %+v", got[0])
+	}
+}
+
+func TestGetAccounts_SanitizesAuthError_HidesBackendAPICalls(t *testing.T) {
+	accID := uuid.New()
+	rawError := "dhan sync failed: get dhan holdings: dhan api error [DH-1111] (HTTP 500): No holdings available"
+	store := &stubStore{accounts: []domain.Account{
+		{
+			ID:              accID,
+			Role:            "master",
+			Broker:          "dhan",
+			BrokerAccountID: "1114425611",
+			Active:          true,
+			Enabled:         true,
+			Status:          "error",
+			AuthStatus:      "error",
+			AuthError:       rawError,
+		},
+	}}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(got))
+	}
+	authErrorVal, ok := got[0]["authError"].(string)
+	if !ok || authErrorVal == "" {
+		t.Fatalf("expected authError string, got %+v", got[0]["authError"])
+	}
+	if authErrorVal != "Broker server temporarily unavailable" {
+		t.Errorf("authError = %q, want %q", authErrorVal, "Broker server temporarily unavailable")
+	}
+	lower := strings.ToLower(authErrorVal)
+	if strings.Contains(lower, "dhan") || strings.Contains(lower, "500") || strings.Contains(lower, "holdings") || strings.Contains(lower, "api") {
+		t.Errorf("authError leaked backend API calls: %q", authErrorVal)
 	}
 }
 
@@ -864,6 +910,15 @@ func TestPostAccount_AllowsDhan(t *testing.T) {
 	if store.setAccessTokenArgs[0].ExpiresAt.Before(time.Now().Add(23 * time.Hour)) {
 		t.Errorf("expected ExpiresAt around 24h in future, got %v", store.setAccessTokenArgs[0].ExpiresAt)
 	}
+	if store.setAccessTokenArgs[0].AuthStatus != "pending" {
+		t.Errorf("setAccessToken AuthStatus = %s, want pending", store.setAccessTokenArgs[0].AuthStatus)
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "pending" {
+		t.Errorf("resp status = %v, want pending", resp["status"])
+	}
 }
 
 func TestPostAccount_BadBroker_Returns400(t *testing.T) {
@@ -1213,6 +1268,83 @@ type stubBrokerEvicter struct {
 
 func (s *stubBrokerEvicter) Evict(id uuid.UUID) {
 	s.evicted = append(s.evicted, id)
+}
+
+func TestPostAccount_QuotaEnforcement(t *testing.T) {
+	testUser := &domain.User{
+		ID:       uuid.New(),
+		Email:    "trader@envoytrade.com",
+		Username: "trader",
+		Role:     domain.RoleUser,
+	}
+
+	// 1. Positive case: Quota OK -> 201 Created
+	t.Run("quota OK", func(t *testing.T) {
+		store := &stubStore{
+			proxyIPs: []domain.ProxyIP{
+				{IPAddress: "192.168.1.100", WhitelistedBrokers: "kite"},
+			},
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+
+		body, _ := json.Marshal(map[string]any{
+			"role": "master", "broker": "kite", "brokerAccountId": "USR001",
+			"apiKey": "key", "apiSecret": "secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		ctx := domain.ContextWithUser(req.Context(), testUser)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body = %s", w.Code, w.Body.String())
+		}
+	})
+
+	// 2. Negative case: Total quota exhausted -> 403 Forbidden
+	t.Run("total quota exhausted", func(t *testing.T) {
+		store := &stubStore{
+			checkAccountQuotaErr: domain.ErrAccountQuotaExceeded,
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+
+		body, _ := json.Marshal(map[string]any{
+			"role": "master", "broker": "kite", "brokerAccountId": "USR002",
+			"apiKey": "key", "apiSecret": "secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		ctx := domain.ContextWithUser(req.Context(), testUser)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+		}
+	})
+
+	// 3. Negative case: Broker quota exhausted -> 403 Forbidden
+	t.Run("broker quota exhausted", func(t *testing.T) {
+		store := &stubStore{
+			checkAccountQuotaErr: domain.ErrBrokerAccountQuotaExceeded,
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+
+		body, _ := json.Marshal(map[string]any{
+			"role": "master", "broker": "kite", "brokerAccountId": "USR003",
+			"apiKey": "key", "apiSecret": "secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		ctx := domain.ContextWithUser(req.Context(), testUser)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+		}
+	})
 }
 
 func TestPatchAccount_CredentialsUpdate_EvictsBroker(t *testing.T) {

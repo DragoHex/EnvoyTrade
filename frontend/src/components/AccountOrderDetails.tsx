@@ -2,6 +2,7 @@ import { createSignal, createResource, createMemo, createEffect, Show, For, onCl
 import { createStore, reconcile } from 'solid-js/store'
 import {
   getAccountOrders,
+  postAction,
   type AccountSummaryMetrics,
   type TabCounts,
   type PaginationInfo,
@@ -17,6 +18,7 @@ import {
   ExitSquareIcon,
   ProhibitIcon,
   DoorExitIcon,
+  SyncIcon,
 } from './icons'
 import { EmptyState } from './EmptyState'
 import { MtmBreakdownPopover } from './MtmBreakdownPopover'
@@ -35,6 +37,7 @@ interface AccountOrderDetailsProps {
   accountName?: string
   brokerAccountId?: string
   onClose?: () => void
+  onEditCredentials?: () => void
   isExpanded?: boolean
   onSummaryChange?: (summary: AccountSummaryMetrics) => void
 }
@@ -122,6 +125,21 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
   const [holdingSortDir, setHoldingSortDir] = createSignal<'asc' | 'desc'>('asc')
   const [isPolling, setIsPolling] = createSignal<boolean>(false)
   const [hasLoaded, setHasLoaded] = createSignal<boolean>(false)
+  const [syncing, setSyncing] = createSignal<boolean>(false)
+  const [syncError, setSyncError] = createSignal<string | null>(null)
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setSyncError(null)
+    try {
+      await postAction(props.accountId, 'sync_positions')
+      await refetch()
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const [store, setStore] = createStore<OrdersStoreState>(createInitialStoreState())
 
@@ -449,19 +467,49 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
           <div class="summary-metric-divider" />
 
           <div class="summary-status-item">
-            <span
-              class={`status-indicator-dot ${
-                summary().status === 'online' || summary().status === 'ok'
-                  ? 'status-dot-online'
-                  : 'status-dot-offline'
-              }`}
-              title={summary().status === 'online' || summary().status === 'ok' ? 'Connected / Online' : 'Offline'}
-            />
-            <span class="status-text capitalize">{summary().status}</span>
+            <Show
+              when={summary().status === 'pending' || summary().status === 'syncing' || syncing()}
+              fallback={
+                <span
+                  class={`status-indicator-dot ${
+                    summary().status === 'online' || summary().status === 'ok'
+                      ? 'status-dot-online'
+                      : 'status-dot-offline'
+                  }`}
+                  title={summary().status === 'online' || summary().status === 'ok' ? 'Connected / Online' : 'Offline'}
+                />
+              }
+            >
+              <span
+                style={{
+                  display: 'inline-flex',
+                  'align-items': 'center',
+                  'justify-content': 'center',
+                  width: '12px',
+                  height: '12px',
+                  color: 'var(--color-accent)',
+                  'vertical-align': 'middle',
+                }}
+                title="Syncing..."
+              >
+                <SyncIcon spinning={true} />
+              </span>
+            </Show>
+            <span class="status-text capitalize">{syncing() ? 'Syncing...' : summary().status}</span>
           </div>
         </div>
 
         <div class="order-header-actions">
+          <button
+            type="button"
+            class="header-action-btn"
+            title="Sync from Kite"
+            aria-label="Sync from Kite"
+            disabled={syncing()}
+            onClick={handleSync}
+          >
+            <SyncIcon spinning={syncing()} />
+          </button>
           <button
             type="button"
             class="header-action-btn"
@@ -480,6 +528,79 @@ export function AccountOrderDetails(props: AccountOrderDetailsProps) {
           </button>
         </div>
       </div>
+
+      <Show when={syncError()}>
+        {(msg) => (
+          <div
+            role="alert"
+            style={{
+              padding: '8px 14px',
+              margin: '10px 16px 0 16px',
+              'background-color': 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid #ef4444',
+              'border-radius': '4px',
+              color: '#ef4444',
+              'font-size': '12px',
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'space-between',
+              gap: '12px',
+            }}
+          >
+            <span>{msg()}</span>
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+              <Show when={props.onEditCredentials}>
+                <button
+                  type="button"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #ef4444',
+                    'border-radius': '3px',
+                    color: '#ef4444',
+                    cursor: 'pointer',
+                    'font-size': '11px',
+                    padding: '2px 8px',
+                  }}
+                  onClick={() => props.onEditCredentials?.()}
+                >
+                  Update Credentials
+                </button>
+              </Show>
+              <button
+                type="button"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #ef4444',
+                  'border-radius': '3px',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  'font-size': '11px',
+                  padding: '2px 8px',
+                }}
+                disabled={syncing()}
+                onClick={handleSync}
+              >
+                Retry Sync
+              </button>
+              <button
+                type="button"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  'font-size': '14px',
+                  padding: '0 4px',
+                }}
+                onClick={() => setSyncError(null)}
+                aria-label="Dismiss error"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
 
       {/* 2. Six Navigation Tabs */}
       <div class="order-drawer-tabs" role="tablist">

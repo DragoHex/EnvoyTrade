@@ -4,6 +4,7 @@ import { Router, Route } from '@solidjs/router'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { AccountsPage } from './AccountsPage'
 import * as api from '../api'
+import * as AuthContextModule from '../context/AuthContext'
 
 function renderPage(initialPath = '/accounts') {
   window.history.pushState({}, '', initialPath)
@@ -328,5 +329,43 @@ describe('AccountsPage', () => {
     expect(await screen.findByText('New Follower')).toBeInTheDocument()
     expect(screen.getByText('Alpha Group')).toBeInTheDocument()
     expect(screen.queryByText('g1')).not.toBeInTheDocument()
+  })
+
+  it('renders top-left account quota donut chart and opens quota breakdown', async () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      user: () => ({
+        id: 'u1',
+        email: 'trader@envoytrade.com',
+        username: 'trader',
+        name: 'Trader',
+        role: 'user',
+        maxIPs: 5,
+        brokerIPLimits: { kite: 3, dhan: 2 },
+      }),
+      isLoading: () => false,
+      isAuthenticated: () => true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refetchUser: vi.fn(),
+      updateProfile: vi.fn(),
+      updatePassword: vi.fn(),
+    })
+    vi.spyOn(api, 'getGroups').mockResolvedValue([])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, follower])
+
+    renderPage()
+
+    expect(await screen.findByText('2 / 5')).toBeInTheDocument()
+    expect(screen.getAllByText('Accounts').length).toBeGreaterThan(0)
+
+    const triggerBtn = screen.getByRole('button', { name: /View Account Quota/i })
+    await userEvent.click(triggerBtn)
+
+    expect(await screen.findByRole('dialog', { name: /Account Quota Breakdown/i })).toBeInTheDocument()
+    expect(screen.getByText('Zerodha Kite')).toBeInTheDocument()
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(screen.getByText('Dhan')).toBeInTheDocument()
+    expect(screen.getByText('0 / 2')).toBeInTheDocument()
   })
 })

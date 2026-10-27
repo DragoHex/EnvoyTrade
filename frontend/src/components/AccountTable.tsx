@@ -7,7 +7,7 @@ export function AccountTable(props: {
     masterId: string
     name?: string
     brokerAccountId: string
-    status: 'ok' | 'error'
+    status: 'ok' | 'error' | 'pending' | 'syncing' | string
     active: boolean
     netQty?: number
     openPositionsCount?: number

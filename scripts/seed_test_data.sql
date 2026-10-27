@@ -34,7 +34,7 @@ VALUES
   ('148.113.41.47', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u7', 'mock_p7', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.48', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u8', 'mock_p8', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.49', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u9', 'mock_p9', 'TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
-  ('148.113.41.50', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u10', 'mock_p10', 'Dhan', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
+  ('148.113.41.50', 'ipv4', 'dc46-mum-01.algoip.in', 443, 'mock_u10', 'mock_p10', 'Dhan, TestBroker', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.51', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u11', 'mock_p11', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.52', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u12', 'mock_p12', 'Zerodha', now() - interval '1 day', now() + interval '90 days', 'QUARTERLY'),
   ('148.113.41.53', 'ipv4', 'dc46-mum-02.algoip.in', 443, 'mock_u13', 'mock_p13', 'Zerodha', now() - interval '1 day', now() + interval '30 days', 'MONTHLY'),

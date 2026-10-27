@@ -1,5 +1,5 @@
 import { createEffect, createResource, createSignal, Index, onCleanup, Show } from 'solid-js'
-import { useParams, A } from '@solidjs/router'
+import { useParams, useLocation, A } from '@solidjs/router'
 import {
   getGroupDetail,
   getAccounts,
@@ -18,7 +18,10 @@ import { StatusDot } from '../components/StatusDot'
 import { CopyToggle } from '../components/CopyToggle'
 import { UserMinusIcon } from '../components/icons'
 import { RoleIcon } from '../components/RoleIcon'
+import { BrokerLogo } from '../components/BrokerLogo'
 import { ThemedSelect } from '../components/ThemedSelect'
+import { ThemedNumberInput } from '../components/ThemedNumberInput'
+
 
 const TOAST_DISMISS_MS = 4000
 
@@ -27,12 +30,16 @@ const TOAST_DISMISS_MS = 4000
 // follower, or edit group name and swap master account.
 export function GroupManagePage() {
   const params = useParams<{ masterId: string }>()
+  const location = useLocation<{ name?: string }>()
   const [detail, { mutate: mutateDetail, refetch: refetchDetail }] = createResource(
     () => params.masterId,
     getGroupDetail
   )
   const [members, setMembers] = createSignal<Account[]>()
   const [allAccounts, { mutate: mutateAll, refetch: refetchAll }] = createResource(() => getAccounts())
+
+  const initialName = () => location.state?.name
+  const groupTitle = () => detail()?.name || initialName() || detail()?.masterAccountId || masterAccount()?.brokerAccountId
 
   const loadMembersForGroup = async (d: { masterId: string; followers: { accountId: string }[] }) => {
     const ids = [d.masterId, ...d.followers.map((f) => f.accountId)]
@@ -78,39 +85,77 @@ export function GroupManagePage() {
   }
 
   const handleToggleActive = async (a: Account, next: boolean) => {
+    // Save previous state for rollback
+    const prevMembers = members()
+    const prevDetail = detail()
+
+    // 1. Optimistic update: immediately update members and detail
+    setMembers((prev) =>
+      prev?.map((m) =>
+        m.id === a.id
+          ? a.role === 'master'
+            ? { ...m, active: next }
+            : { ...m, enabled: next }
+          : m,
+      ),
+    )
+    mutateDetail((prev) => {
+      if (!prev) return prev
+      if (a.role === 'master') {
+        return { ...prev, masterActive: next }
+      }
+      return {
+        ...prev,
+        followers: prev.followers.map((f) =>
+          f.accountId === a.id ? { ...f, enabled: next } : f,
+        ),
+      }
+    })
+
     setTogglingId(a.id)
     try {
       if (a.role === 'master') {
         await patchAccount(a.id, { active: next })
-        const updated = await getAccount(a.id)
-        setMembers((prev) => prev?.map((m) => (m.id === a.id ? updated : m)))
-        mutateAll((prev) => prev?.map((acc) => (acc.id === a.id ? updated : acc)))
-        mutateDetail((prev) => (prev ? { ...prev, masterActive: updated.active } : prev))
+        try {
+          const updated = await getAccount(a.id)
+          setMembers((prev) => prev?.map((m) => (m.id === a.id ? updated : m)))
+          mutateAll((prev) => prev?.map((acc) => (acc.id === a.id ? updated : acc)))
+          mutateDetail((prev) => (prev ? { ...prev, masterActive: updated.active } : prev))
+        } catch {
+          // If secondary getAccount fails, optimistic state is preserved
+        }
         showToast({
           kind: 'success',
           message: `Master ${next ? 'activated' : 'deactivated'} successfully.`,
         })
       } else {
         await patchAccount(a.id, { enabled: next })
-        const updated = await getAccount(a.id)
-        setMembers((prev) => prev?.map((m) => (m.id === a.id ? updated : m)))
-        mutateAll((prev) => prev?.map((acc) => (acc.id === a.id ? updated : acc)))
-        mutateDetail((prev) =>
-          prev
-            ? {
-                ...prev,
-                followers: prev.followers.map((f) =>
-                  f.accountId === a.id ? { ...f, enabled: updated.enabled } : f,
-                ),
-              }
-            : prev,
-        )
+        try {
+          const updated = await getAccount(a.id)
+          setMembers((prev) => prev?.map((m) => (m.id === a.id ? updated : m)))
+          mutateAll((prev) => prev?.map((acc) => (acc.id === a.id ? updated : acc)))
+          mutateDetail((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  followers: prev.followers.map((f) =>
+                    f.accountId === a.id ? { ...f, enabled: updated.enabled } : f,
+                  ),
+                }
+              : prev,
+          )
+        } catch {
+          // If secondary getAccount fails, optimistic state is preserved
+        }
         showToast({
           kind: 'success',
           message: `Follower ${next ? 'enabled' : 'disabled'} successfully.`,
         })
       }
     } catch (e) {
+      // Revert optimistic update
+      setMembers(prevMembers)
+      mutateDetail(prevDetail)
       showToast({
         kind: 'error',
         message: e instanceof Error ? e.message : 'State update failed.',
@@ -154,38 +199,112 @@ export function GroupManagePage() {
     e.preventDefault()
     setSubmittingAdd(true)
     const accountId = selectedAccountId()
-    try {
-      const groupId = detail()?.id || params.masterId
-      await addAccountToGroup(groupId, {
-        accountId,
-        cloneFactor: cloneFactor() || '1',
-        maxQtyPerOrder: maxQtyPerOrder() === '' ? undefined : Number(maxQtyPerOrder()),
+    const target = allAccounts()?.find((a) => a.id === accountId)
+    const cf = cloneFactor() || '1'
+    const maxQty = maxQtyPerOrder() === '' ? undefined : Number(maxQtyPerOrder())
+
+    const optimisticFollower: Account | undefined = target
+      ? {
+          ...target,
+          groupId: detail()?.id || params.masterId,
+          masterId: detail()?.masterId || params.masterId,
+          cloneFactor: cf,
+          maxQtyPerOrder: maxQty ?? null,
+          enabled: true,
+          active: true,
+        }
+      : undefined
+
+    const prevMembers = members()
+    const prevDetail = detail()
+    const prevAll = allAccounts()
+
+    if (optimisticFollower) {
+      setMembers((prev) => {
+        if (!prev) return [optimisticFollower]
+        const master = prev.find((m) => m.role === 'master')
+        const followers = [
+          ...prev.filter((m) => m.role !== 'master' && m.id !== optimisticFollower.id),
+          optimisticFollower,
+        ].sort((a, b) =>
+          (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+        )
+        return master ? [master, ...followers] : followers
       })
-      const added = await getAccount(accountId)
-      setMembers((prev) => (prev ? [...prev, added] : [added]))
       mutateDetail((prev) =>
         prev
           ? {
               ...prev,
               followers: [
-                ...prev.followers,
+                ...prev.followers.filter((f) => f.accountId !== optimisticFollower.id),
                 {
-                  accountId: added.id,
-                  name: added.name,
-                  brokerAccountId: added.brokerAccountId,
-                  enabled: added.enabled,
-                  status: added.status as any,
+                  accountId: optimisticFollower.id,
+                  name: optimisticFollower.name,
+                  brokerAccountId: optimisticFollower.brokerAccountId,
+                  enabled: true,
+                  status: optimisticFollower.status as any,
                 },
               ],
             }
           : prev,
       )
-      mutateAll((prev) => prev?.map((acc) => (acc.id === added.id ? added : acc)))
+      mutateAll((prev) => prev?.map((acc) => (acc.id === optimisticFollower.id ? optimisticFollower : acc)))
       setSelectedAccountId('')
       setCloneFactor('1')
       setMaxQtyPerOrder('')
+    }
+
+    try {
+      const groupId = detail()?.id || params.masterId
+      await addAccountToGroup(groupId, {
+        accountId,
+        cloneFactor: cf,
+        maxQtyPerOrder: maxQty,
+      })
+      try {
+        const added = await getAccount(accountId)
+        setMembers((prev) => {
+          if (!prev) return [added]
+          const master = prev.find((m) => m.role === 'master')
+          const followers = [
+            ...prev.filter((m) => m.role !== 'master' && m.id !== added.id),
+            added,
+          ].sort((a, b) =>
+            (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
+          )
+          return master ? [master, ...followers] : followers
+        })
+        mutateDetail((prev) =>
+          prev
+            ? {
+                ...prev,
+                followers: [
+                  ...prev.followers.filter((f) => f.accountId !== added.id),
+                  {
+                    accountId: added.id,
+                    name: added.name,
+                    brokerAccountId: added.brokerAccountId,
+                    enabled: added.enabled,
+                    status: added.status as any,
+                  },
+                ],
+              }
+            : prev,
+        )
+        mutateAll((prev) => prev?.map((acc) => (acc.id === added.id ? added : acc)))
+      } catch {
+        // If secondary getAccount fails, optimistic follower is already applied
+      }
       showToast({ kind: 'success', message: 'Follower added to group successfully.' })
     } catch (err) {
+      if (optimisticFollower) {
+        setMembers(prevMembers)
+        mutateDetail(prevDetail)
+        mutateAll(prevAll)
+        setSelectedAccountId(accountId)
+        setCloneFactor(cf)
+        setMaxQtyPerOrder(maxQty != null ? String(maxQty) : '')
+      }
       showToast({
         kind: 'error',
         message: err instanceof Error ? err.message : 'Failed to add follower to group.',
@@ -231,13 +350,16 @@ export function GroupManagePage() {
         <div class="group-title-row" style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between' }}>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '0.75rem' }}>
             <h1>
-              Group: {detail()?.name || detail()?.masterAccountId || masterAccount()?.brokerAccountId || params.masterId}
+              Group:{' '}
+              <Show when={groupTitle()} fallback={<span class="skeleton-bar group-title-skeleton" aria-label="Loading group name" />}>
+                {groupTitle()}
+              </Show>
             </h1>
             <Show when={masterAccount()}>
               {(m) => <StatusDot status={m().status} />}
             </Show>
           </div>
-          <button type="button" class="btn-primary" onClick={() => setEditModalOpen(true)}>
+          <button type="button" class="btn-primary" disabled={!detail()} onClick={() => setEditModalOpen(true)}>
             Edit Group
           </button>
         </div>
@@ -254,6 +376,7 @@ export function GroupManagePage() {
                     <th class="col-toggle"></th>
                     <th class="col-name">Name</th>
                     <th class="col-broker-id">Broker User ID</th>
+                    <th class="col-broker">Broker</th>
                     <th class="col-role">Role</th>
                     <th class="col-clone-factor">Clone Factor</th>
                     <th class="col-max-qty">Max Qty/Order</th>
@@ -264,26 +387,22 @@ export function GroupManagePage() {
                 <tbody>
                   <Index each={ms()}>
                     {(a) => (
-                      <tr>
+                      <tr data-disabled={a().role === 'master' ? !a().active : !a().enabled}>
                         <td class="col-toggle">
                           <CopyToggle
                             enabled={a().role === 'master' ? a().active : a().enabled}
                             disabled={togglingId() === a().id}
                             ariaLabel={`Toggle active for ${a().name || a().brokerAccountId}`}
-                            title={
-                              a().role === 'master'
-                                ? a().active
-                                  ? 'Active — click to deactivate'
-                                  : 'Inactive — click to activate'
-                                : a().enabled
-                                  ? 'Enabled — click to disable'
-                                  : 'Disabled — click to enable'
-                            }
                             onToggle={(next) => handleToggleActive(a(), next)}
                           />
                         </td>
                         <td class="col-name">{a().name || '—'}</td>
                         <td class="col-broker-id">{a().brokerAccountId}</td>
+                        <td class="col-broker">
+                          <span class="broker-cell-centered">
+                            <BrokerLogo broker={a().broker} />
+                          </span>
+                        </td>
                         <td class="col-role">
                           <span class="role-cell-centered">
                             <RoleIcon role={a().role} />
@@ -317,6 +436,11 @@ export function GroupManagePage() {
                   </Index>
                 </tbody>
               </table>
+              <Show when={members() && members()!.length === 1}>
+                <div class="group-empty-followers-note">
+                  No follower accounts attached to this group yet. Use the form below to add one.
+                </div>
+              </Show>
             </div>
           )}
         </Show>
@@ -331,22 +455,27 @@ export function GroupManagePage() {
               aria-label="Account"
               value={selectedAccountId()}
               placeholder="Select an Account"
-              disabled={unattachedFollowers().length === 0}
+              disabled={allAccounts.loading || unattachedFollowers().length === 0}
               onChange={(val) => setSelectedAccountId(val)}
               required
               options={
-                unattachedFollowers().length === 0
-                  ? [{ value: '', label: 'no unassigned follower accounts available', disabled: true }]
-                  : unattachedFollowers().map((a) => ({
-                      value: a.id,
-                      label: a.name ? `${a.name} (${a.brokerAccountId})` : a.brokerAccountId,
-                    }))
+                allAccounts.loading
+                  ? [{ value: '', label: 'Loading accounts...', disabled: true }]
+                  : unattachedFollowers().length === 0
+                    ? [{ value: '', label: 'No unassigned follower accounts available', disabled: true }]
+                    : unattachedFollowers().map((a) => ({
+                        value: a.id,
+                        label: a.name ? `${a.name} (${a.brokerAccountId})` : a.brokerAccountId,
+                      }))
               }
             />
           </label>
           <label>
             Clone Factor
-            <input
+            <ThemedNumberInput
+              aria-label="Clone Factor"
+              step="any"
+              min="0.01"
               value={cloneFactor()}
               placeholder="e.g. 1.0"
               required
@@ -355,7 +484,10 @@ export function GroupManagePage() {
           </label>
           <label>
             Max Qty/Order
-            <input
+            <ThemedNumberInput
+              aria-label="Max Qty/Order"
+              step="1"
+              min="1"
               value={maxQtyPerOrder()}
               placeholder="optional cap"
               onInput={(e) => setMaxQtyPerOrder(e.currentTarget.value)}

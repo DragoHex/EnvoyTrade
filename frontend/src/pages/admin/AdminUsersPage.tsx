@@ -13,6 +13,10 @@ import {
 import { SyncIcon, EditIcon, LogoutIcon } from '../../components/icons'
 import { Skeleton } from '../../components/Skeleton'
 import { ThemedSelect } from '../../components/ThemedSelect'
+import { ThemedNumberInput } from '../../components/ThemedNumberInput'
+import { useAuth } from '../../context/AuthContext'
+import { useEscapeKey } from '../../utils/useEscapeKey'
+
 
 export function AdminUsersPage() {
   const [users, setUsers] = createSignal<UserSummary[]>([])
@@ -83,6 +87,8 @@ export function AdminUsersPage() {
   const [roleModalOpen, setRoleModalOpen] = createSignal(false)
   const [selectedUser, setSelectedUser] = createSignal<UserSummary | null>(null)
   const [selectedRole, setSelectedRole] = createSignal('user')
+  const [editMaxIPs, setEditMaxIPs] = createSignal<number>(0)
+  const [editBrokerLimits, setEditBrokerLimits] = createSignal<Record<string, number>>({})
   const [roleSubmitting, setRoleSubmitting] = createSignal(false)
 
   // Reset Password Modal state
@@ -99,6 +105,32 @@ export function AdminUsersPage() {
   const [sessionsList, setSessionsList] = createSignal<Session[]>([])
   const [sessionsLoading, setSessionsLoading] = createSignal(false)
   const [revokeSubmitting, setRevokeSubmitting] = createSignal(false)
+
+  // Escape key handlers for admin user modals
+  useEscapeKey({
+    enabled: createModalOpen,
+    canDismiss: () => !createSubmitting(),
+    onEscape: () => setCreateModalOpen(false),
+  })
+
+  useEscapeKey({
+    enabled: roleModalOpen,
+    canDismiss: () => !roleSubmitting(),
+    onEscape: () => setRoleModalOpen(false),
+  })
+
+  useEscapeKey({
+    enabled: resetModalOpen,
+    canDismiss: () => !passwordSubmitting(),
+    onEscape: () => setResetModalOpen(false),
+  })
+
+  useEscapeKey({
+    enabled: sessionsModalOpen,
+    canDismiss: () => !revokeSubmitting(),
+    onEscape: () => setSessionsModalOpen(false),
+  })
+
 
   const [lastUpdated, setLastUpdated] = createSignal<string>('')
 
@@ -158,27 +190,64 @@ export function AdminUsersPage() {
     }
   }
 
-  // Edit role
+  // Edit role & allowed IPs
   const openRoleModal = (u: UserSummary) => {
     setSelectedUser(u)
     setSelectedRole(u.role)
+    setEditMaxIPs(u.maxIPs ?? 0)
+    setEditBrokerLimits({ ...(u.brokerIPLimits ?? {}) })
     setRoleModalOpen(true)
   }
 
+  const brokerLimitsSum = createMemo(() => {
+    const limits = editBrokerLimits()
+    return Object.values(limits).reduce((sum, val) => sum + (Number(val) || 0), 0)
+  })
+
+  const isBrokerSumMismatch = createMemo(() => {
+    const total = editMaxIPs()
+    if (total === -1) return false
+    return brokerLimitsSum() !== total
+  })
+
   const handleRoleSubmit = async (e: Event) => {
     e.preventDefault()
-    if (!selectedUser()) return
+    if (!selectedUser() || isBrokerSumMismatch()) return
     setRoleSubmitting(true)
     try {
-      await patchAdminUser(selectedUser()!.id, { role: selectedRole() })
+      const limits = { ...editBrokerLimits() }
+      const cleanedLimits: Record<string, number> = {}
+      for (const [k, v] of Object.entries(limits)) {
+        if (v > 0) cleanedLimits[k] = v
+      }
+      await patchAdminUser(selectedUser()!.id, {
+        role: selectedRole(),
+        maxIPs: editMaxIPs(),
+        brokerIPLimits: cleanedLimits,
+      })
       setUsers((prev) =>
         prev.map((item) =>
-          item.id === selectedUser()!.id ? { ...item, role: selectedRole() } : item,
+          item.id === selectedUser()!.id
+            ? {
+                ...item,
+                role: selectedRole(),
+                maxIPs: editMaxIPs(),
+                brokerIPLimits: cleanedLimits,
+              }
+            : item,
         ),
       )
+      try {
+        const auth = useAuth()
+        if (auth?.user()?.id === selectedUser()!.id) {
+          auth.refetchUser()
+        }
+      } catch {
+        // ignore
+      }
       setRoleModalOpen(false)
     } catch (err: any) {
-      setError(err?.message || 'Failed to change user role')
+      setError(err?.message || 'Failed to update user')
     } finally {
       setRoleSubmitting(false)
     }
@@ -477,7 +546,7 @@ export function AdminUsersPage() {
                               type="button"
                               class="icon-button"
                               onClick={() => openRoleModal(u)}
-                              aria-label="Edit Platform Role"
+                              aria-label="Edit User"
                             >
                               <EditIcon />
                             </button>
@@ -639,12 +708,12 @@ export function AdminUsersPage() {
         </div>
       </Show>
 
-      {/* Edit Role Modal */}
+      {/* Edit User Modal */}
       <Show when={roleModalOpen() && selectedUser()}>
-        <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Edit User Role">
+        <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Edit User">
           <div class="modal-card">
             <div class="modal-header-row">
-              <h3>Edit Role: {selectedUser()!.username}</h3>
+              <h3>Edit User: {selectedUser()!.username}</h3>
               <button
                 type="button"
                 onClick={() => setRoleModalOpen(false)}
@@ -655,6 +724,96 @@ export function AdminUsersPage() {
             </div>
             <form onSubmit={handleRoleSubmit}>
               <div class="modal-body">
+                {/* 1. Total Allowed IPs */}
+                <div style={{ 'margin-bottom': '0.85rem' }}>
+                  <label for="edit-total-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
+                    Total Allowed IPs (-1 = unlimited, 0 = no allocation)
+                  </label>
+                  <ThemedNumberInput
+                    id="edit-total-ips"
+                    aria-label="Total Allowed IPs"
+                    min="-1"
+                    value={editMaxIPs()}
+                    error={isBrokerSumMismatch()}
+                    onInput={(e) => {
+                      const v = parseInt(e.currentTarget.value)
+                      setEditMaxIPs(isNaN(v) ? 0 : Math.max(-1, v))
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '0.5rem',
+                      border: isBrokerSumMismatch() ? '1px solid var(--color-error, #ef4444)' : '1px solid var(--color-border)',
+                      'border-radius': '6px',
+                      background: 'var(--color-surface)',
+                      color: isBrokerSumMismatch() ? 'var(--color-error, #ef4444)' : 'var(--color-text)',
+                      'box-sizing': 'border-box',
+                    }}
+                  />
+                  <Show when={isBrokerSumMismatch()}>
+                    <div style={{ color: 'var(--color-error, #ef4444)', 'font-size': '0.75rem', 'margin-top': '0.25rem' }}>
+                      Sum of broker accounts ({brokerLimitsSum()}) must match total ({editMaxIPs()})
+                    </div>
+                  </Show>
+                </div>
+
+                {/* 2. Broker & Generalist Allowed IPs */}
+                <div style={{ 'margin-bottom': '0.85rem' }}>
+                  <label for="edit-general-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
+                    Generalist (Unrestricted) Allowed IPs
+                  </label>
+                  <ThemedNumberInput
+                    id="edit-general-ips"
+                    aria-label="Generalist Allowed IPs"
+                    min="0"
+                    value={editBrokerLimits()['general'] ?? 0}
+                    onInput={(e) => setEditBrokerLimits({ ...editBrokerLimits(), general: Math.max(0, parseInt(e.currentTarget.value) || 0) })}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ 'margin-bottom': '0.85rem' }}>
+                  <label for="edit-kite-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
+                    Zerodha Kite Allowed IPs
+                  </label>
+                  <ThemedNumberInput
+                    id="edit-kite-ips"
+                    aria-label="Zerodha Kite Allowed IPs"
+                    min="0"
+                    value={editBrokerLimits()['kite'] ?? 0}
+                    onInput={(e) => setEditBrokerLimits({ ...editBrokerLimits(), kite: Math.max(0, parseInt(e.currentTarget.value) || 0) })}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ 'margin-bottom': '0.85rem' }}>
+                  <label for="edit-dhan-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
+                    Dhan Allowed IPs
+                  </label>
+                  <ThemedNumberInput
+                    id="edit-dhan-ips"
+                    aria-label="Dhan Allowed IPs"
+                    min="0"
+                    value={editBrokerLimits()['dhan'] ?? 0}
+                    onInput={(e) => setEditBrokerLimits({ ...editBrokerLimits(), dhan: Math.max(0, parseInt(e.currentTarget.value) || 0) })}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ 'margin-bottom': '0.85rem' }}>
+                  <label for="edit-testbroker-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
+                    Test Broker (Mock) Allowed IPs
+                  </label>
+                  <ThemedNumberInput
+                    id="edit-testbroker-ips"
+                    aria-label="Test Broker Allowed IPs"
+                    min="0"
+                    value={editBrokerLimits()['testbroker'] ?? 0}
+                    onInput={(e) => setEditBrokerLimits({ ...editBrokerLimits(), testbroker: Math.max(0, parseInt(e.currentTarget.value) || 0) })}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
+                  />
+                </div>
+
+                {/* 3. Role */}
                 <div>
                   <label style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
                     Role
@@ -682,9 +841,9 @@ export function AdminUsersPage() {
                 <button
                   type="submit"
                   class="btn-primary"
-                  disabled={roleSubmitting()}
+                  disabled={roleSubmitting() || isBrokerSumMismatch()}
                 >
-                  {roleSubmitting() ? 'Updating...' : 'Save Role'}
+                  {roleSubmitting() ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </form>

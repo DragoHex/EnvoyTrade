@@ -255,4 +255,24 @@ describe('AccountsTable', () => {
 
     expect(postActionSpy).toHaveBeenCalledWith(follower.id, 'sync_positions')
   })
+
+  it('clicking error status dot triggers onEdit callback', async () => {
+    const onEditSpy = vi.fn()
+    const errorAccount: api.Account = {
+      ...follower,
+      status: 'error',
+      authStatus: 'error',
+      authError: 'Session expired',
+    }
+
+    render(() => (
+      <AccountsTable accounts={[errorAccount]} onEdit={onEditSpy} />
+    ))
+
+    const statusCell = screen.getByTitle('Session expired (click to edit)')
+    expect(statusCell).toBeInTheDocument()
+
+    await userEvent.click(statusCell)
+    expect(onEditSpy).toHaveBeenCalledWith(errorAccount)
+  })
 })
