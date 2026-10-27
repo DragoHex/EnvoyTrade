@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@solidjs/testing-library'
+import { render, screen, waitFor, within, fireEvent } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { Router, Route } from '@solidjs/router'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -639,4 +639,43 @@ describe('GroupManagePage', () => {
 
     expect(screen.getByText(/no follower accounts attached to this group yet/i)).toBeInTheDocument()
   })
+
+  it('increments and decrements clone factor and max qty using themed counter steppers', async () => {
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [],
+    })
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, unattached])
+
+    renderPage()
+    await screen.findByText('ZX1234')
+
+    const cloneInput = screen.getByLabelText('Clone Factor') as HTMLInputElement
+    expect(cloneInput.value).toBe('1')
+
+    const cloneWrapper = cloneInput.closest('.themed-number-wrapper')!
+    const cloneIncBtn = cloneWrapper.querySelector('.themed-number-btn-up') as HTMLButtonElement
+    const cloneDecBtn = cloneWrapper.querySelector('.themed-number-btn-down') as HTMLButtonElement
+
+    fireEvent.click(cloneIncBtn)
+    expect(cloneInput.value).toBe('1.1')
+
+    fireEvent.click(cloneDecBtn)
+    expect(cloneInput.value).toBe('1')
+
+    const qtyInput = screen.getByLabelText('Max Qty/Order') as HTMLInputElement
+    const qtyWrapper = qtyInput.closest('.themed-number-wrapper')!
+    const qtyIncBtn = qtyWrapper.querySelector('.themed-number-btn-up') as HTMLButtonElement
+
+    fireEvent.click(qtyIncBtn)
+    expect(qtyInput.value).toBe('1')
+
+    fireEvent.click(qtyIncBtn)
+    expect(qtyInput.value).toBe('2')
+  })
 })
+

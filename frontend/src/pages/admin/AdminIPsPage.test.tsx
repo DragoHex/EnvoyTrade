@@ -755,5 +755,86 @@ describe('AdminIPsPage', () => {
     const editBrokerSelect = screen.getByLabelText(/^Whitelisted Brokers$/i) as HTMLSelectElement
     expect(editBrokerSelect.value).toBe('Zerodha, TestBroker')
   })
+
+  it('closes bulk ingest modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminProxyIPs').mockResolvedValue(mockIPsResponse)
+    renderIPsPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('148.113.41.42')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Bulk Ingest$/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Bulk Ingest Proxy IPs/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Bulk Ingest Proxy IPs/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes edit modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminProxyIPs').mockResolvedValue(mockIPsResponse)
+    renderIPsPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('148.113.41.42')).toBeInTheDocument()
+    })
+
+    const editBtns = screen.getAllByRole('button', { name: /Edit \/ Renew IP/i })
+    fireEvent.click(editBtns[0])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Edit Proxy IP/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Edit Proxy IP/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes delete confirm modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminProxyIPs').mockResolvedValue(mockIPsResponse)
+    renderIPsPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('148.113.41.42')).toBeInTheDocument()
+    })
+
+    const deleteBtns = screen.getAllByRole('button', { name: /Delete IP/i })
+    fireEvent.click(deleteBtns[0])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Confirm Delete/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Confirm Delete/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes add single IP modal on Escape key', async () => {
+    vi.spyOn(api, 'getAdminProxyIPs').mockResolvedValue(mockIPsResponse)
+    renderIPsPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('148.113.41.42')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /\+ Add IP/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Add Proxy IP/i })).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Add Proxy IP/i })).not.toBeInTheDocument()
+    })
+  })
 })
+
 

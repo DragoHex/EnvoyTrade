@@ -3,6 +3,7 @@ import { AdminLayout } from './AdminLayout'
 import { getAdminServiceStatus, postAdminKillSwitch, type PipelineStatus } from '../../api'
 import { SyncIcon } from '../../components/icons'
 import { Skeleton } from '../../components/Skeleton'
+import { useEscapeKey } from '../../utils/useEscapeKey'
 
 export function AdminStatusPage() {
   const [status, setStatus] = createSignal<PipelineStatus | null>(null)
@@ -16,6 +17,12 @@ export function AdminStatusPage() {
   const [killActionEngage, setKillActionEngage] = createSignal(true)
   const [killReason, setKillReason] = createSignal('')
   const [killSubmitting, setKillSubmitting] = createSignal(false)
+
+  useEscapeKey({
+    enabled: killModalOpen,
+    canDismiss: () => !killSubmitting(),
+    onEscape: () => setKillModalOpen(false),
+  })
 
   const loadStatus = async (isManual = false) => {
     if (isManual) {

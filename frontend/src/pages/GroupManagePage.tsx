@@ -20,6 +20,8 @@ import { UserMinusIcon } from '../components/icons'
 import { RoleIcon } from '../components/RoleIcon'
 import { BrokerLogo } from '../components/BrokerLogo'
 import { ThemedSelect } from '../components/ThemedSelect'
+import { ThemedNumberInput } from '../components/ThemedNumberInput'
+
 
 const TOAST_DISMISS_MS = 4000
 
@@ -470,8 +472,8 @@ export function GroupManagePage() {
           </label>
           <label>
             Clone Factor
-            <input
-              type="number"
+            <ThemedNumberInput
+              aria-label="Clone Factor"
               step="any"
               min="0.01"
               value={cloneFactor()}
@@ -482,8 +484,8 @@ export function GroupManagePage() {
           </label>
           <label>
             Max Qty/Order
-            <input
-              type="number"
+            <ThemedNumberInput
+              aria-label="Max Qty/Order"
               step="1"
               min="1"
               value={maxQtyPerOrder()}

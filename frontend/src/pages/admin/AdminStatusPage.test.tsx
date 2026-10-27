@@ -105,6 +105,26 @@ describe('AdminStatusPage', () => {
       expect(postKillSpy).toHaveBeenCalledWith(true, 'Circuit breaker volatility')
     })
   })
+
+  it('closes kill switch modal when Escape key is pressed', async () => {
+    vi.spyOn(api, 'getAdminServiceStatus').mockResolvedValue(mockStatus)
+
+    renderStatusPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('Engage Kill Switch')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Engage Kill Switch'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    // Press Escape
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
 })
 
 
