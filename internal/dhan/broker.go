@@ -45,14 +45,8 @@ func NewBroker(api API, proxied bool, resolver *InstrumentResolver) *Broker {
 
 // NewLiveBroker constructs a live Dhan Broker client with optional static proxy routing.
 func NewLiveBroker(clientID, accessToken string, proxyCfg *ProxyConfig, resolver *InstrumentResolver) (*Broker, error) {
-	opts := []godhan.Option{}
-	proxied := false
-
-	if proxyCfg != nil && proxyCfg.Host != "" {
-		opts = append(opts, godhan.WithProxy(*proxyCfg))
-		proxied = true
-	}
-
+	opts := BuildClientOptions(proxyCfg)
+	proxied := proxyCfg != nil && proxyCfg.Host != ""
 	client := godhan.NewClient(clientID, accessToken, opts...)
 	return NewBroker(client, proxied, resolver), nil
 }
