@@ -758,6 +758,10 @@ tr[data-testid='master-row'] td {
 .group-add-form .themed-select-container {
   min-width: 220px;
 }
+.group-add-form .themed-number-wrapper {
+  min-width: 160px;
+}
+
 
 /* Account Detail Drawer */
 .drawer-overlay {
@@ -3500,6 +3504,89 @@ nav a.user-badge-link.active:hover,
     font-size: 1.5rem !important;
   }
 }
+
+/* 13. Themed Number Counter / Stepper Inputs */
+.themed-number-input::-webkit-outer-spin-button,
+.themed-number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.themed-number-input {
+  -moz-appearance: textfield;
+}
+
+.themed-number-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+}
+
+.themed-number-input {
+  width: 100%;
+  padding-right: 1.85rem !important;
+  box-sizing: border-box;
+}
+
+.themed-number-steppers {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 8px);
+  width: 18px;
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+  pointer-events: none;
+  justify-content: center;
+  gap: 1px;
+}
+
+.themed-number-wrapper:hover .themed-number-steppers,
+.themed-number-wrapper:focus-within .themed-number-steppers {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.themed-number-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.themed-number-btn:hover:not(:disabled) {
+  background: var(--color-border);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.themed-number-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.themed-number-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.themed-number-input--error {
+  border-color: var(--color-error, #ef4444) !important;
+  color: var(--color-error, #ef4444) !important;
+}
+
 
 
 
