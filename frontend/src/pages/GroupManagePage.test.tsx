@@ -103,6 +103,10 @@ describe('GroupManagePage', () => {
     expect(toggles).toHaveLength(2)
     expect(toggles[0]).toBeChecked()
     expect(toggles[1]).toBeChecked()
+    expect(toggles[0].closest('label')).not.toHaveAttribute('title')
+    expect(toggles[0].closest('label')).not.toHaveAttribute('data-tooltip')
+    expect(toggles[1].closest('label')).not.toHaveAttribute('title')
+    expect(toggles[1].closest('label')).not.toHaveAttribute('data-tooltip')
   })
 
   it('toggling active on follower calls patchAccount with targeted getAccount update', async () => {

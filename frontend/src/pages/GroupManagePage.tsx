@@ -391,15 +391,6 @@ export function GroupManagePage() {
                             enabled={a().role === 'master' ? a().active : a().enabled}
                             disabled={togglingId() === a().id}
                             ariaLabel={`Toggle active for ${a().name || a().brokerAccountId}`}
-                            title={
-                              a().role === 'master'
-                                ? a().active
-                                  ? 'Active — click to deactivate'
-                                  : 'Inactive — click to activate'
-                                : a().enabled
-                                  ? 'Enabled — click to disable'
-                                  : 'Disabled — click to enable'
-                            }
                             onToggle={(next) => handleToggleActive(a(), next)}
                           />
                         </td>

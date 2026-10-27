@@ -129,6 +129,7 @@ describe('AccountDetailDrawer', () => {
     ))
 
     expect(screen.getByLabelText('Role')).toBeDisabled()
+    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
 
     await userEvent.clear(screen.getByLabelText('Clone Factor'))
     await userEvent.type(screen.getByLabelText('Clone Factor'), '0.75')

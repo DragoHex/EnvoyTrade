@@ -60,7 +60,6 @@ export function AccountDetailDrawer(props: {
   const [cloneFactor, setCloneFactor] = createSignal('1')
   const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
   const [groupId, setGroupId] = createSignal('')
-  const [status, setStatus] = createSignal('ok')
   const [error, setError] = createSignal<string | null>(null)
   const [saving, setSaving] = createSignal(false)
   const [isDropdownOpen, setIsDropdownOpen] = createSignal(false)
@@ -107,7 +106,6 @@ export function AccountDetailDrawer(props: {
         setCloneFactor(a?.cloneFactor ?? '1')
         setMaxQtyPerOrder(a?.maxQtyPerOrder != null ? String(a.maxQtyPerOrder) : '')
         setGroupId(a?.groupId ?? '')
-        setStatus(a?.status ?? 'ok')
         setError(null)
 
         // Synchronous initial IP state
@@ -278,7 +276,6 @@ export function AccountDetailDrawer(props: {
             if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
           }
         }
-        if (status() !== a.status) patch.status = status()
         if (Object.keys(patch).length > 0) await props.onSave(a.id, patch)
       } else {
         const body: CreateAccountRequest = {
@@ -725,20 +722,6 @@ export function AccountDetailDrawer(props: {
                   />
                 </label>
               </Show>
-            </Show>
-            <Show when={isEdit()}>
-              <label>
-                Status
-                <ThemedSelect
-                  aria-label="Status"
-                  value={status()}
-                  onChange={(val) => setStatus(val)}
-                  options={[
-                    { value: 'ok', label: 'ok', badge: { text: 'OK', variant: 'emerald' } },
-                    { value: 'error', label: 'error', badge: { text: 'Error', variant: 'amber' } },
-                  ]}
-                />
-              </label>
             </Show>
             <Show when={error()}>{(msg) => <p role="alert">{msg()}</p>}</Show>
             <div class="drawer-actions">
