@@ -46,28 +46,32 @@ type AuthStore interface {
 }
 
 type userResponse struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	Username  string `json:"username"`
-	Name      string `json:"name"`
-	Phone     string `json:"phone"`
-	Address   string `json:"address"`
-	GSTNumber string `json:"gstNumber"`
-	Role      string `json:"role"`
-	Active    bool   `json:"active"`
+	ID             string         `json:"id"`
+	Email          string         `json:"email"`
+	Username       string         `json:"username"`
+	Name           string         `json:"name"`
+	Phone          string         `json:"phone"`
+	Address        string         `json:"address"`
+	GSTNumber      string         `json:"gstNumber"`
+	Role           string         `json:"role"`
+	Active         bool           `json:"active"`
+	MaxIPs         int            `json:"maxIPs"`
+	BrokerIPLimits map[string]int `json:"brokerIPLimits,omitempty"`
 }
 
 func toUserResponse(u *domain.User) userResponse {
 	return userResponse{
-		ID:        u.ID.String(),
-		Email:     u.Email,
-		Username:  u.Username,
-		Name:      u.Name,
-		Phone:     u.Phone,
-		Address:   u.Address,
-		GSTNumber: u.GSTNumber,
-		Role:      u.Role,
-		Active:    u.Active,
+		ID:             u.ID.String(),
+		Email:          u.Email,
+		Username:       u.Username,
+		Name:           u.Name,
+		Phone:          u.Phone,
+		Address:        u.Address,
+		GSTNumber:      u.GSTNumber,
+		Role:           u.Role,
+		Active:         u.Active,
+		MaxIPs:         u.MaxIPs,
+		BrokerIPLimits: u.BrokerIPLimits,
 	}
 }
 

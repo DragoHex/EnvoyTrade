@@ -41,6 +41,7 @@ type AccountsStore interface {
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
+	CheckAccountQuota(ctx context.Context, userID uuid.UUID, broker string) error
 }
 
 type accountResponse struct {
@@ -209,6 +210,17 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ApiKey = strings.TrimSpace(req.ApiKey)
 	req.ApiSecret = strings.TrimSpace(req.ApiSecret)
+
+	if u, ok := domain.UserFromContext(r.Context()); ok && u != nil {
+		if err := h.store.CheckAccountQuota(r.Context(), u.ID, broker); err != nil {
+			if errors.Is(err, domain.ErrAccountQuotaExceeded) || errors.Is(err, domain.ErrBrokerAccountQuotaExceeded) {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to check account quota: "+err.Error())
+			return
+		}
+	}
 
 	var rawIP *string
 	if req.IP != nil {

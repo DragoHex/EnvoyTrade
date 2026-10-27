@@ -1270,6 +1270,83 @@ func (s *stubBrokerEvicter) Evict(id uuid.UUID) {
 	s.evicted = append(s.evicted, id)
 }
 
+func TestPostAccount_QuotaEnforcement(t *testing.T) {
+	testUser := &domain.User{
+		ID:       uuid.New(),
+		Email:    "trader@envoytrade.com",
+		Username: "trader",
+		Role:     domain.RoleUser,
+	}
+
+	// 1. Positive case: Quota OK -> 201 Created
+	t.Run("quota OK", func(t *testing.T) {
+		store := &stubStore{
+			proxyIPs: []domain.ProxyIP{
+				{IPAddress: "192.168.1.100", WhitelistedBrokers: "kite"},
+			},
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+
+		body, _ := json.Marshal(map[string]any{
+			"role": "master", "broker": "kite", "brokerAccountId": "USR001",
+			"apiKey": "key", "apiSecret": "secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		ctx := domain.ContextWithUser(req.Context(), testUser)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body = %s", w.Code, w.Body.String())
+		}
+	})
+
+	// 2. Negative case: Total quota exhausted -> 403 Forbidden
+	t.Run("total quota exhausted", func(t *testing.T) {
+		store := &stubStore{
+			checkAccountQuotaErr: domain.ErrAccountQuotaExceeded,
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+
+		body, _ := json.Marshal(map[string]any{
+			"role": "master", "broker": "kite", "brokerAccountId": "USR002",
+			"apiKey": "key", "apiSecret": "secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		ctx := domain.ContextWithUser(req.Context(), testUser)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+		}
+	})
+
+	// 3. Negative case: Broker quota exhausted -> 403 Forbidden
+	t.Run("broker quota exhausted", func(t *testing.T) {
+		store := &stubStore{
+			checkAccountQuotaErr: domain.ErrBrokerAccountQuotaExceeded,
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+
+		body, _ := json.Marshal(map[string]any{
+			"role": "master", "broker": "kite", "brokerAccountId": "USR003",
+			"apiKey": "key", "apiSecret": "secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		ctx := domain.ContextWithUser(req.Context(), testUser)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestPatchAccount_CredentialsUpdate_EvictsBroker(t *testing.T) {
 	accID := uuid.New()
 	store := &stubStore{accountRoles: map[uuid.UUID]string{accID: "follower"}}

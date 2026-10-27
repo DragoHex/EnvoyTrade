@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"envoytrade/internal/domain"
@@ -85,29 +87,56 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*domain
 
 // GetUserByID finds a user by their primary key UUID.
 func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
-	row, err := s.queries.GetUserByID(ctx, id)
+	const query = `
+SELECT id, email, username, name, phone, address, gst_number, password_hash,
+       totp_secret, totp_enabled, role, active, max_ips, broker_ip_limits,
+       created_at, updated_at
+FROM users
+WHERE id = $1;`
+
+	var (
+		u                 domain.User
+		brokerLimitsBytes []byte
+		createdAt         pgtype.Timestamptz
+		updatedAt         pgtype.Timestamptz
+	)
+	err := s.pool.QueryRow(ctx, query, id).Scan(
+		&u.ID,
+		&u.Email,
+		&u.Username,
+		&u.Name,
+		&u.Phone,
+		&u.Address,
+		&u.GSTNumber,
+		&u.PasswordHash,
+		&u.TotpSecret,
+		&u.TotpEnabled,
+		&u.Role,
+		&u.Active,
+		&u.MaxIPs,
+		&brokerLimitsBytes,
+		&createdAt,
+		&updatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
 		return nil, err
 	}
-	return &domain.User{
-		ID:           row.ID,
-		Email:        row.Email,
-		Username:     row.Username,
-		Name:         row.Name,
-		Phone:        row.Phone,
-		Address:      row.Address,
-		GSTNumber:    row.GstNumber,
-		PasswordHash: row.PasswordHash,
-		Role:         row.Role,
-		Active:       row.Active,
-		TotpSecret:   row.TotpSecret,
-		TotpEnabled:  row.TotpEnabled,
-		CreatedAt:    row.CreatedAt.Time,
-		UpdatedAt:    row.UpdatedAt.Time,
-	}, nil
+	if len(brokerLimitsBytes) > 0 {
+		var limits map[string]int
+		if err := json.Unmarshal(brokerLimitsBytes, &limits); err == nil {
+			u.BrokerIPLimits = limits
+		}
+	}
+	if createdAt.Valid {
+		u.CreatedAt = createdAt.Time.In(domain.IST)
+	}
+	if updatedAt.Valid {
+		u.UpdatedAt = updatedAt.Time.In(domain.IST)
+	}
+	return &u, nil
 }
 
 // UpdateUserProfile updates a user's editable profile information.
@@ -263,6 +292,7 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]domain.User
 	const listQuery = `
 SELECT 
     u.id, u.email, u.username, u.name, u.role, u.active, u.phone,
+    u.max_ips, u.broker_ip_limits,
     u.created_at, u.updated_at,
     COUNT(DISTINCT a.id)::int AS account_count,
     COUNT(DISTINCT s.id)::int AS session_count
@@ -282,9 +312,10 @@ LIMIT $1 OFFSET $2;`
 	var result []domain.UserSummary
 	for rows.Next() {
 		var (
-			u         domain.UserSummary
-			createdAt pgtype.Timestamptz
-			updatedAt pgtype.Timestamptz
+			u                 domain.UserSummary
+			brokerLimitsBytes []byte
+			createdAt         pgtype.Timestamptz
+			updatedAt         pgtype.Timestamptz
 		)
 		if err := rows.Scan(
 			&u.ID,
@@ -294,12 +325,20 @@ LIMIT $1 OFFSET $2;`
 			&u.Role,
 			&u.Active,
 			&u.Phone,
+			&u.MaxIPs,
+			&brokerLimitsBytes,
 			&createdAt,
 			&updatedAt,
 			&u.AccountCount,
 			&u.SessionCount,
 		); err != nil {
 			return nil, 0, err
+		}
+		if len(brokerLimitsBytes) > 0 {
+			var limits map[string]int
+			if err := json.Unmarshal(brokerLimitsBytes, &limits); err == nil {
+				u.BrokerIPLimits = limits
+			}
 		}
 		if createdAt.Valid {
 			u.CreatedAt = createdAt.Time.In(domain.IST)
@@ -312,22 +351,135 @@ LIMIT $1 OFFSET $2;`
 	return result, total, rows.Err()
 }
 
-// UpdateUserRoleAndStatus updates a user's role and/or active status.
-func (s *Store) UpdateUserRoleAndStatus(ctx context.Context, userID uuid.UUID, role string, active *bool) error {
+// UpdateUserRoleAndStatus updates a user's role, active status, and/or account/IP quotas.
+func (s *Store) UpdateUserRoleAndStatus(ctx context.Context, userID uuid.UUID, role string, active *bool, maxIPs *int, brokerIPLimits map[string]int) error {
+	var brokerLimitsJSON *string
+	if brokerIPLimits != nil {
+		data, err := json.Marshal(brokerIPLimits)
+		if err != nil {
+			return err
+		}
+		str := string(data)
+		brokerLimitsJSON = &str
+	}
+
 	const query = `
 UPDATE users SET
     role = CASE WHEN $2::text != '' THEN $2::text ELSE role END,
     active = CASE WHEN $3::boolean IS NOT NULL THEN $3::boolean ELSE active END,
+    max_ips = CASE WHEN $4::int IS NOT NULL THEN $4::int ELSE max_ips END,
+    broker_ip_limits = CASE WHEN $5::text IS NOT NULL THEN $5::jsonb ELSE broker_ip_limits END,
     updated_at = now()
 WHERE id = $1;`
 
-	tag, err := s.pool.Exec(ctx, query, userID, role, active)
+	tag, err := s.pool.Exec(ctx, query, userID, role, active, maxIPs, brokerLimitsJSON)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrNotFound
 	}
+	return nil
+}
+
+// CheckAccountQuota checks whether user has exceeded global max_ips or broker-specific account quota.
+func (s *Store) CheckAccountQuota(ctx context.Context, userID uuid.UUID, broker string) error {
+	const userQuery = `
+SELECT 
+    u.max_ips,
+    u.broker_ip_limits,
+    COUNT(a.id)::int AS total_used
+FROM users u
+LEFT JOIN accounts a 
+       ON a.user_id = u.id 
+      AND a.deleted_at IS NULL
+WHERE u.id = $1
+GROUP BY u.id, u.max_ips, u.broker_ip_limits;`
+
+	var (
+		maxIPs          int
+		brokerLimitsRaw []byte
+		totalUsed       int
+	)
+	err := s.pool.QueryRow(ctx, userQuery, userID).Scan(&maxIPs, &brokerLimitsRaw, &totalUsed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	// -1 on max_ips unrestricts all types.
+	if maxIPs == -1 {
+		return nil
+	}
+
+	// Any value >= 0 enforces totalUsed < maxIPs.
+	if totalUsed >= maxIPs {
+		return domain.ErrAccountQuotaExceeded
+	}
+
+	var limits map[string]int
+	if len(brokerLimitsRaw) > 0 {
+		_ = json.Unmarshal(brokerLimitsRaw, &limits)
+	}
+
+	targetBroker := strings.ToLower(strings.TrimSpace(broker))
+	if targetBroker == "" {
+		targetBroker = "kite"
+	}
+
+	brokerLimit := limits[targetBroker]
+	generalLimit := limits["general"]
+
+	// For individual types, 0 is 0 IP, not infinity.
+	if brokerLimit <= 0 && generalLimit <= 0 {
+		return domain.ErrBrokerAccountQuotaExceeded
+	}
+
+	const brokerCountsQuery = `
+SELECT 
+    LOWER(COALESCE(a.broker, 'kite')) AS broker,
+    COUNT(a.id)::int AS count
+FROM accounts a
+WHERE a.user_id = $1 AND a.deleted_at IS NULL
+GROUP BY LOWER(COALESCE(a.broker, 'kite'));`
+
+	rows, err := s.pool.Query(ctx, brokerCountsQuery, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var b string
+		var cnt int
+		if err := rows.Scan(&b, &cnt); err != nil {
+			return err
+		}
+		counts[b] = cnt
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if counts[targetBroker] < brokerLimit {
+		return nil
+	}
+
+	excessUsed := 0
+	for b, count := range counts {
+		dedicated := limits[b]
+		if count > dedicated {
+			excessUsed += (count - dedicated)
+		}
+	}
+
+	if excessUsed >= generalLimit {
+		return domain.ErrBrokerAccountQuotaExceeded
+	}
+
 	return nil
 }
 

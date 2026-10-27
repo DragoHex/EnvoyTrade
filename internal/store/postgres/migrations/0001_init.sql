@@ -31,6 +31,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
 ALTER TABLE users ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
 CREATE INDEX IF NOT EXISTS idx_users_active ON users (active);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS max_ips integer NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS broker_ip_limits jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS sessions (
     id              bigserial PRIMARY KEY,

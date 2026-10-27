@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,37 +14,47 @@ const (
 	RoleUser  = "user"
 )
 
+// Sentinel errors for user quota management.
+var (
+	ErrAccountQuotaExceeded       = errors.New("domain: account quota exceeded")
+	ErrBrokerAccountQuotaExceeded = errors.New("domain: broker account quota exceeded")
+)
+
 // User represents an authenticated platform user.
 type User struct {
-	ID           uuid.UUID
-	Email        string
-	Username     string
-	Name         string
-	Phone        string
-	Address      string
-	GSTNumber    string
-	PasswordHash string
-	Role         string
-	Active       bool
-	TotpSecret   *string
-	TotpEnabled  bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID             uuid.UUID
+	Email          string
+	Username       string
+	Name           string
+	Phone          string
+	Address        string
+	GSTNumber      string
+	PasswordHash   string
+	Role           string
+	Active         bool
+	MaxIPs         int
+	BrokerIPLimits map[string]int
+	TotpSecret     *string
+	TotpEnabled    bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // UserSummary provides an administrative overview of a platform user with related stats.
 type UserSummary struct {
-	ID           uuid.UUID `json:"id"`
-	Email        string    `json:"email"`
-	Username     string    `json:"username"`
-	Name         string    `json:"name"`
-	Role         string    `json:"role"`
-	Active       bool      `json:"active"`
-	Phone        string    `json:"phone,omitempty"`
-	AccountCount int       `json:"accountCount"`
-	SessionCount int       `json:"sessionCount"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID             uuid.UUID      `json:"id"`
+	Email          string         `json:"email"`
+	Username       string         `json:"username"`
+	Name           string         `json:"name"`
+	Role           string         `json:"role"`
+	Active         bool           `json:"active"`
+	MaxIPs         int            `json:"maxIPs"`
+	BrokerIPLimits map[string]int `json:"brokerIPLimits,omitempty"`
+	Phone          string         `json:"phone,omitempty"`
+	AccountCount   int            `json:"accountCount"`
+	SessionCount   int            `json:"sessionCount"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
 }
 
 // Session represents an active session identified by the SHA-256 hash of its token.
