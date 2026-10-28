@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -875,6 +876,7 @@ func TestPostAccount_AllowsTestbroker(t *testing.T) {
 func TestPostAccount_AllowsDhan(t *testing.T) {
 	store := &stubStore{}
 	r := httpapi.NewRouter(store, &stubActionEngine{})
+	validJWT := makeTestDhanJWT("1000000001", time.Now().Add(24*time.Hour))
 
 	body, _ := json.Marshal(map[string]any{
 		"name":            "Dhan Master",
@@ -883,7 +885,7 @@ func TestPostAccount_AllowsDhan(t *testing.T) {
 		"brokerAccountId": "1000000001",
 		"apiKey":          "dhan_key",
 		"apiSecret":       "dhan_secret",
-		"accessToken":     "jwt_token_sample",
+		"accessToken":     validJWT,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -901,8 +903,8 @@ func TestPostAccount_AllowsDhan(t *testing.T) {
 	if len(store.setAccessTokenArgs) != 1 {
 		t.Fatalf("expected 1 setAccessToken call, got %d", len(store.setAccessTokenArgs))
 	}
-	if store.setAccessTokenArgs[0].Token != "jwt_token_sample" {
-		t.Errorf("token = %s, want jwt_token_sample", store.setAccessTokenArgs[0].Token)
+	if store.setAccessTokenArgs[0].Token != validJWT {
+		t.Errorf("token = %s, want %s", store.setAccessTokenArgs[0].Token, validJWT)
 	}
 	if store.setAccessTokenArgs[0].ExpiresAt == nil {
 		t.Fatalf("expected non-nil ExpiresAt for Dhan access token")
@@ -1565,7 +1567,7 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 			"role":            "follower",
 			"brokerAccountId": "1000000005",
 			"ip":              "10.0.0.5",
-			"accessToken":     "token_dhan_valid",
+			"accessToken":     makeTestDhanJWT("1000000005", time.Now().Add(24*time.Hour)),
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 		w := httptest.NewRecorder()
@@ -1582,7 +1584,7 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 			"role":            "follower",
 			"brokerAccountId": "1000000006",
 			"ip":              "10.0.0.2",
-			"accessToken":     "token_dhan_bad",
+			"accessToken":     makeTestDhanJWT("1000000006", time.Now().Add(24*time.Hour)),
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 		w := httptest.NewRecorder()
@@ -1599,7 +1601,7 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 			"role":            "follower",
 			"brokerAccountId": "1000000007",
 			"ip":              "10.0.0.4",
-			"accessToken":     "token_dhan_all",
+			"accessToken":     makeTestDhanJWT("1000000007", time.Now().Add(24*time.Hour)),
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
 		w := httptest.NewRecorder()
@@ -1665,8 +1667,9 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 	// Case 13: Patch Dhan account with accessToken -> sets ExpiresAt ~24h in future
 	{
 		before := len(store.setAccessTokenArgs)
+		patchedJWT := makeTestDhanJWT("1000000008", time.Now().Add(24*time.Hour))
 		body, _ := json.Marshal(map[string]any{
-			"accessToken": "patched_jwt_token",
+			"accessToken": patchedJWT,
 		})
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+dhanAccID.String(), bytes.NewReader(body))
 		w := httptest.NewRecorder()
@@ -1678,11 +1681,141 @@ func TestAccount_ProxyIP_WhitelistedBrokers_Validation(t *testing.T) {
 			t.Fatalf("expected 1 setAccessToken call, got %d", len(store.setAccessTokenArgs)-before)
 		}
 		call := store.setAccessTokenArgs[len(store.setAccessTokenArgs)-1]
-		if call.Token != "patched_jwt_token" {
-			t.Errorf("token = %s, want patched_jwt_token", call.Token)
+		if call.Token != patchedJWT {
+			t.Errorf("token = %s, want %s", call.Token, patchedJWT)
 		}
 		if call.ExpiresAt == nil || call.ExpiresAt.Before(time.Now().Add(23*time.Hour)) {
 			t.Errorf("expected 24h ExpiresAt on patched token, got %v", call.ExpiresAt)
+		}
+	}
+}
+
+func makeTestDhanJWT(dhanClientID string, exp time.Time) string {
+	hBytes, _ := json.Marshal(map[string]any{"typ": "JWT", "alg": "HS512"})
+	pBytes, _ := json.Marshal(map[string]any{
+		"dhanClientId": dhanClientID,
+		"exp":          exp.Unix(),
+		"iss":          "dhan",
+	})
+	return base64.RawURLEncoding.EncodeToString(hBytes) + "." + base64.RawURLEncoding.EncodeToString(pBytes) + ".sig"
+}
+
+func TestAccounts_Dhan_JWTValidation(t *testing.T) {
+	future := time.Now().Add(24 * time.Hour).Truncate(time.Second)
+	past := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+
+	// 1. POST account with mismatched Dhan client ID fails 400
+	{
+		store := &stubStore{}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+		token := makeTestDhanJWT("1114425611", future) // belongs to 1114425611
+
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "dhan",
+			"role":            "master",
+			"brokerAccountId": "1114455553", // configured as 1114455553
+			"accessToken":     token,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for mismatched Dhan client ID on POST, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "1114425611") || !strings.Contains(w.Body.String(), "1114455553") {
+			t.Errorf("expected error message to mention both client IDs, got %s", w.Body.String())
+		}
+	}
+
+	// 2. POST account with expired Dhan token fails 400
+	{
+		store := &stubStore{}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+		token := makeTestDhanJWT("1114455553", past)
+
+		body, _ := json.Marshal(map[string]any{
+			"broker":          "dhan",
+			"role":            "master",
+			"brokerAccountId": "1114455553",
+			"accessToken":     token,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for expired Dhan token on POST, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "expired") {
+			t.Errorf("expected error message to mention expired, got %s", w.Body.String())
+		}
+	}
+
+	// 3. PATCH account with mismatched Dhan client ID fails 400
+	{
+		store := &stubStore{}
+		dhanAccID := uuid.New()
+		store.accounts = []domain.Account{
+			{
+				ID:              dhanAccID,
+				Broker:          "dhan",
+				Role:            "follower",
+				BrokerAccountID: "1114455553",
+			},
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+		mismatchedToken := makeTestDhanJWT("1114425611", future)
+
+		body, _ := json.Marshal(map[string]any{
+			"accessToken": mismatchedToken,
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+dhanAccID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for mismatched Dhan client ID on PATCH, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "1114425611") || !strings.Contains(w.Body.String(), "1114455553") {
+			t.Errorf("expected error message to mention both client IDs, got %s", w.Body.String())
+		}
+	}
+
+	// 4. PATCH account with matching valid token succeeds 200 and sets exact expiresAt
+	{
+		store := &stubStore{}
+		dhanAccID := uuid.New()
+		store.accounts = []domain.Account{
+			{
+				ID:              dhanAccID,
+				Broker:          "dhan",
+				Role:            "follower",
+				BrokerAccountID: "1114455553",
+			},
+		}
+		r := httpapi.NewRouter(store, &stubActionEngine{})
+		validToken := makeTestDhanJWT("1114455553", future)
+
+		body, _ := json.Marshal(map[string]any{
+			"accessToken": validToken,
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/accounts/"+dhanAccID.String(), bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 for matching Dhan token on PATCH, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(store.setAccessTokenArgs) != 1 {
+			t.Fatalf("expected 1 setAccessToken call, got %d", len(store.setAccessTokenArgs))
+		}
+		call := store.setAccessTokenArgs[0]
+		if call.Token != validToken {
+			t.Errorf("token = %s, want validToken", call.Token)
+		}
+		if call.ExpiresAt == nil || !call.ExpiresAt.Equal(future.UTC()) {
+			t.Errorf("expiresAt = %v, want exact %v", call.ExpiresAt, future.UTC())
 		}
 	}
 }

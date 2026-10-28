@@ -144,4 +144,37 @@ describe('GroupCard', () => {
     const statusDot = within(groupHeading).getByTestId('status-dot')
     expect(statusDot).toHaveAttribute('data-status', 'error')
   })
+
+  it('passes onEditAccount to AccountTable and propagates click on error row', async () => {
+    const onEditAccount = vi.fn()
+    const detailWithError: GroupDetail = {
+      ...mockDetail,
+      followers: [
+        {
+          accountId: 'f-err',
+          name: 'Follower In Error',
+          brokerAccountId: 'ZY9999',
+          enabled: true,
+          status: 'error',
+        },
+      ],
+    }
+
+    render(() => (
+      <GroupCard
+        detail={detailWithError}
+        status="ok"
+        onToggleCopy={() => {}}
+        onToggleMasterActive={() => {}}
+        onAction={vi.fn()}
+        onEditAccount={onEditAccount}
+      />
+    ))
+
+    const statusCell = screen.getByTitle('Account error - click to edit')
+    expect(statusCell).toBeInTheDocument()
+    statusCell.click()
+    expect(onEditAccount).toHaveBeenCalledWith('f-err')
+  })
 })
+

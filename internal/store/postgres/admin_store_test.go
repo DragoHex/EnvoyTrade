@@ -210,7 +210,7 @@ func TestAdminStore_UserManagement(t *testing.T) {
 
 	// 2. UpdateUserRoleAndStatus
 	activeFalse := false
-	err = store.UpdateUserRoleAndStatus(ctx, u1ID, domain.RoleAdmin, &activeFalse)
+	err = store.UpdateUserRoleAndStatus(ctx, u1ID, domain.RoleAdmin, &activeFalse, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateUserRoleAndStatus failed: %v", err)
 	}

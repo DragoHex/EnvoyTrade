@@ -585,6 +585,100 @@ describe('Dashboard', () => {
       expect(within(heroCard).getByText('+₹7,000.00')).toBeInTheDocument()
     })
   })
+
+  it('clicking error status dot on an account row opens AccountDetailDrawer with auth error banner', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'error' },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'error' }],
+    })
+    const getAccountSpy = vi.spyOn(api, 'getAccount').mockResolvedValue({
+      id: 'f1',
+      name: 'Follower 1',
+      role: 'follower',
+      broker: 'kite',
+      brokerAccountId: 'ZY5678',
+      masterId: 'm1',
+      cloneFactor: '1',
+      maxQtyPerOrder: null,
+      enabled: true,
+      active: true,
+      status: 'error',
+      authStatus: 'error',
+      authError: 'Session expired or token invalid',
+    })
+
+    render(() => <Dashboard />)
+    await screen.findByText('ZY5678')
+
+    const statusDots = screen.getAllByTitle('Account error - click to edit')
+    expect(statusDots.length).toBeGreaterThan(0)
+
+    await userEvent.click(statusDots[statusDots.length - 1])
+
+    expect(getAccountSpy).toHaveBeenCalledWith('f1')
+    expect(await screen.findByText('Edit Account')).toBeInTheDocument()
+    expect(await screen.findByText(/Authentication required:/)).toBeInTheDocument()
+    expect(screen.getByText(/Session expired or token invalid/)).toBeInTheDocument()
+  })
+
+  it('saving edited account in drawer calls patchAccount and shows success toast', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([
+      { id: 'g1', name: 'Group 1', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'zerodha', followerCount: 1, status: 'error' },
+    ])
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'g1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterName: 'Alice Trader',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower 1', brokerAccountId: 'ZY5678', enabled: true, status: 'error' }],
+    })
+    vi.spyOn(api, 'getAccount').mockResolvedValue({
+      id: 'f1',
+      name: 'Follower 1',
+      role: 'follower',
+      broker: 'kite',
+      brokerAccountId: 'ZY5678',
+      masterId: 'm1',
+      cloneFactor: '1',
+      maxQtyPerOrder: null,
+      enabled: true,
+      active: true,
+      status: 'error',
+      authStatus: 'error',
+      authError: 'Session expired',
+    })
+    const patchAccountSpy = vi.spyOn(api, 'patchAccount').mockResolvedValue({} as any)
+
+    render(() => <Dashboard />)
+    await screen.findByText('ZY5678')
+
+    const statusDots = screen.getAllByTitle('Account error - click to edit')
+    await userEvent.click(statusDots[statusDots.length - 1])
+
+    expect(await screen.findByText('Edit Account')).toBeInTheDocument()
+
+    const nameInput = screen.getByLabelText('Name')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'Updated Follower')
+
+    const saveBtn = screen.getByRole('button', { name: /^Save$/i })
+    await userEvent.click(saveBtn)
+
+    expect(patchAccountSpy).toHaveBeenCalledWith('f1', expect.objectContaining({ name: 'Updated Follower' }))
+    expect(await screen.findByText('Account saved successfully.')).toBeInTheDocument()
+  })
 })
+
+
 
 

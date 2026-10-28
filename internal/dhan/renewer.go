@@ -37,6 +37,22 @@ type RenewerStore interface {
 	SetAccountAccessToken(ctx context.Context, id uuid.UUID, token string, expiresAt *time.Time, authStatus, authError string) error
 }
 
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, domain.ErrAuthExpired) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "dh-901") || strings.Contains(msg, "dh-906") ||
+		strings.Contains(msg, "invalid token") || strings.Contains(msg, "token expired") ||
+		strings.Contains(msg, "unauthorized") || strings.Contains(msg, "forbidden") {
+		return false
+	}
+	return true
+}
+
 // Renewer handles scheduled 24h JWT token renewals for Dhan accounts.
 type Renewer struct {
 	Store            RenewerStore
@@ -49,17 +65,39 @@ type Renewer struct {
 
 // RenewToken calls DhanHQ API via godhan.Client to refresh an active access token.
 func RenewToken(ctx context.Context, clientID, token string, proxyCfg *ProxyConfig, extraOpts ...godhan.Option) (string, time.Time, error) {
+	clientID = strings.TrimSpace(clientID)
+	token = strings.TrimSpace(token)
+	if clientID == "" {
+		return "", time.Time{}, fmt.Errorf("%w: missing client id", domain.ErrAuthExpired)
+	}
+	if token == "" {
+		return "", time.Time{}, fmt.Errorf("%w: missing access token", domain.ErrAuthExpired)
+	}
+
 	opts := BuildClientOptions(proxyCfg, extraOpts...)
 	client := godhan.NewClient(clientID, token, opts...)
 	resp, err := client.RenewToken(ctx)
 	if err != nil {
 		return "", time.Time{}, err
 	}
+	if resp == nil {
+		return "", time.Time{}, fmt.Errorf("%w: nil response from broker", domain.ErrBrokerUnreachable)
+	}
+
+	newToken := strings.TrimSpace(resp.AccessToken)
+	if newToken == "" {
+		return "", time.Time{}, fmt.Errorf("%w: broker renewal returned empty access token", domain.ErrAuthExpired)
+	}
+
 	expiresAt := resp.ExpiryTime.Time
 	if expiresAt.IsZero() {
-		expiresAt = time.Now().Add(24 * time.Hour)
+		if claims, claimErr := ParseDhanJWT(newToken); claimErr == nil && !claims.ExpiresAt.IsZero() {
+			expiresAt = claims.ExpiresAt
+		} else {
+			expiresAt = time.Now().Add(24 * time.Hour)
+		}
 	}
-	return resp.AccessToken, expiresAt, nil
+	return newToken, expiresAt, nil
 }
 
 // NewRenewer constructs a Renewer with default settings.
@@ -116,14 +154,27 @@ func (r *Renewer) RenewAll(ctx context.Context) error {
 		if clientID == "" {
 			clientID = strings.TrimSpace(authInfo.ApiKey)
 		}
+		if clientID == "" {
+			r.Logger.Error("dhan renew: missing client id", "account_id", a.ID)
+			_ = r.Store.SetAccountAccessToken(ctx, a.ID, authInfo.AccessToken, authInfo.TokenExpiresAt, "error", "Missing broker client ID")
+			if setter, ok := r.Store.(accountStatusSetter); ok {
+				_ = setter.SetAccountStatus(ctx, a.ID, domain.AccountStatusError)
+			}
+			continue
+		}
 
 		var lastErr error
 		for attempt := 1; attempt <= r.MaxRetries; attempt++ {
 			newToken, expiresAt, err := r.RenewFunc(ctx, clientID, authInfo.AccessToken, proxyCfg)
-			if err == nil {
+			newToken = strings.TrimSpace(newToken)
+			if err == nil && newToken != "" {
 				if saveErr := r.Store.SetAccountAccessToken(ctx, a.ID, newToken, &expiresAt, "authenticated", ""); saveErr != nil {
 					r.Logger.Error("dhan renew: save token failed", "account_id", a.ID, "error", saveErr)
+					lastErr = saveErr
 					break
+				}
+				if setter, ok := r.Store.(accountStatusSetter); ok {
+					_ = setter.SetAccountStatus(ctx, a.ID, domain.AccountStatusActive)
 				}
 				r.Logger.Info("dhan renew: token renewed successfully", "account_id", a.ID, "expires_at", expiresAt)
 				if r.OnTokenRefreshed != nil {
@@ -133,8 +184,17 @@ func (r *Renewer) RenewAll(ctx context.Context) error {
 				break
 			}
 
+			if err == nil && newToken == "" {
+				err = fmt.Errorf("%w: renewal returned empty token", domain.ErrAuthExpired)
+			}
+
 			lastErr = err
 			r.Logger.Warn("dhan renew: attempt failed", "account_id", a.ID, "attempt", attempt, "error", err)
+
+			if !isRetryable(err) {
+				break
+			}
+
 			if attempt < r.MaxRetries {
 				select {
 				case <-ctx.Done():
@@ -146,6 +206,9 @@ func (r *Renewer) RenewAll(ctx context.Context) error {
 
 		if lastErr != nil {
 			_ = r.Store.SetAccountAccessToken(ctx, a.ID, authInfo.AccessToken, authInfo.TokenExpiresAt, "error", domain.SanitizeAuthError(lastErr.Error()))
+			if setter, ok := r.Store.(accountStatusSetter); ok {
+				_ = setter.SetAccountStatus(ctx, a.ID, domain.AccountStatusError)
+			}
 		}
 	}
 	return nil

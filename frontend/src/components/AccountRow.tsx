@@ -35,6 +35,7 @@ export function AccountRow(props: {
   onRebalance: (followerIds?: string[]) => void | Promise<void>
   onSquareOff: (symbols?: string[]) => void | Promise<void>
   onExitOpenOrders: () => void
+  onEditAccount?: (accountId: string) => void
 }) {
   const [pending, setPending] = createSignal<DestructiveAction>(null)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
@@ -148,7 +149,17 @@ export function AccountRow(props: {
           </div>
         </td>
         <td class="col-status">
-          <span title={props.follower.status === 'error' ? 'Account error' : (props.follower.status === 'pending' || props.follower.status === 'syncing' ? 'Connecting / Syncing...' : 'Active')}>
+          <span
+            class="status-cell-centered"
+            title={props.follower.status === 'error' ? 'Account error - click to edit' : (props.follower.status === 'pending' || props.follower.status === 'syncing' ? 'Connecting / Syncing...' : 'Active')}
+            style={{ cursor: props.follower.status === 'error' && props.onEditAccount ? 'pointer' : 'default' }}
+            onClick={(e) => {
+              if (props.follower.status === 'error' && props.onEditAccount) {
+                e.stopPropagation()
+                props.onEditAccount(props.follower.accountId)
+              }
+            }}
+          >
             <StatusDot status={props.follower.status} />
           </span>
         </td>

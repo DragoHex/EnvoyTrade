@@ -305,6 +305,16 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 			marginBreakdown = &mb
 		}
 	}
+
+	accountStatus := "online"
+	if acc.Status == "error" || acc.AuthStatus == "error" {
+		accountStatus = "error"
+	} else if acc.AuthStatus == "pending" || acc.Status == "pending" {
+		accountStatus = "pending"
+	} else if acc.AuthStatus == "unauthenticated" || !acc.Active {
+		accountStatus = "offline"
+	}
+
 	if err == nil {
 		detail.Summary = domain.AccountSummaryMetrics{
 			NetQty:               int(netQty),
@@ -316,7 +326,7 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 			AccountValue:         accountValue,
 			AvailableCash:        &availableCash,
 			AvailableMargin:      &availableMargin,
-			Status:               marginStatus,
+			Status:               accountStatus,
 			MtmBreakdown:         breakdown,
 			MarginBreakdown:      marginBreakdown,
 		}
@@ -353,7 +363,7 @@ func (s *Store) AccountOrders(ctx context.Context, accountID uuid.UUID, tab stri
 			TotalMtm:             decimal.Zero,
 			RealizedPnl:          fallbackRealizedPnl,
 			AccountValue:         decimal.Zero,
-			Status:               "offline",
+			Status:               accountStatus,
 			MtmBreakdown:         breakdown,
 		}
 	}
