@@ -31,6 +31,7 @@ export function AccountTable(props: {
   onSquareOffAccount?: (accountId: string, symbols?: string[]) => Promise<void>
   onRebalanceGroup?: (groupId: string, followerIds?: string[]) => Promise<void>
   onRebalanceAccount?: (accountId: string) => Promise<void>
+  onEditAccount?: (accountId: string) => void
 }) {
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
 
@@ -109,6 +110,7 @@ export function AccountTable(props: {
             return props.onAction(props.master.masterId, 'square_off')
           }}
           onExitOpenOrders={() => props.onAction(props.master.masterId, 'exit_open_orders')}
+          onEditAccount={props.onEditAccount}
         />
         {/* Index (not For): a refetch after a button click resolves to a
             new array of new follower objects even though the account list
@@ -136,6 +138,7 @@ export function AccountTable(props: {
                 return props.onAction(f().accountId, 'square_off')
               }}
               onExitOpenOrders={() => props.onAction(f().accountId, 'exit_open_orders')}
+              onEditAccount={props.onEditAccount}
             />
           )}
         </Index>

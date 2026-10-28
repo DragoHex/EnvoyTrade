@@ -691,6 +691,54 @@ describe('AccountRow', () => {
     const rebalanceBtn = screen.getByRole('button', { name: 'Rebalance' })
     expect(within(rebalanceBtn).queryByTestId('rebalance-notification-dot')).not.toBeInTheDocument()
   })
+
+  it('clicking error status dot triggers onEditAccount with accountId', async () => {
+    const onEditAccount = vi.fn()
+    const errorFollower: GroupFollower = {
+      ...follower,
+      status: 'error',
+    }
+
+    render(() => (
+      <AccountRow
+        follower={errorFollower}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+        onEditAccount={onEditAccount}
+      />
+    ))
+
+    const statusCell = screen.getByTitle('Account error - click to edit')
+    expect(statusCell).toBeInTheDocument()
+    expect(statusCell).toHaveStyle({ cursor: 'pointer' })
+
+    await userEvent.click(statusCell)
+    expect(onEditAccount).toHaveBeenCalledWith('f1')
+  })
+
+  it('clicking non-error status dot does not trigger onEditAccount', async () => {
+    const onEditAccount = vi.fn()
+
+    render(() => (
+      <AccountRow
+        follower={follower}
+        onToggleCopy={() => {}}
+        onRebalance={() => Promise.resolve()}
+        onSquareOff={() => {}}
+        onExitOpenOrders={() => {}}
+        onEditAccount={onEditAccount}
+      />
+    ))
+
+    const statusCell = screen.getByTitle('Active')
+    expect(statusCell).toBeInTheDocument()
+    expect(statusCell).toHaveStyle({ cursor: 'default' })
+
+    await userEvent.click(statusCell)
+    expect(onEditAccount).not.toHaveBeenCalled()
+  })
 })
 
 

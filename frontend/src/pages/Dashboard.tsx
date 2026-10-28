@@ -3,26 +3,33 @@ import {
   getGroupDetail,
   getGroupRebalanceDiff,
   getGroups,
+  getAccount,
   patchAccount,
   postAction,
   squareOffAccount,
   squareOffGroup,
   rebalanceGroup,
   rebalanceAccount,
+  type Account,
   type ActionType,
   type GroupDetail,
 } from '../api'
 import { GroupCard } from '../components/GroupCard'
 import { DashboardHeroCard } from '../components/DashboardHeroCard'
+import { AccountDetailDrawer } from '../components/AccountDetailDrawer'
+import { ResultToast, type ToastResult } from '../components/ResultToast'
 import { GroupCardSkeleton, GroupsSkeleton, LoadingTimeout } from '../components/Skeleton'
 import { EmptyState } from '../components/EmptyState'
 import { registerSyncSubscriber, triggerSyncNow } from '../utils/syncBus'
+
+const TOAST_DISMISS_MS = 4000
 
 function GroupCardLoader(props: {
   id: string
   status: 'ok' | 'error' | 'pending' | 'syncing' | string
   hasImbalance?: boolean
   onDetailLoaded?: (detail: GroupDetail) => void
+  onEditAccount?: (accountId: string) => void
 }) {
   const [detail, { refetch }] = createResource(() => props.id, getGroupDetail)
 
@@ -177,6 +184,7 @@ function GroupCardLoader(props: {
         onSquareOffAccount={onSquareOffAccount}
         onRebalanceGroup={onRebalanceGroup}
         onRebalanceAccount={onRebalanceAccount}
+        onEditAccount={props.onEditAccount}
       />
     </Show>
   )
@@ -185,8 +193,42 @@ function GroupCardLoader(props: {
 export function Dashboard() {
   const [groups] = createResource(getGroups)
   const [groupDetailsMap, setGroupDetailsMap] = createSignal<Record<string, GroupDetail>>({})
+  const [editingAccount, setEditingAccount] = createSignal<Account | null>(null)
+  const [drawerOpen, setDrawerOpen] = createSignal(false)
+  const [toast, setToast] = createSignal<ToastResult | null>(null)
   let pendingDetails: Record<string, GroupDetail> = {}
   let microtaskScheduled = false
+  let dismissTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => clearTimeout(dismissTimer))
+
+  const showToast = (result: ToastResult) => {
+    setToast(result)
+    clearTimeout(dismissTimer)
+    dismissTimer = setTimeout(() => setToast(null), TOAST_DISMISS_MS)
+  }
+
+  const openEditAccount = async (accountId: string) => {
+    try {
+      const acc = await getAccount(accountId)
+      setEditingAccount(acc)
+      setDrawerOpen(true)
+    } catch (e) {
+      showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to load account.' })
+    }
+  }
+
+  const handleSaveAccount = async (id: string, patch: Record<string, unknown>) => {
+    try {
+      await patchAccount(id, patch as any)
+      setDrawerOpen(false)
+      setEditingAccount(null)
+      showToast({ kind: 'success', message: 'Account saved successfully.' })
+      triggerSyncNow()
+    } catch (e) {
+      showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Save failed.' })
+      throw e
+    }
+  }
 
   const handleDetailLoaded = (detail: GroupDetail) => {
     pendingDetails[detail.id] = detail
@@ -239,11 +281,26 @@ export function Dashboard() {
                 status={g.status}
                 hasImbalance={g.hasImbalance}
                 onDetailLoaded={handleDetailLoaded}
+                onEditAccount={openEditAccount}
               />
             )}
           </For>
         </Show>
       </Show>
+
+      <AccountDetailDrawer
+        open={drawerOpen()}
+        account={editingAccount()}
+        groups={groups() ?? []}
+        onClose={() => {
+          setDrawerOpen(false)
+          setEditingAccount(null)
+        }}
+        onCreate={async () => {}}
+        onSave={handleSaveAccount}
+      />
+
+      <ResultToast result={toast()} onDismiss={() => setToast(null)} />
     </div>
   )
 }

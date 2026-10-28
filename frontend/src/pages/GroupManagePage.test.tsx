@@ -677,5 +677,85 @@ describe('GroupManagePage', () => {
     fireEvent.click(qtyIncBtn)
     expect(qtyInput.value).toBe('2')
   })
+
+  it('clicking error status dot on a member row opens AccountDetailDrawer with auth error banner', async () => {
+    const errorFollower: api.Account = {
+      ...follower,
+      status: 'error',
+      authStatus: 'error',
+      authError: 'Invalid credentials or session expired',
+    }
+
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower Account', brokerAccountId: 'ZY5678', enabled: true, status: 'error' }],
+    })
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, errorFollower])
+
+    renderPage()
+    await screen.findByText('ZY5678')
+
+    const statusCell = screen.getByTitle(/Invalid credentials or session expired \(click to edit\)/i)
+    expect(statusCell).toBeInTheDocument()
+    expect(statusCell).toHaveStyle({ cursor: 'pointer' })
+
+    await userEvent.click(statusCell)
+
+    expect(await screen.findByText('Edit Account')).toBeInTheDocument()
+    expect(await screen.findByText(/Authentication required:/)).toBeInTheDocument()
+    expect(screen.getByText(/Invalid credentials or session expired/)).toBeInTheDocument()
+  })
+
+  it('saving edited member in drawer updates members list and shows success toast', async () => {
+    const errorFollower: api.Account = {
+      ...follower,
+      status: 'error',
+      authStatus: 'error',
+      authError: 'Session expired',
+    }
+
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [{ accountId: 'f1', name: 'Follower Account', brokerAccountId: 'ZY5678', enabled: true, status: 'error' }],
+    })
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, errorFollower])
+    const patchAccountSpy = vi.spyOn(api, 'patchAccount').mockResolvedValue({} as any)
+    vi.spyOn(api, 'getAccount').mockResolvedValue({
+      ...errorFollower,
+      name: 'Follower Updated Name',
+      status: 'ok',
+      authStatus: 'authenticated',
+      authError: null,
+    })
+
+    renderPage()
+    await screen.findByText('ZY5678')
+
+    const statusCell = screen.getByTitle(/Session expired \(click to edit\)/i)
+    await userEvent.click(statusCell)
+
+    expect(await screen.findByText('Edit Account')).toBeInTheDocument()
+
+    const nameInput = screen.getByLabelText('Name')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'Follower Updated Name')
+
+    const saveBtn = screen.getByRole('button', { name: /^Save$/i })
+    await userEvent.click(saveBtn)
+
+    expect(patchAccountSpy).toHaveBeenCalledWith('f1', expect.objectContaining({ name: 'Follower Updated Name' }))
+    expect(await screen.findByText('Account saved successfully.')).toBeInTheDocument()
+    expect(await screen.findByText('Follower Updated Name')).toBeInTheDocument()
+  })
 })
+
+
 

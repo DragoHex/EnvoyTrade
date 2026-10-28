@@ -1,7 +1,8 @@
-import { createEffect, createResource, createSignal, Index, onCleanup, Show } from 'solid-js'
+import { createEffect, createMemo, createResource, createSignal, Index, onCleanup, Show } from 'solid-js'
 import { useParams, useLocation, A } from '@solidjs/router'
 import {
   getGroupDetail,
+  getGroups,
   getAccounts,
   getAccount,
   patchAccount,
@@ -9,9 +10,11 @@ import {
   addAccountToGroup,
   patchGroup,
   type Account,
+  type GroupSummary,
 } from '../api'
 import { ConfirmActionModal } from '../components/ConfirmActionModal'
 import { EditGroupModal } from '../components/EditGroupModal'
+import { AccountDetailDrawer } from '../components/AccountDetailDrawer'
 import { ResultToast, type ToastResult } from '../components/ResultToast'
 import { LoadingTimeout, TableSkeleton } from '../components/Skeleton'
 import { StatusDot } from '../components/StatusDot'
@@ -21,6 +24,7 @@ import { RoleIcon } from '../components/RoleIcon'
 import { BrokerLogo } from '../components/BrokerLogo'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { ThemedNumberInput } from '../components/ThemedNumberInput'
+import { formatAuthError } from '../utils/authError'
 
 
 const TOAST_DISMISS_MS = 4000
@@ -36,7 +40,29 @@ export function GroupManagePage() {
     getGroupDetail
   )
   const [members, setMembers] = createSignal<Account[]>()
+  const [editingAccount, setEditingAccount] = createSignal<Account | null>(null)
+  const [drawerOpen, setDrawerOpen] = createSignal(false)
   const [allAccounts, { mutate: mutateAll, refetch: refetchAll }] = createResource(() => getAccounts())
+  const [allGroups] = createResource(
+    () => (drawerOpen() ? true : null),
+    () => getGroups().catch(() => [])
+  )
+  const availableGroups = createMemo<GroupSummary[]>(() => {
+    if (allGroups() && allGroups()!.length > 0) return allGroups()!
+    const d = detail()
+    if (!d) return []
+    return [
+      {
+        id: d.id,
+        name: d.name,
+        masterId: d.masterId,
+        masterAccountId: d.masterAccountId,
+        broker: masterAccount()?.broker || 'kite',
+        followerCount: (members() ?? []).filter((m) => m.role === 'follower').length,
+        status: masterAccount()?.status || 'ok',
+      },
+    ]
+  })
 
   const initialName = () => location.state?.name
   const groupTitle = () => detail()?.name || initialName() || detail()?.masterAccountId || masterAccount()?.brokerAccountId
@@ -74,6 +100,27 @@ export function GroupManagePage() {
   const [editModalOpen, setEditModalOpen] = createSignal(false)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
   const [submittingAdd, setSubmittingAdd] = createSignal(false)
+
+  const openEdit = (a: Account) => {
+    setEditingAccount(a)
+    setDrawerOpen(true)
+  }
+
+  const handleSaveAccount = async (id: string, patch: Record<string, unknown>) => {
+    try {
+      await patchAccount(id, patch as any)
+      const updated = await getAccount(id)
+      setMembers((prev) => prev?.map((m) => (m.id === id ? updated : m)))
+      mutateAll((prev) => prev?.map((m) => (m.id === id ? updated : m)))
+      setDrawerOpen(false)
+      setEditingAccount(null)
+      showToast({ kind: 'success', message: 'Account saved successfully.' })
+      refetchDetail()
+    } catch (e) {
+      showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Save failed.' })
+      throw e
+    }
+  }
 
   let dismissTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => clearTimeout(dismissTimer))
@@ -411,9 +458,27 @@ export function GroupManagePage() {
                         <td class="col-clone-factor">{a().role === 'follower' ? (a().cloneFactor ?? '—') : '—'}</td>
                         <td class="col-max-qty">{a().role === 'follower' ? (a().maxQtyPerOrder ?? '—') : '—'}</td>
                         <td class="col-status">
-                          <span class="status-cell-centered" title={a().status}>
-                            <StatusDot status={a().status} />
-                          </span>
+                          {(() => {
+                            const isErr = a().status === 'error' || a().authStatus === 'error'
+                            const tooltip = isErr
+                              ? (a().authError ? `${formatAuthError(a().authError)} (click to edit)` : 'Account error - click to edit')
+                              : (a().status === 'pending' || a().status === 'syncing' ? 'Connecting / Syncing...' : 'Active')
+                            return (
+                              <span
+                                class="status-cell-centered"
+                                title={tooltip}
+                                style={{ cursor: isErr ? 'pointer' : 'default' }}
+                                onClick={(e) => {
+                                  if (isErr) {
+                                    e.stopPropagation()
+                                    openEdit(a())
+                                  }
+                                }}
+                              >
+                                <StatusDot status={isErr ? 'error' : a().status} />
+                              </span>
+                            )
+                          })()}
                         </td>
                         <td class="col-actions">
                           <div class="table-actions">
@@ -517,6 +582,19 @@ export function GroupManagePage() {
         label="Remove from group"
         onConfirm={confirmRemoveFromGroup}
         onCancel={() => setPendingRemove(null)}
+      />
+
+      <AccountDetailDrawer
+        open={drawerOpen()}
+        account={editingAccount()}
+        groups={availableGroups()}
+        existingAccounts={allAccounts() ?? []}
+        onClose={() => {
+          setDrawerOpen(false)
+          setEditingAccount(null)
+        }}
+        onCreate={async () => {}}
+        onSave={handleSaveAccount}
       />
 
       <ResultToast result={toast()} onDismiss={() => setToast(null)} />

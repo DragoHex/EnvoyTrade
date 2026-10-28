@@ -14,6 +14,7 @@ export function GroupCard(props: {
   onSquareOffAccount?: (accountId: string, symbols?: string[]) => Promise<void>
   onRebalanceGroup?: (groupId: string, followerIds?: string[]) => Promise<void>
   onRebalanceAccount?: (accountId: string) => Promise<void>
+  onEditAccount?: (accountId: string) => void
 }) {
   const groupStatus = () => {
     if (props.status === 'error') return 'error'
@@ -55,6 +56,7 @@ export function GroupCard(props: {
         onSquareOffAccount={props.onSquareOffAccount}
         onRebalanceGroup={props.onRebalanceGroup}
         onRebalanceAccount={props.onRebalanceAccount}
+        onEditAccount={props.onEditAccount}
       />
     </section>
   )
