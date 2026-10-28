@@ -5,6 +5,7 @@ package postgres_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"envoytrade/internal/domain"
 	"envoytrade/internal/store/postgres"
@@ -182,3 +183,72 @@ func TestStore_SyncPositions_OvernightPositionsWithPnL(t *testing.T) {
 		t.Errorf("MarginBreakdown.Cash = %s, want %s", detail.Summary.MarginBreakdown.Cash, cashVal)
 	}
 }
+
+func TestStore_AccountOrders_SummaryStatusDerivedFromAccounts(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	accID := uuid.New()
+	err := store.CreateAccount(ctx, accID, "Test Status Acc", "follower", "dhan", "DHAN123", "key", "secret", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+
+	margin := domain.MarginSyncParam{
+		NetQty:       10,
+		TotalMtm:     decimal.Zero,
+		RealizedPnl:  decimal.Zero,
+		AccountValue: decimal.NewFromFloat(50000.0),
+		Status:       "online",
+	}
+	if err := store.SyncAccountMargins(ctx, accID, margin); err != nil {
+		t.Fatalf("SyncAccountMargins: %v", err)
+	}
+
+	// 1. Account in error status MUST return Summary.Status == "error", NOT stale "online"
+	if err := store.SetAccountStatus(ctx, accID, domain.AccountStatusError); err != nil {
+		t.Fatalf("SetAccountStatus(error): %v", err)
+	}
+	if err := store.SetAccountAccessToken(ctx, accID, "", nil, "error", "Token expired"); err != nil {
+		t.Fatalf("SetAccountAccessToken(error): %v", err)
+	}
+
+	detail, err := store.AccountOrders(ctx, accID, "open_positions", 1, 10)
+	if err != nil {
+		t.Fatalf("AccountOrders: %v", err)
+	}
+	if detail.Summary.Status != "error" {
+		t.Errorf("detail.Summary.Status = %q, want %q", detail.Summary.Status, "error")
+	}
+
+	// 2. Unauthenticated account MUST return Summary.Status == "offline"
+	if err := store.SetAccountStatus(ctx, accID, domain.AccountStatusActive); err != nil {
+		t.Fatalf("SetAccountStatus(active): %v", err)
+	}
+	if err := store.SetAccountAccessToken(ctx, accID, "", nil, "unauthenticated", ""); err != nil {
+		t.Fatalf("SetAccountAccessToken(unauthenticated): %v", err)
+	}
+
+	detail, err = store.AccountOrders(ctx, accID, "open_positions", 1, 10)
+	if err != nil {
+		t.Fatalf("AccountOrders: %v", err)
+	}
+	if detail.Summary.Status != "offline" {
+		t.Errorf("detail.Summary.Status = %q, want %q", detail.Summary.Status, "offline")
+	}
+
+	// 3. Active authenticated account MUST return Summary.Status == "online"
+	future := time.Now().Add(24 * time.Hour)
+	if err := store.SetAccountAccessToken(ctx, accID, "valid_token", &future, "authenticated", ""); err != nil {
+		t.Fatalf("SetAccountAccessToken(authenticated): %v", err)
+	}
+
+	detail, err = store.AccountOrders(ctx, accID, "open_positions", 1, 10)
+	if err != nil {
+		t.Fatalf("AccountOrders: %v", err)
+	}
+	if detail.Summary.Status != "online" {
+		t.Errorf("detail.Summary.Status = %q, want %q", detail.Summary.Status, "online")
+	}
+}
+

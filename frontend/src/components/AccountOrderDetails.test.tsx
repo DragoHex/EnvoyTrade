@@ -1365,7 +1365,41 @@ it('locks column header widths with fixed table layout so headers do not shift a
     await userEvent.click(dismissBtn)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  it('renders status-dot-offline and error text when summary status is error', async () => {
+    vi.spyOn(api, 'getAccountOrders').mockResolvedValue({
+      accountId: 'acc-err-test',
+      summary: {
+        netQty: 0,
+        totalMtm: 0,
+        realizedPnl: 0,
+        accountValue: 0,
+        status: 'error',
+      },
+      counts: {
+        openPositions: 0,
+        closedPositions: 0,
+        holdings: 0,
+        openOrders: 0,
+        closedOrders: 0,
+        rejectedOrders: 0,
+      },
+      openPositions: [],
+      closedPositions: [],
+      holdings: [],
+      openOrders: [],
+      closedOrders: [],
+      rejectedOrders: [],
+    })
+
+    render(() => <AccountOrderDetails accountId="acc-err-test" />)
+
+    expect(await screen.findByText(/error/i)).toBeInTheDocument()
+    const dot = document.querySelector('.status-dot-offline')
+    expect(dot).toBeInTheDocument()
+  })
 });
+
 
 
 
