@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"envoytrade/internal/crypto"
+	"envoytrade/internal/dhan"
 	"envoytrade/internal/domain"
 
 	"github.com/google/uuid"
@@ -327,6 +328,26 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		encTotp = enc
 	}
 
+	var dhanExpiresAt *time.Time
+	if broker == "dhan" && req.AccessToken != nil && strings.TrimSpace(*req.AccessToken) != "" {
+		claims, err := dhan.ParseDhanJWT(*req.AccessToken)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid Dhan access token: "+err.Error())
+			return
+		}
+		if claims.DhanClientID != req.BrokerAccountID {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("access token belongs to Dhan client ID %s, but account is configured for %s", claims.DhanClientID, req.BrokerAccountID))
+			return
+		}
+		if !claims.ExpiresAt.IsZero() && claims.ExpiresAt.Before(time.Now()) {
+			writeError(w, http.StatusBadRequest, "access token is already expired")
+			return
+		}
+		if !claims.ExpiresAt.IsZero() {
+			dhanExpiresAt = &claims.ExpiresAt
+		}
+	}
+
 	resolvedID, err := h.store.CreateAccountWithCredentials(r.Context(), id, req.Name, req.Role, req.Broker, req.BrokerAccountID, req.ApiKey, req.ApiSecret, validIP, encPass, encTotp)
 	if errors.Is(err, domain.ErrIPAlreadyAssigned) {
 		writeError(w, http.StatusConflict, "IP address "+validIP+" is already assigned to another account")
@@ -347,8 +368,11 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		var expiresAt *time.Time
 		authStatus := "authenticated"
 		if broker == "dhan" {
-			exp := time.Now().UTC().Add(24 * time.Hour)
-			expiresAt = &exp
+			expiresAt = dhanExpiresAt
+			if expiresAt == nil {
+				exp := time.Now().UTC().Add(24 * time.Hour)
+				expiresAt = &exp
+			}
 			authStatus = "pending"
 			initialStatus = "pending"
 		}
@@ -736,12 +760,33 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 	if req.AccessToken != nil {
 		var expiresAt *time.Time
 		authStatus := "authenticated"
-		if accs, err := h.store.Accounts(r.Context(), []uuid.UUID{id}); err == nil && len(accs) > 0 && strings.ToLower(accs[0].Broker) == "dhan" {
+		tokenStr := strings.TrimSpace(*req.AccessToken)
+		accs, err := h.store.Accounts(r.Context(), []uuid.UUID{id})
+		isDhan := err == nil && len(accs) > 0 && strings.ToLower(accs[0].Broker) == "dhan"
+		if isDhan && tokenStr != "" {
+			claims, err := dhan.ParseDhanJWT(tokenStr)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid Dhan access token: "+err.Error())
+				return
+			}
+			if claims.DhanClientID != accs[0].BrokerAccountID {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("access token belongs to Dhan client ID %s, but account is configured for %s", claims.DhanClientID, accs[0].BrokerAccountID))
+				return
+			}
+			if !claims.ExpiresAt.IsZero() && claims.ExpiresAt.Before(time.Now()) {
+				writeError(w, http.StatusBadRequest, "access token is already expired")
+				return
+			}
+			if !claims.ExpiresAt.IsZero() {
+				expiresAt = &claims.ExpiresAt
+			}
+			authStatus = "pending"
+		} else if isDhan {
 			exp := time.Now().UTC().Add(24 * time.Hour)
 			expiresAt = &exp
 			authStatus = "pending"
 		}
-		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, strings.TrimSpace(*req.AccessToken), expiresAt, authStatus, "")) {
+		if writePatchStoreError(w, h.store.SetAccountAccessToken(r.Context(), id, tokenStr, expiresAt, authStatus, "")) {
 			return
 		}
 		role, _ := h.store.AccountRole(r.Context(), id)

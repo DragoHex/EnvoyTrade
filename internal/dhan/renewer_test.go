@@ -135,23 +135,25 @@ type fakeRenewerStore struct {
 	proxyIPs     map[string]domain.ProxyIP
 	proxyIPErrs  map[string]error
 
-	savedTokens  map[uuid.UUID]string
-	savedExpirys map[uuid.UUID]*time.Time
-	savedStatus  map[uuid.UUID]string
-	savedErrors  map[uuid.UUID]string
-	saveTokenErr error
+	savedTokens        map[uuid.UUID]string
+	savedExpirys       map[uuid.UUID]*time.Time
+	savedStatus        map[uuid.UUID]string
+	savedErrors        map[uuid.UUID]string
+	savedAccountStatus map[uuid.UUID]domain.AccountStatus
+	saveTokenErr       error
 }
 
 func newFakeRenewerStore() *fakeRenewerStore {
 	return &fakeRenewerStore{
-		authInfos:    make(map[uuid.UUID]domain.AccountAuthInfo),
-		authInfoErrs: make(map[uuid.UUID]error),
-		proxyIPs:     make(map[string]domain.ProxyIP),
-		proxyIPErrs:  make(map[string]error),
-		savedTokens:  make(map[uuid.UUID]string),
-		savedExpirys: make(map[uuid.UUID]*time.Time),
-		savedStatus:  make(map[uuid.UUID]string),
-		savedErrors:  make(map[uuid.UUID]string),
+		authInfos:          make(map[uuid.UUID]domain.AccountAuthInfo),
+		authInfoErrs:       make(map[uuid.UUID]error),
+		proxyIPs:           make(map[string]domain.ProxyIP),
+		proxyIPErrs:        make(map[string]error),
+		savedTokens:        make(map[uuid.UUID]string),
+		savedExpirys:       make(map[uuid.UUID]*time.Time),
+		savedStatus:        make(map[uuid.UUID]string),
+		savedErrors:        make(map[uuid.UUID]string),
+		savedAccountStatus: make(map[uuid.UUID]domain.AccountStatus),
 	}
 }
 
@@ -198,6 +200,13 @@ func (s *fakeRenewerStore) SetAccountAccessToken(ctx context.Context, id uuid.UU
 	s.savedExpirys[id] = expiresAt
 	s.savedStatus[id] = authStatus
 	s.savedErrors[id] = authError
+	return nil
+}
+
+func (s *fakeRenewerStore) SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.savedAccountStatus[id] = status
 	return nil
 }
 
@@ -452,7 +461,7 @@ func TestRenewer_RenewAll_EdgeCase_PermanentFailure_RecordsErrorPreservingToken(
 	renewer.RetryInterval = 2 * time.Millisecond
 	renewer.RenewFunc = func(ctx context.Context, clientID, token string, proxyCfg *dhan.ProxyConfig) (string, time.Time, error) {
 		attempts++
-		return "", time.Time{}, errors.New("401 unauthorized: token revoked")
+		return "", time.Time{}, errors.New("503 service unavailable: upstream down")
 	}
 
 	callbackCalled := false
@@ -482,8 +491,8 @@ func TestRenewer_RenewAll_EdgeCase_PermanentFailure_RecordsErrorPreservingToken(
 	if store.savedStatus[accountID] != "error" {
 		t.Errorf("savedStatus = %q, want 'error'", store.savedStatus[accountID])
 	}
-	if store.savedErrors[accountID] != "401 unauthorized: token revoked" {
-		t.Errorf("savedErrors = %q, want '401 unauthorized: token revoked'", store.savedErrors[accountID])
+	if store.savedErrors[accountID] != "503 service unavailable: upstream down" {
+		t.Errorf("savedErrors = %q, want '503 service unavailable: upstream down'", store.savedErrors[accountID])
 	}
 }
 
@@ -586,6 +595,254 @@ func TestRenewToken_HTTPIntegration_EdgeCase_EmptyToken(t *testing.T) {
 	_, _, err := dhan.RenewToken(context.Background(), "1000000401", "   ", nil)
 	if err == nil {
 		t.Fatalf("expected error when renewing empty token, got nil")
+	}
+}
+
+func TestRenewToken_HTTPIntegration_EdgeCase_EmptyTokenInResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"dhanClientId": "1000000401",
+			"accessToken": "",
+			"expiryTime": "2026-10-27 06:00:00"
+		}`))
+	}))
+	defer ts.Close()
+
+	_, _, err := dhan.RenewToken(
+		context.Background(),
+		"1000000401",
+		"active-jwt-token",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err == nil {
+		t.Fatalf("expected error when upstream returns empty accessToken, got nil")
+	}
+}
+
+func TestRenewToken_HTTPIntegration_EdgeCase_WhitespaceTokenInResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"dhanClientId": "1000000401",
+			"accessToken": "   ",
+			"expiryTime": "2026-10-27 06:00:00"
+		}`))
+	}))
+	defer ts.Close()
+
+	_, _, err := dhan.RenewToken(
+		context.Background(),
+		"1000000401",
+		"active-jwt-token",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err == nil {
+		t.Fatalf("expected error when upstream returns whitespace accessToken, got nil")
+	}
+}
+
+func TestRenewToken_EdgeCase_EmptyClientID(t *testing.T) {
+	_, _, err := dhan.RenewToken(context.Background(), "   ", "active-jwt-token", nil)
+	if err == nil {
+		t.Fatalf("expected error when renewing with empty clientID, got nil")
+	}
+}
+
+func TestRenewer_RenewAll_EdgeCase_EmptyTokenReturned_PreservesExistingToken(t *testing.T) {
+	store := newFakeRenewerStore()
+	accountID := uuid.New()
+	oldExpiry := time.Now().Add(4 * time.Hour)
+
+	store.accounts = []domain.Account{
+		{ID: accountID, Broker: "dhan", Active: true},
+	}
+	store.authInfos[accountID] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "1000000405",
+		AccessToken:     "initial-token-123",
+		TokenExpiresAt:  &oldExpiry,
+	}
+
+	renewer := dhan.NewRenewer(store, slog.Default())
+	renewer.RenewFunc = func(ctx context.Context, clientID, token string, proxyCfg *dhan.ProxyConfig) (string, time.Time, error) {
+		// Mock buggy renew func returning empty string with nil error
+		return "", time.Now().Add(24 * time.Hour), nil
+	}
+
+	err := renewer.RenewAll(context.Background())
+	if err != nil {
+		t.Fatalf("RenewAll should not fail fatal: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	// CRITICAL: Token must NEVER be overwritten with empty string!
+	if store.savedTokens[accountID] == "" && store.savedStatus[accountID] == "authenticated" {
+		t.Fatalf("CRITICAL BUG: RenewAll saved empty token and marked authenticated!")
+	}
+	if store.savedStatus[accountID] != "error" {
+		t.Errorf("savedStatus = %q, want 'error'", store.savedStatus[accountID])
+	}
+	if store.savedTokens[accountID] != "initial-token-123" {
+		t.Errorf("savedToken = %q, want preserved 'initial-token-123'", store.savedTokens[accountID])
+	}
+}
+
+func TestRenewer_RenewAll_EdgeCase_NonRetryableAuthFailure_FailsFastWithoutRetry(t *testing.T) {
+	store := newFakeRenewerStore()
+	accountID := uuid.New()
+
+	store.accounts = []domain.Account{
+		{ID: accountID, Broker: "dhan", Active: true},
+	}
+	store.authInfos[accountID] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "1000000406",
+		AccessToken:     "expired-token",
+	}
+
+	attempts := 0
+	renewer := dhan.NewRenewer(store, slog.Default())
+	renewer.MaxRetries = 3
+	renewer.RetryInterval = 1 * time.Hour // long interval: if it retries, test would hang/fail
+	renewer.RenewFunc = func(ctx context.Context, clientID, token string, proxyCfg *dhan.ProxyConfig) (string, time.Time, error) {
+		attempts++
+		return "", time.Time{}, domain.ErrAuthExpired
+	}
+
+	err := renewer.RenewAll(context.Background())
+	if err != nil {
+		t.Fatalf("RenewAll failed: %v", err)
+	}
+
+	if attempts != 1 {
+		t.Errorf("expected fail fast with 1 attempt for ErrAuthExpired, got %d", attempts)
+	}
+}
+
+func TestRenewer_RenewAll_EdgeCase_MissingClientID_FailsWithoutCallingAPI(t *testing.T) {
+	store := newFakeRenewerStore()
+	accountID := uuid.New()
+
+	store.accounts = []domain.Account{
+		{ID: accountID, Broker: "dhan", Active: true},
+	}
+	store.authInfos[accountID] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "",
+		ApiKey:          "",
+		AccessToken:     "valid-token",
+	}
+
+	apiCalled := false
+	renewer := dhan.NewRenewer(store, slog.Default())
+	renewer.RenewFunc = func(ctx context.Context, clientID, token string, proxyCfg *dhan.ProxyConfig) (string, time.Time, error) {
+		apiCalled = true
+		return "new-token", time.Now().Add(24 * time.Hour), nil
+	}
+
+	_ = renewer.RenewAll(context.Background())
+	if apiCalled {
+		t.Errorf("RenewFunc should not be called when clientID is missing")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.savedStatus[accountID] != "error" {
+		t.Errorf("savedStatus = %q, want 'error'", store.savedStatus[accountID])
+	}
+}
+
+func TestRenewer_RenewAll_AccountStatusUpdated_OnSuccessAndFailure(t *testing.T) {
+	store := newFakeRenewerStore()
+	accSuccess := uuid.New()
+	accFailure := uuid.New()
+
+	store.accounts = []domain.Account{
+		{ID: accSuccess, Broker: "dhan", Active: true},
+		{ID: accFailure, Broker: "dhan", Active: true},
+	}
+	store.authInfos[accSuccess] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "1001",
+		AccessToken:     "token-success",
+	}
+	store.authInfos[accFailure] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "1002",
+		AccessToken:     "token-failure",
+	}
+
+	renewer := dhan.NewRenewer(store, slog.Default())
+	renewer.RetryInterval = 1 * time.Millisecond
+	renewer.RenewFunc = func(ctx context.Context, clientID, token string, proxyCfg *dhan.ProxyConfig) (string, time.Time, error) {
+		if clientID == "1001" {
+			return "new-token-1001", time.Now().Add(24 * time.Hour), nil
+		}
+		return "", time.Time{}, domain.ErrAuthExpired
+	}
+
+	_ = renewer.RenewAll(context.Background())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.savedAccountStatus[accSuccess] != domain.AccountStatusActive {
+		t.Errorf("accSuccess account status = %v, want active", store.savedAccountStatus[accSuccess])
+	}
+	if store.savedAccountStatus[accFailure] != domain.AccountStatusError {
+		t.Errorf("accFailure account status = %v, want error", store.savedAccountStatus[accFailure])
+	}
+}
+
+func TestRenewer_RenewAll_MultiAccount_FailingAccountDoesNotBlockSibling(t *testing.T) {
+	store := newFakeRenewerStore()
+	acc1 := uuid.New()
+	acc2 := uuid.New()
+
+	store.accounts = []domain.Account{
+		{ID: acc1, Broker: "dhan", Active: true},
+		{ID: acc2, Broker: "dhan", Active: true},
+	}
+	store.authInfos[acc1] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "1001",
+		AccessToken:     "token-bad",
+	}
+	store.authInfos[acc2] = domain.AccountAuthInfo{
+		Broker:          "dhan",
+		BrokerAccountID: "1002",
+		AccessToken:     "token-good",
+	}
+
+	renewer := dhan.NewRenewer(store, slog.Default())
+	renewer.MaxRetries = 3
+	renewer.RetryInterval = 1 * time.Hour // large delay
+	renewer.RenewFunc = func(ctx context.Context, clientID, token string, proxyCfg *dhan.ProxyConfig) (string, time.Time, error) {
+		if clientID == "1001" {
+			return "", time.Time{}, domain.ErrAuthExpired
+		}
+		return "renewed-token-1002", time.Now().Add(24 * time.Hour), nil
+	}
+
+	err := renewer.RenewAll(context.Background())
+	if err != nil {
+		t.Fatalf("RenewAll failed: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.savedTokens[acc2] != "renewed-token-1002" {
+		t.Errorf("acc2 token = %q, want 'renewed-token-1002'", store.savedTokens[acc2])
+	}
+	if store.savedStatus[acc2] != "authenticated" {
+		t.Errorf("acc2 status = %q, want 'authenticated'", store.savedStatus[acc2])
 	}
 }
 
