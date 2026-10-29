@@ -554,6 +554,10 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			if h.followerRegistrar != nil {
 				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 			}
+		} else {
+			if h.followerRegistrar != nil {
+				h.followerRegistrar.UnregisterFollower(id)
+			}
 		}
 		if h.rebalanceSvc != nil {
 			if masterID, err := h.store.ResolveMasterID(r.Context(), id); err == nil {
@@ -782,7 +786,7 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			authStatus = "pending"
 		} else if isDhan {
-			exp := time.Now().UTC().Add(24 * time.Hour)
+			exp := domain.NowIST().Add(24 * time.Hour)
 			expiresAt = &exp
 			authStatus = "pending"
 		}

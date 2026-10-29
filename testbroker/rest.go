@@ -432,6 +432,12 @@ func NewRouter(cfg *Config, eng *OrderEngine, hub *WSHub, postback *PostbackDisp
 		writeKiteSuccess(w, map[string]string{"mode": cfg.ExecutionMode})
 	})
 
+	// Reset all state (orders, positions)
+	mux.HandleFunc("POST /api/reset", func(w http.ResponseWriter, r *http.Request) {
+		eng.Reset()
+		writeKiteSuccess(w, map[string]string{"message": "reset successful"})
+	})
+
 	// -------------------------------------------------------------
 	// Root / WebSocket / UI routing
 	// -------------------------------------------------------------

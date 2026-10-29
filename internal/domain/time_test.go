@@ -63,3 +63,82 @@ func TestNowIST(t *testing.T) {
 		t.Errorf("NowIST() zone offset = %d, want 19800", offset)
 	}
 }
+
+func TestParseIST(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantYear    int
+		wantMonth   time.Month
+		wantDay     int
+		wantHour    int
+		wantMinute  int
+		wantSecond  int
+		wantZero    bool
+		wantOffset  int
+	}{
+		{
+			input:      "2026-10-29 09:15:30",
+			wantYear:   2026,
+			wantMonth:  time.October,
+			wantDay:    29,
+			wantHour:   9,
+			wantMinute: 15,
+			wantSecond: 30,
+			wantOffset: 19800,
+		},
+		{
+			input:      "2026-10-29 09:15:30.500",
+			wantYear:   2026,
+			wantMonth:  time.October,
+			wantDay:    29,
+			wantHour:   9,
+			wantMinute: 15,
+			wantSecond: 30,
+			wantOffset: 19800,
+		},
+		{
+			input:      "2026-10-29T09:15:30.000",
+			wantYear:   2026,
+			wantMonth:  time.October,
+			wantDay:    29,
+			wantHour:   9,
+			wantMinute: 15,
+			wantSecond: 30,
+			wantOffset: 19800,
+		},
+		{
+			input:      "2026-10-29",
+			wantYear:   2026,
+			wantMonth:  time.October,
+			wantDay:    29,
+			wantOffset: 19800,
+		},
+		{
+			input:    "",
+			wantZero: true,
+		},
+		{
+			input:    "invalid-time",
+			wantZero: true,
+		},
+	}
+
+	for _, tc := range tests {
+		got := domain.ParseIST(tc.input)
+		if tc.wantZero {
+			if !got.IsZero() {
+				t.Errorf("ParseIST(%q) = %v, want zero time", tc.input, got)
+			}
+			continue
+		}
+		if got.Year() != tc.wantYear || got.Month() != tc.wantMonth || got.Day() != tc.wantDay ||
+			got.Hour() != tc.wantHour || got.Minute() != tc.wantMinute || got.Second() != tc.wantSecond {
+			t.Errorf("ParseIST(%q) = %v, want %d-%d-%d %d:%d:%d",
+				tc.input, got, tc.wantYear, tc.wantMonth, tc.wantDay, tc.wantHour, tc.wantMinute, tc.wantSecond)
+		}
+		_, offset := got.Zone()
+		if offset != tc.wantOffset {
+			t.Errorf("ParseIST(%q) zone offset = %d, want %d", tc.input, offset, tc.wantOffset)
+		}
+	}
+}

@@ -37,6 +37,7 @@ import (
 	"envoytrade/internal/domain"
 	"envoytrade/internal/engine"
 	"envoytrade/internal/httpapi"
+	"envoytrade/internal/instrument"
 	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/callback"
 	"envoytrade/internal/kite/fake"
@@ -292,12 +293,17 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("database migrations applied")
 
-	dhanResolver := dhan.NewInstrumentResolver(logger.With("component", "dhan_resolver"))
-	go func() {
-		if err := dhanResolver.Load(context.Background()); err != nil {
-			logger.Error("dhan: failed to load instrument resolver", "error", err)
-		}
-	}()
+	// Pre-allocated 10,000 capacity unified instrument cache
+	instrumentCache := instrument.NewCache(10000, store, logger.With("component", "instrument_cache"))
+	if err := instrumentCache.AutoLoadActiveFO(ctx); err != nil {
+		logger.Warn("auto-load active fo instruments failed on boot", "error", err)
+	}
+
+	// Instrument Syncer for daily 05:00 AM IST ingestion
+	instrumentSyncer := instrument.NewSyncer(store, logger.With("component", "instrument_syncer"))
+	instrumentSyncer.StartDailyRoutine(ctx, 5, 0, func(c context.Context) error {
+		return instrumentCache.AutoLoadActiveFO(c)
+	})
 
 	brokerRegistry := broker.NewRegistry()
 	kiteBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
@@ -328,7 +334,7 @@ func run(logger *slog.Logger) error {
 		if clientID == "" {
 			clientID = acc.ApiKey
 		}
-		return dhan.NewLiveBroker(clientID, acc.AccessToken, proxyCfg, dhanResolver)
+		return dhan.NewLiveBroker(clientID, acc.AccessToken, proxyCfg, instrumentCache)
 	})
 	brokerRegistry.Register("kite", kiteBrokerFactory)
 	brokerRegistry.Register("zerodha", kiteBrokerFactory)
@@ -377,6 +383,7 @@ func run(logger *slog.Logger) error {
 	rebalanceSvc := rebalance.NewService(store, accountPool, syncer, logger.With("component", "rebalance"))
 
 	eng := engine.New(store, workerPool)
+	eng.SetLotSizeResolver(instrumentCache)
 	eng.Logger = logger.With("component", "engine")
 	execFeed := telemetry.NewExecutionFeed(25)
 	eng.ExecutionRecorder = execFeed
@@ -402,6 +409,7 @@ func run(logger *slog.Logger) error {
 				return
 			case <-timer.C:
 				eng.ClearLotSizeCache()
+				_ = instrumentCache.AutoLoadActiveFO(context.Background())
 				logger.Info("daily lot size cache cleared at 01:00:00 IST")
 			}
 		}
@@ -463,7 +471,7 @@ func run(logger *slog.Logger) error {
 		Accounts:        store,
 		MasterFills:     masterFillQueue,
 		FollowerUpdates: orderUpdateQueue,
-		Resolver:        dhanResolver,
+		Resolver:        instrumentCache,
 		Logger:          logger.With("component", "dhan_postback"),
 	}
 	postbackRouter.Register("dhan", dhanPostback)
@@ -495,7 +503,7 @@ func run(logger *slog.Logger) error {
 	// Dynamic multi-master WebSocket ticker manager (generic, multi-broker)
 	tickerManager := ticker.NewManager(store, poller, logger.With("component", "ticker_manager"))
 	kiteTickerFactory := kite.NewTickerFactory(masterFillQueue, logger.With("component", "kite_ticker"))
-	dhanTickerFactory := dhanws.NewTickerFactory(masterFillQueue, dhanResolver, logger.With("component", "dhan_ticker"))
+	dhanTickerFactory := dhanws.NewTickerFactory(masterFillQueue, instrumentCache, logger.With("component", "dhan_ticker"))
 	testbrokerTickerFactory := testbroker.NewTickerFactory(masterFillQueue, logger.With("component", "testbroker_ticker"))
 	tickerManager.RegisterFactory("kite", kiteTickerFactory)
 	tickerManager.RegisterFactory("zerodha", kiteTickerFactory)

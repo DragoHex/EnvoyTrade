@@ -133,6 +133,25 @@ listener.FollowerStatusConsumer.Handle (drains queue.Consumer[domain.OrderUpdate
 - `internal/kite/fake.Broker` is a programmable fake (injectable `Latency`, `Err`, `OrderID`, and call recording) used across worker and kite/fake tests — not a mock framework.
 - `internal/kite/callback` tests use small hand-written fakes (`fakeAccounts`, generic `fakePublisher[T]`, `fakeConn`) rather than a mock framework, same style as the rest of the repo.
 
+### Scheduled Jobs & Periodic Routines Documentation
+
+All OS cron jobs, in-process timers, tickers, and recurring background routines are cataloged in [`docs/CRON_AND_PERIODIC_ROUTINES.md`](docs/CRON_AND_PERIODIC_ROUTINES.md).
+- **Mandatory Rule**: On ANY addition, modification, schedule change, or removal of OS cron jobs (e.g. `/etc/cron.d/`, `scripts/`) or in-process routines/tickers (e.g. `cmd/server/main.go`, `internal/recon`, `internal/dhan`), you MUST update [`docs/CRON_AND_PERIODIC_ROUTINES.md`](docs/CRON_AND_PERIODIC_ROUTINES.md) in the exact same change.
+
+### Broker Integration Checklist
+
+When integrating or extending a broker adapter in EnvoyTrade, follow [`docs/BROKER_INTEGRATION_CHECKLIST.md`](docs/BROKER_INTEGRATION_CHECKLIST.md).
+- **Mandatory Rule**: Every broker adapter MUST adhere to the mandatory broker integration checklist across all 9 operational areas:
+  1. **Instrument Master**: Stream & parse feeds without heap bloat, transactional prune only after 100% download/parse success, batch `UNNEST` insert, post-sync `VACUUM ANALYZE instruments`, and auto-load active F&O into the pre-allocated 10,000 capacity unified cache (`instrument.Cache`) for forward/reverse symbol translation.
+  2. **Auth & Tokens**: AES-GCM credential encryption, JWT claim/identity verification, automated headless login/token renewal daemons, and token refresh callbacks (`accountPool.Evict`, ticker restart, worker re-registration).
+  3. **Broker Adapter**: Seam-rule conformance (`broker.Broker`), registration with `broker.Registry`, strict static proxy routing (`RESTClientFor`), sentinel error mapping, and decimal-only math.
+  4. **Master Ticker**: Isolated WebSocket stream per master (`ticker.Factory`), terminal status filtering (`COMPLETE`/`REJECTED`/`CANCELLED`), reverse symbol resolution, and reconnect catch-up reconciliation.
+  5. **Postback Webhooks**: Adaptive router registration with zero-allocation payload fingerprinting, per-account checksum verification, and HTTP 200 response guarantees.
+  6. **Reconciliation & Drift**: Order/history inspection (`GetOrders`, `GetOrderHistory`), stuck follower order sweeping (>2 min), and fail-fast drift detection.
+  7. **Portfolio & Margin Sync**: Normalized position/holding/margin sync, account status transitions, and debounced polling.
+  8. **Admin API**: Whitelisted broker enums, quota enforcement, and proxy IP pool whitelist matching.
+  9. **Documentation**: Maintain entries in [`docs/CRON_AND_PERIODIC_ROUTINES.md`](docs/CRON_AND_PERIODIC_ROUTINES.md).
+
 ## Frontend
 
 For frontend design principles, themed dropdown rules, and UI color palette, see [`frontend/AGENTS.md`](frontend/AGENTS.md).

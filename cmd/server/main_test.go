@@ -15,6 +15,7 @@ import (
 	"envoytrade/internal/broker"
 	"envoytrade/internal/dhan"
 	"envoytrade/internal/domain"
+	"envoytrade/internal/instrument"
 	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/fake"
 	"envoytrade/internal/testbroker"
@@ -137,7 +138,7 @@ func setupTestResolver(store brokerResolverStore) *serverBrokerResolver {
 	reg.Register("zerodha", kiteFactory)
 	reg.Register("testbroker", testbroker.NewBrokerFactory())
 
-	dhanResolver := dhan.NewInstrumentResolver(nil)
+	dhanResolver := instrument.NewCache(1000, nil, nil)
 	dhanFactory := broker.FactoryFunc(func(_ context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
 		var proxyCfg *dhan.ProxyConfig
 		if acc.ProxyHost != "" {

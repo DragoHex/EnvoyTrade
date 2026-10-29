@@ -1,10 +1,39 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // IST is the Indian Standard Time zone (UTC+05:30).
 // Indian equity and commodity markets (NSE, BSE, MCX) operate strictly in IST.
 var IST = time.FixedZone("IST", 5*3600+1800)
+
+var istLayouts = []string{
+	"2006-01-02 15:04:05.999999999",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04:05",
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02",
+}
+
+// ParseIST parses timestamp strings in Indian Standard Time (IST).
+// It supports space-separated, ISO formats, with or without milliseconds.
+// If the string is empty or unparseable, it returns a zero time.Time.
+func ParseIST(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "null" {
+		return time.Time{}
+	}
+	for _, layout := range istLayouts {
+		if t, err := time.ParseInLocation(layout, s, IST); err == nil {
+			return t.In(IST)
+		}
+	}
+	return time.Time{}
+}
 
 // FormatIST returns the timestamp formatted as "YYYY-MM-DD HH:MM:SS" in IST.
 func FormatIST(t time.Time) string {

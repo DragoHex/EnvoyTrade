@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"envoytrade/internal/domain"
 	"envoytrade/internal/queue"
@@ -140,14 +139,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	raw, _ := json.Marshal(p)
 
-	var ts time.Time
-	if p.CreateTime != "" {
-		if t, err := time.Parse("2006-01-02 15:04:05", p.CreateTime); err == nil {
-			ts = t
-		}
-	}
+	ts := domain.ParseIST(p.CreateTime)
 	if ts.IsZero() {
-		ts = time.Now().UTC()
+		ts = domain.NowIST()
 	}
 
 	avgPrice := p.AverageTradedPrice

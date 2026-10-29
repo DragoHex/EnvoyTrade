@@ -47,12 +47,18 @@ type ExecutionRecorder interface {
 	Record(event domain.ExecutionEvent)
 }
 
+// LotSizeResolver resolves the contract lot size for a given exchange and symbol.
+type LotSizeResolver interface {
+	ResolveLotSize(ctx context.Context, exchange, tradingsymbol string) (int, error)
+}
+
 // Engine fans a master fill out to every enabled follower.
 type Engine struct {
 	store             Store
 	dispatcher        Dispatcher
 	Logger            *slog.Logger
 	ExecutionRecorder ExecutionRecorder
+	lotSizeResolver   LotSizeResolver
 	lotSizeCache      sync.Map
 	killSwitch        atomic.Bool
 	killSwitchStatus  atomic.Pointer[domain.KillSwitchStatus]
@@ -61,6 +67,11 @@ type Engine struct {
 // New wires an Engine to its store and dispatcher.
 func New(store Store, dispatcher Dispatcher) *Engine {
 	return &Engine{store: store, dispatcher: dispatcher}
+}
+
+// SetLotSizeResolver configures an external lot size resolver (e.g. instrument.Cache).
+func (e *Engine) SetLotSizeResolver(resolver LotSizeResolver) {
+	e.lotSizeResolver = resolver
 }
 
 // IsKillSwitchEngaged returns whether the emergency fan-out kill switch is active.
@@ -105,6 +116,10 @@ func (e *Engine) ClearLotSizeCache() {
 }
 
 func (e *Engine) resolveLotSize(ctx context.Context, exchange, symbol string) (int, error) {
+	if e.lotSizeResolver != nil {
+		return e.lotSizeResolver.ResolveLotSize(ctx, exchange, symbol)
+	}
+
 	key := exchange + ":" + symbol
 	if val, ok := e.lotSizeCache.Load(key); ok {
 		return val.(int), nil

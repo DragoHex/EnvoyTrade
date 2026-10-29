@@ -90,11 +90,13 @@ func RenewToken(ctx context.Context, clientID, token string, proxyCfg *ProxyConf
 	}
 
 	expiresAt := resp.ExpiryTime.Time
-	if expiresAt.IsZero() {
+	if !expiresAt.IsZero() {
+		expiresAt = expiresAt.In(domain.IST)
+	} else {
 		if claims, claimErr := ParseDhanJWT(newToken); claimErr == nil && !claims.ExpiresAt.IsZero() {
-			expiresAt = claims.ExpiresAt
+			expiresAt = claims.ExpiresAt.In(domain.IST)
 		} else {
-			expiresAt = time.Now().Add(24 * time.Hour)
+			expiresAt = domain.NowIST().Add(24 * time.Hour)
 		}
 	}
 	return newToken, expiresAt, nil

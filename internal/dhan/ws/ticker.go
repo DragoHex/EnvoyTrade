@@ -182,14 +182,9 @@ func (t *MasterTicker) handleOrderUpdate(update dhanticker.OrderUpdate) {
 
 	raw, _ := json.Marshal(update)
 
-	var ts time.Time
-	if update.CreateTime != "" {
-		if parsed, err := time.Parse("2006-01-02 15:04:05", update.CreateTime); err == nil {
-			ts = parsed
-		}
-	}
+	ts := domain.ParseIST(update.CreateTime)
 	if ts.IsZero() {
-		ts = time.Now().UTC()
+		ts = domain.NowIST()
 	}
 
 	avgPrice := update.AverageTradedPrice

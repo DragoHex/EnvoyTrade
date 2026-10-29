@@ -12,8 +12,67 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const activeFOInstrumentsForCache = `-- name: ActiveFOInstrumentsForCache :many
+SELECT 
+    broker,
+    exchange,
+    tradingsymbol,
+    lot_size,
+    COALESCE(security_id, '')::text AS security_id,
+    COALESCE(exchange_segment, '')::text AS exchange_segment,
+    expiry
+FROM instruments
+WHERE expiry IS NOT NULL
+  AND exchange = ANY(ARRAY['NFO', 'BFO', 'MCX']::text[])
+  AND expiry >= CURRENT_DATE
+  AND (
+      (expiry >= date_trunc('month', CURRENT_DATE) AND expiry < (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'))
+      OR expiry <= (CURRENT_DATE + INTERVAL '21 days')
+  )
+ORDER BY expiry ASC, tradingsymbol ASC
+LIMIT 10000
+`
+
+type ActiveFOInstrumentsForCacheRow struct {
+	Broker          string
+	Exchange        string
+	Tradingsymbol   string
+	LotSize         int32
+	SecurityID      string
+	ExchangeSegment string
+	Expiry          pgtype.Date
+}
+
+func (q *Queries) ActiveFOInstrumentsForCache(ctx context.Context) ([]ActiveFOInstrumentsForCacheRow, error) {
+	rows, err := q.db.Query(ctx, activeFOInstrumentsForCache)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActiveFOInstrumentsForCacheRow{}
+	for rows.Next() {
+		var i ActiveFOInstrumentsForCacheRow
+		if err := rows.Scan(
+			&i.Broker,
+			&i.Exchange,
+			&i.Tradingsymbol,
+			&i.LotSize,
+			&i.SecurityID,
+			&i.ExchangeSegment,
+			&i.Expiry,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const instrumentLotSize = `-- name: InstrumentLotSize :one
-SELECT lot_size FROM instruments WHERE exchange = $1 AND tradingsymbol = $2
+SELECT lot_size FROM instruments WHERE exchange = $1 AND tradingsymbol = $2 LIMIT 1
 `
 
 type InstrumentLotSizeParams struct {
@@ -28,33 +87,52 @@ func (q *Queries) InstrumentLotSize(ctx context.Context, arg InstrumentLotSizePa
 	return lot_size, err
 }
 
+const pruneInstrumentsByBroker = `-- name: PruneInstrumentsByBroker :execrows
+DELETE FROM instruments WHERE broker = $1
+`
+
+func (q *Queries) PruneInstrumentsByBroker(ctx context.Context, broker string) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneInstrumentsByBroker, broker)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertInstrument = `-- name: UpsertInstrument :exec
-INSERT INTO instruments (instrument_token, exchange, tradingsymbol, lot_size, tick_size, segment, expiry, refreshed_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+INSERT INTO instruments (instrument_token, broker, exchange, tradingsymbol, lot_size, tick_size, segment, security_id, exchange_segment, expiry, refreshed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 ON CONFLICT (instrument_token) DO UPDATE SET
-  exchange = EXCLUDED.exchange, tradingsymbol = EXCLUDED.tradingsymbol,
+  broker = EXCLUDED.broker, exchange = EXCLUDED.exchange, tradingsymbol = EXCLUDED.tradingsymbol,
   lot_size = EXCLUDED.lot_size, tick_size = EXCLUDED.tick_size,
-  segment = EXCLUDED.segment, expiry = EXCLUDED.expiry, refreshed_at = now()
+  segment = EXCLUDED.segment, security_id = EXCLUDED.security_id,
+  exchange_segment = EXCLUDED.exchange_segment, expiry = EXCLUDED.expiry, refreshed_at = now()
 `
 
 type UpsertInstrumentParams struct {
 	InstrumentToken int64
+	Broker          string
 	Exchange        string
 	Tradingsymbol   string
 	LotSize         int32
 	TickSize        decimal.Decimal
 	Segment         *string
+	SecurityID      *string
+	ExchangeSegment *string
 	Expiry          pgtype.Date
 }
 
 func (q *Queries) UpsertInstrument(ctx context.Context, arg UpsertInstrumentParams) error {
 	_, err := q.db.Exec(ctx, upsertInstrument,
 		arg.InstrumentToken,
+		arg.Broker,
 		arg.Exchange,
 		arg.Tradingsymbol,
 		arg.LotSize,
 		arg.TickSize,
 		arg.Segment,
+		arg.SecurityID,
+		arg.ExchangeSegment,
 		arg.Expiry,
 	)
 	return err
