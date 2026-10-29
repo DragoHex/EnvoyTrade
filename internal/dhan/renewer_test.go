@@ -686,6 +686,153 @@ func TestRenewToken_EdgeCase_EmptyClientID(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Defense-in-Depth Unit Tests: Live Gateway Payload, Token Interoperability & JWT Validation
+// =============================================================================
+
+func TestRenewToken_DefenseInDepth_LiveGatewayPayload(t *testing.T) {
+	expTime := time.Date(2026, 10, 30, 15, 8, 58, 0, domain.IST)
+	validJWT := makeTestJWT(
+		map[string]any{"typ": "JWT", "alg": "HS512"},
+		map[string]any{
+			"dhanClientId": "1114425611",
+			"exp":          expTime.Unix(),
+			"iss":          "dhan",
+		},
+	)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Exact JSON structure from live DhanHQ gateway /v2/RenewToken response:
+		_, _ = w.Write([]byte(`{
+			"createTime": "2026-10-29T15:08:58.164",
+			"expiryTime": "2026-10-30T15:08:58.163",
+			"token": "` + validJWT + `"
+		}`))
+	}))
+	defer ts.Close()
+
+	newToken, expiresAt, err := dhan.RenewToken(
+		context.Background(),
+		"1114425611",
+		"active-jwt",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("RenewToken failed with live gateway payload: %v", err)
+	}
+	if newToken != validJWT {
+		t.Errorf("newToken = %q, want %q", newToken, validJWT)
+	}
+	expectedExpiry := time.Date(2026, 10, 30, 15, 8, 58, 163000000, time.UTC)
+	if !expiresAt.Equal(expectedExpiry) {
+		t.Errorf("expiresAt = %v, want %v", expiresAt, expectedExpiry)
+	}
+}
+
+func TestRenewToken_DefenseInDepth_JWTClaimsClientMismatch(t *testing.T) {
+	expTime := time.Now().Add(24 * time.Hour).Truncate(time.Second)
+	mismatchedJWT := makeTestJWT(
+		map[string]any{"typ": "JWT", "alg": "HS512"},
+		map[string]any{
+			"dhanClientId": "9999999999", // different client ID
+			"exp":          expTime.Unix(),
+			"iss":          "dhan",
+		},
+	)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"token": "` + mismatchedJWT + `",
+			"expiryTime": "2026-10-30 15:00:00"
+		}`))
+	}))
+	defer ts.Close()
+
+	_, _, err := dhan.RenewToken(
+		context.Background(),
+		"1114425611", // expected client ID
+		"active-jwt",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err == nil {
+		t.Fatalf("expected error when returned JWT dhanClientId mismatches requested clientID, got nil")
+	}
+	if !errors.Is(err, domain.ErrAuthExpired) {
+		t.Errorf("expected ErrAuthExpired, got: %v", err)
+	}
+}
+
+func TestRenewToken_DefenseInDepth_MalformedJWTSegments(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"token": "header.!!!invalid-base64-payload!!!.signature",
+			"expiryTime": "2026-10-30 15:00:00"
+		}`))
+	}))
+	defer ts.Close()
+
+	_, _, err := dhan.RenewToken(
+		context.Background(),
+		"1114425611",
+		"active-jwt",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err == nil {
+		t.Fatalf("expected error when returned 3-segment token is not valid JWT, got nil")
+	}
+	if !errors.Is(err, domain.ErrAuthExpired) {
+		t.Errorf("expected ErrAuthExpired, got: %v", err)
+	}
+}
+
+func TestRenewToken_DefenseInDepth_ExpiryFallbackToJWT(t *testing.T) {
+	expTime := time.Date(2026, 10, 30, 20, 0, 0, 0, domain.IST)
+	validJWT := makeTestJWT(
+		map[string]any{"typ": "JWT", "alg": "HS512"},
+		map[string]any{
+			"dhanClientId": "1114425611",
+			"exp":          expTime.Unix(),
+			"iss":          "dhan",
+		},
+	)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Missing expiryTime in response
+		_, _ = w.Write([]byte(`{
+			"token": "` + validJWT + `"
+		}`))
+	}))
+	defer ts.Close()
+
+	newToken, expiresAt, err := dhan.RenewToken(
+		context.Background(),
+		"1114425611",
+		"active-jwt",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("RenewToken failed: %v", err)
+	}
+	if newToken != validJWT {
+		t.Errorf("newToken = %q, want %q", newToken, validJWT)
+	}
+	if !expiresAt.Equal(expTime) {
+		t.Errorf("expiresAt = %v, want %v", expiresAt, expTime)
+	}
+}
+
 func TestRenewer_RenewAll_EdgeCase_EmptyTokenReturned_PreservesExistingToken(t *testing.T) {
 	store := newFakeRenewerStore()
 	accountID := uuid.New()

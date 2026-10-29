@@ -86,18 +86,31 @@ func RenewToken(ctx context.Context, clientID, token string, proxyCfg *ProxyConf
 
 	newToken := strings.TrimSpace(resp.AccessToken)
 	if newToken == "" {
+		newToken = strings.TrimSpace(resp.Token)
+	}
+	if newToken == "" {
 		return "", time.Time{}, fmt.Errorf("%w: broker renewal returned empty access token", domain.ErrAuthExpired)
+	}
+
+	var claims *DhanClaims
+	if strings.Count(newToken, ".") == 2 {
+		var claimErr error
+		claims, claimErr = ParseDhanJWT(newToken)
+		if claimErr != nil {
+			return "", time.Time{}, fmt.Errorf("%w: invalid renewed jwt: %v", domain.ErrAuthExpired, claimErr)
+		}
+		if clientID != "" && claims.DhanClientID != "" && claims.DhanClientID != clientID {
+			return "", time.Time{}, fmt.Errorf("%w: renewed token client id mismatch (got %s, want %s)", domain.ErrAuthExpired, claims.DhanClientID, clientID)
+		}
 	}
 
 	expiresAt := resp.ExpiryTime.Time
 	if !expiresAt.IsZero() {
 		expiresAt = expiresAt.In(domain.IST)
+	} else if claims != nil && !claims.ExpiresAt.IsZero() {
+		expiresAt = claims.ExpiresAt.In(domain.IST)
 	} else {
-		if claims, claimErr := ParseDhanJWT(newToken); claimErr == nil && !claims.ExpiresAt.IsZero() {
-			expiresAt = claims.ExpiresAt.In(domain.IST)
-		} else {
-			expiresAt = domain.NowIST().Add(24 * time.Hour)
-		}
+		expiresAt = domain.NowIST().Add(24 * time.Hour)
 	}
 	return newToken, expiresAt, nil
 }
