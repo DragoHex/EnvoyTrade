@@ -2,6 +2,7 @@ package dhan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,6 +46,20 @@ type PortfolioSyncer struct {
 func defaultAPIFactory(clientID, token string, proxyCfg *ProxyConfig) (SyncAPI, error) {
 	opts := BuildClientOptions(proxyCfg)
 	return godhan.NewClient(clientID, token, opts...), nil
+}
+
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, domain.ErrAuthExpired) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "dh-901") || strings.Contains(msg, "dh-906") ||
+		strings.Contains(msg, "invalid token") || strings.Contains(msg, "token expired") ||
+		strings.Contains(msg, "unauthorized") || strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "http 401") || strings.Contains(msg, "status 401")
 }
 
 // SyncAccountPortfolio syncs positions, holdings, and funds limits for a Dhan account.
@@ -91,14 +106,16 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		return fmt.Errorf("create dhan sync client: %w", err)
 	}
 
-	handleAuthFailure := func(err error) error {
-		authErrMsg := domain.SanitizeAuthError(err.Error())
-		if authErrMsg == "" {
-			authErrMsg = "Broker session expired or token invalid"
-		}
-		_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "error", authErrMsg)
-		if setter, ok := s.Store.(accountStatusSetter); ok {
-			_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
+	handleFailure := func(err error) error {
+		if isAuthError(err) {
+			authErrMsg := domain.SanitizeAuthError(err.Error())
+			if authErrMsg == "" {
+				authErrMsg = "Broker session expired or token invalid"
+			}
+			_ = s.Store.SetAccountAccessToken(ctx, accountID, token, nil, "error", authErrMsg)
+			if setter, ok := s.Store.(accountStatusSetter); ok {
+				_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
+			}
 		}
 		return err
 	}
@@ -110,7 +127,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		if strings.Contains(msg, "no positions") || strings.Contains(msg, "no data") || strings.Contains(msg, "dh-1111") {
 			positions = []models.Position{}
 		} else {
-			return handleAuthFailure(fmt.Errorf("get dhan positions: %w", err))
+			return handleFailure(fmt.Errorf("get dhan positions: %w", err))
 		}
 	}
 
@@ -151,7 +168,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		if strings.Contains(msg, "no holdings") || strings.Contains(msg, "dh-1111") || strings.Contains(msg, "no data") {
 			holdings = []models.Holding{}
 		} else {
-			return handleAuthFailure(fmt.Errorf("get dhan holdings: %w", err))
+			return handleFailure(fmt.Errorf("get dhan holdings: %w", err))
 		}
 	}
 
@@ -171,7 +188,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// 3. Fetch & Sync Fund Limits / Margins
 	funds, err := api.GetFundLimits(ctx)
 	if err != nil {
-		return handleAuthFailure(fmt.Errorf("get dhan fund limits: %w", err))
+		return handleFailure(fmt.Errorf("get dhan fund limits: %w", err))
 	}
 
 	availCash := funds.AvailableBalance
@@ -193,8 +210,8 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 
 	// Mark status as authenticated and active, ensuring token expiration is set / preserved
 	expiresAt := authInfo.TokenExpiresAt
-	if expiresAt == nil || !expiresAt.After(time.Now().UTC()) {
-		exp := time.Now().UTC().Add(24 * time.Hour)
+	if expiresAt == nil || !expiresAt.After(domain.NowIST()) {
+		exp := domain.NowIST().Add(24 * time.Hour)
 		expiresAt = &exp
 	}
 	if authInfo.AuthStatus != "authenticated" || authInfo.TokenExpiresAt == nil {

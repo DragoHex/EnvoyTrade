@@ -185,6 +185,38 @@ func TestPortfolioSyncer_SyncAccountPortfolio_Negative_MissingToken(t *testing.T
 	}
 }
 
+func TestPortfolioSyncer_SyncAccountPortfolio_TransientNetworkError_PreservesToken(t *testing.T) {
+	accountID := uuid.New()
+	store := &fakeSyncStore{
+		authInfo: domain.AccountAuthInfo{
+			ID:              accountID,
+			Broker:          "dhan",
+			BrokerAccountID: "1000000001",
+			AccessToken:     "valid-token",
+			AuthStatus:      "authenticated",
+		},
+	}
+
+	api := &fakeDhanSyncAPI{
+		err: errors.New("503 Service Unavailable: connection timed out"),
+	}
+
+	syncer := &dhan.PortfolioSyncer{
+		Store: store,
+		APIFactory: func(clientID, token string, proxyCfg *dhan.ProxyConfig) (dhan.SyncAPI, error) {
+			return api, nil
+		},
+	}
+
+	err := syncer.SyncAccountPortfolio(context.Background(), accountID)
+	if err == nil {
+		t.Errorf("expected error for 503, got nil")
+	}
+	if store.statusUpdated == "error" {
+		t.Errorf("transient network error should NOT set status to error, got: %s", store.statusUpdated)
+	}
+}
+
 func TestPortfolioSyncer_SyncAccountPortfolio_Negative_AuthError(t *testing.T) {
 	accountID := uuid.New()
 	store := &fakeSyncStore{
