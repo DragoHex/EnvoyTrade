@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"envoytrade/internal/domain"
 )
 
 // DhanClaims holds essential claims decoded from a Dhan JWT access token.
@@ -43,7 +45,7 @@ func ParseDhanJWT(token string) (*DhanClaims, error) {
 		return nil, errors.New("jwt missing dhanClientId claim")
 	}
 	if claims.Exp > 0 {
-		claims.ExpiresAt = time.Unix(claims.Exp, 0).UTC()
+		claims.ExpiresAt = time.Unix(claims.Exp, 0).In(domain.IST)
 	}
 	return &claims, nil
 }

@@ -786,7 +786,7 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			authStatus = "pending"
 		} else if isDhan {
-			exp := time.Now().UTC().Add(24 * time.Hour)
+			exp := domain.NowIST().Add(24 * time.Hour)
 			expiresAt = &exp
 			authStatus = "pending"
 		}

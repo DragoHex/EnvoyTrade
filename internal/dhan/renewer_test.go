@@ -571,6 +571,39 @@ func TestRenewToken_HTTPIntegration_Positive(t *testing.T) {
 	}
 }
 
+func TestRenewToken_HTTPIntegration_WithMillisecondsExpiry(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"dhanClientId": "1000000401",
+			"dhanClientName": "MSP TRADER",
+			"accessToken": "brand-new-jwt-token-with-millis",
+			"expiryTime": "2026-10-29T10:30:00.000"
+		}`))
+	}))
+	defer ts.Close()
+
+	newToken, expiresAt, err := dhan.RenewToken(
+		context.Background(),
+		"1000000401",
+		"current-jwt-token",
+		nil,
+		godhan.WithBaseURI(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("RenewToken failed on milliseconds timestamp: %v", err)
+	}
+
+	if newToken != "brand-new-jwt-token-with-millis" {
+		t.Errorf("newToken = %q, want 'brand-new-jwt-token-with-millis'", newToken)
+	}
+	expectedExpiry := time.Date(2026, 10, 29, 10, 30, 0, 0, time.UTC)
+	if !expiresAt.Equal(expectedExpiry) {
+		t.Errorf("expiresAt = %v, want %v", expiresAt, expectedExpiry)
+	}
+}
+
 func TestRenewToken_HTTPIntegration_Negative_Unauthorized(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

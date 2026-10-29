@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
@@ -172,12 +171,7 @@ func toBrokerOrder(o models.OrderResponse) broker.Order {
 	triggerPrice, _ := o.TriggerPrice.Float64()
 	avgPrice, _ := o.AverageTradedPrice.Float64()
 
-	var ts time.Time
-	if o.CreateTime != "" {
-		if t, err := time.Parse("2006-01-02 15:04:05", o.CreateTime); err == nil {
-			ts = t
-		}
-	}
+	ts := domain.ParseIST(o.CreateTime)
 
 	exchange := "NSE"
 	if strings.HasPrefix(o.ExchangeSegment, "BSE") {
