@@ -98,6 +98,23 @@ func NewOrderEngine(cfg *Config) *OrderEngine {
 	return e
 }
 
+// Reset restores the order engine to initial config state.
+func (e *OrderEngine) Reset() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.orders = make(map[string]*Order)
+	e.userOrders = make(map[string][]string)
+	e.history = make(map[string][]Order)
+	if e.config != nil {
+		for i := range e.config.Orders {
+			o := e.config.Orders[i]
+			e.orders[o.OrderID] = &o
+			e.userOrders[o.UserID] = append(e.userOrders[o.UserID], o.OrderID)
+			e.history[o.OrderID] = []Order{o}
+		}
+	}
+}
+
 // OnTerminal registers a hook called whenever an order reaches a terminal state.
 func (e *OrderEngine) OnTerminal(fn func(*Order)) {
 	e.mu.Lock()

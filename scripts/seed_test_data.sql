@@ -6,21 +6,23 @@ BEGIN;
 
 -- 0. Users: Test users for authentication and multi-tenant scoping
 -- Password for both accounts is: password123 (bcrypt cost 12 hash)
-INSERT INTO users (id, email, username, name, password_hash, role, active, phone, address, gst_number, created_at, updated_at)
+INSERT INTO users (id, email, username, name, password_hash, role, active, max_ips, broker_ip_limits, phone, address, gst_number, created_at, updated_at)
 VALUES
-  ('a0000000-0000-0000-0000-000000000001', 'trader@envoytrade.com', 'trader', 'Demo Trader', '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'admin', true, '+919876543210', '123 Dalal Street, Fort, Mumbai, Maharashtra 400001', '27AABCU9603R1ZM', now(), now()),
-  ('a0000000-0000-0000-0000-000000000002', 'bob@envoytrade.com',    'bob',    'Bob Trader',  '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'user',  true, '+919876543211', '456 MG Road, Bengaluru, Karnataka 560001',          '',                now(), now())
+  ('a0000000-0000-0000-0000-000000000001', 'trader@envoytrade.com', 'trader', 'Demo Trader', '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'admin', true, -1, '{"general": 100, "kite": 50, "dhan": 50, "testbroker": 50}'::jsonb, '+919876543210', '123 Dalal Street, Fort, Mumbai, Maharashtra 400001', '27AABCU9603R1ZM', now(), now()),
+  ('a0000000-0000-0000-0000-000000000002', 'bob@envoytrade.com',    'bob',    'Bob Trader',  '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'user',  true, -1, '{"general": 100, "kite": 50, "dhan": 50, "testbroker": 50}'::jsonb, '+919876543211', '456 MG Road, Bengaluru, Karnataka 560001',          '',                now(), now())
 ON CONFLICT (id) DO UPDATE SET
-  email         = EXCLUDED.email,
-  username      = EXCLUDED.username,
-  name          = EXCLUDED.name,
-  password_hash = EXCLUDED.password_hash,
-  role          = EXCLUDED.role,
-  active        = EXCLUDED.active,
-  phone         = EXCLUDED.phone,
-  address       = EXCLUDED.address,
-  gst_number    = EXCLUDED.gst_number,
-  updated_at    = now();
+  email            = EXCLUDED.email,
+  username         = EXCLUDED.username,
+  name             = EXCLUDED.name,
+  password_hash    = EXCLUDED.password_hash,
+  role             = EXCLUDED.role,
+  active           = EXCLUDED.active,
+  max_ips          = EXCLUDED.max_ips,
+  broker_ip_limits = EXCLUDED.broker_ip_limits,
+  phone            = EXCLUDED.phone,
+  address          = EXCLUDED.address,
+  gst_number       = EXCLUDED.gst_number,
+  updated_at       = now();
 
 -- 0.1 Proxy IPs: Static proxy IP pool for broker accounts
 INSERT INTO proxy_ips (ip_address, ip_type, host, port, username, password, whitelisted_brokers, valid_from, valid_until, plan)
@@ -215,22 +217,22 @@ VALUES
 ON CONFLICT (master_id, broker_order_id, filled_quantity, status) DO NOTHING;
 
 -- 8. Instruments: Canonical lot sizes and tick sizes for test contracts
-INSERT INTO instruments (instrument_token, exchange, tradingsymbol, lot_size, tick_size, segment, expiry, refreshed_at)
+INSERT INTO instruments (instrument_token, broker, exchange, tradingsymbol, lot_size, tick_size, segment, expiry, refreshed_at)
 VALUES
-  (408065, 'NFO', 'NIFTY26OCTFUT',        75,  0.0500, 'NFO-FUT', '2026-10-29', now()),
-  (738561, 'NSE', 'RELIANCE',               1,  0.0500, 'NSE-EQ',  NULL,         now()),
-  (408066, 'NSE', 'INFY',                   1,  0.0500, 'NSE-EQ',  NULL,         now()),
-  (1001,   'MCX', 'CRUDEOIL17SEP26C10600', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1002,   'MCX', 'CRUDEOIL17SEP26C10700', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1003,   'MCX', 'CRUDEOIL17SEP26C11000', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1004,   'MCX', 'CRUDEOIL17SEP26P8400',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1005,   'MCX', 'CRUDEOIL17SEP26P8500',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1006,   'MCX', 'CRUDEOIL17SEP26P8600',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1007,   'MCX', 'CRUDEOIL17SEP26P8700',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1008,   'MCX', 'CRUDEOILM21SEP26',       10, 0.0500, 'MCX-FUT', '2026-09-21', now()),
-  (1009,   'MCX', 'CRUDEOIL17SEP26P8200',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
-  (1010,   'MCX', 'CRUDEOIL21SEP26',       100, 0.0500, 'MCX-FUT', '2026-09-21', now())
-ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET
+  (408065, 'kite', 'NFO', 'NIFTY26OCTFUT',        75,  0.0500, 'NFO-FUT', '2026-10-29', now()),
+  (738561, 'kite', 'NSE', 'RELIANCE',               1,  0.0500, 'NSE-EQ',  NULL,         now()),
+  (408066, 'kite', 'NSE', 'INFY',                   1,  0.0500, 'NSE-EQ',  NULL,         now()),
+  (1001,   'kite', 'MCX', 'CRUDEOIL17SEP26C10600', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1002,   'kite', 'MCX', 'CRUDEOIL17SEP26C10700', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1003,   'kite', 'MCX', 'CRUDEOIL17SEP26C11000', 100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1004,   'kite', 'MCX', 'CRUDEOIL17SEP26P8400',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1005,   'kite', 'MCX', 'CRUDEOIL17SEP26P8500',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1006,   'kite', 'MCX', 'CRUDEOIL17SEP26P8600',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1007,   'kite', 'MCX', 'CRUDEOIL17SEP26P8700',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1008,   'kite', 'MCX', 'CRUDEOILM21SEP26',       10, 0.0500, 'MCX-FUT', '2026-09-21', now()),
+  (1009,   'kite', 'MCX', 'CRUDEOIL17SEP26P8200',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
+  (1010,   'kite', 'MCX', 'CRUDEOIL21SEP26',       100, 0.0500, 'MCX-FUT', '2026-09-21', now())
+ON CONFLICT (broker, exchange, tradingsymbol) DO UPDATE SET
   lot_size     = EXCLUDED.lot_size,
   tick_size    = EXCLUDED.tick_size,
   segment      = EXCLUDED.segment,

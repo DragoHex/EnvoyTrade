@@ -273,6 +273,17 @@ func (h *Harness) ResetDB(ctx context.Context) {
 	if _, err := h.DB.Exec(ctx, string(seedSQL)); err != nil {
 		h.t.Fatalf("exec seed_test_data.sql: %v", err)
 	}
+
+	// Reset TestBroker in-memory orders and positions
+	if h.TestBrokerURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.TestBrokerURL+"/api/reset", nil)
+		if err == nil {
+			req.Header.Set("Authorization", "token admin:admin_token")
+			if resp, err := h.HTTPClient.Do(req); err == nil {
+				_ = resp.Body.Close()
+			}
+		}
+	}
 }
 
 func (h *Harness) loginTrader(email, password string) {
