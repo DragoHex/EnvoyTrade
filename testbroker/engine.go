@@ -69,6 +69,7 @@ type OrderEngine struct {
 	mu          sync.RWMutex
 	config      *Config
 	instruments map[string]*Instrument // "NFO:NIFTY26OCTFUT" -> *Instrument
+	initialLTP  map[string]float64     // initial LTP snapshot from config
 	orders      map[string]*Order      // orderID -> *Order (global index)
 	userOrders  map[string][]string    // userID -> []orderID (preserves insertion order)
 	history     map[string][]Order     // orderID -> []Order snapshots
@@ -81,13 +82,16 @@ func NewOrderEngine(cfg *Config) *OrderEngine {
 	e := &OrderEngine{
 		config:      cfg,
 		instruments: make(map[string]*Instrument, len(cfg.Instruments)),
+		initialLTP:  make(map[string]float64, len(cfg.Instruments)),
 		orders:      make(map[string]*Order),
 		userOrders:  make(map[string][]string),
 		history:     make(map[string][]Order),
 	}
 	for i := range cfg.Instruments {
 		inst := &cfg.Instruments[i]
-		e.instruments[inst.Exchange+":"+inst.Tradingsymbol] = inst
+		key := inst.Exchange + ":" + inst.Tradingsymbol
+		e.instruments[key] = inst
+		e.initialLTP[key] = inst.LTP
 	}
 	for i := range cfg.Orders {
 		o := cfg.Orders[i]
@@ -105,6 +109,11 @@ func (e *OrderEngine) Reset() {
 	e.orders = make(map[string]*Order)
 	e.userOrders = make(map[string][]string)
 	e.history = make(map[string][]Order)
+	for key, ltp := range e.initialLTP {
+		if inst, ok := e.instruments[key]; ok {
+			inst.LTP = ltp
+		}
+	}
 	if e.config != nil {
 		for i := range e.config.Orders {
 			o := e.config.Orders[i]

@@ -22,6 +22,14 @@ func TestMTMDisplay_BrokerMarginsAndBreakdown(t *testing.T) {
 		t.Fatalf("set execution mode: %v", err)
 	}
 
+	// Set baseline LTP for both instruments
+	if err := h.AdminSDK.SetLTP("NSE", "RELIANCE", 2450.0); err != nil {
+		t.Fatalf("set initial RELIANCE LTP: %v", err)
+	}
+	if err := h.AdminSDK.SetLTP("NFO", "NIFTY26OCTFUT", 25000.0); err != nil {
+		t.Fatalf("set initial NIFTY LTP: %v", err)
+	}
+
 	// 1. Follower 01A places MIS order (10 RELIANCE) and NRML order (75 NIFTY26OCTFUT)
 	fCliA := h.FollowerClient("follow01a")
 
@@ -80,26 +88,32 @@ func TestMTMDisplay_BrokerMarginsAndBreakdown(t *testing.T) {
 		t.Fatalf("trigger sync failed: resp=%v err=%v", resp, err)
 	}
 
-	// Allow brief time for async processing if any
-	time.Sleep(300 * time.Millisecond)
-
-	// 4. Query /api/v1/accounts/:id/orders
-	resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/accounts/%s/orders", Follow01AID), nil)
-	if err != nil {
-		t.Fatalf("get orders error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get orders status = %d, want 200: %s", resp.StatusCode, string(body))
-	}
-
+	// 4. Query /api/v1/accounts/:id/orders (poll until debounced portfolio sync reflects in summary)
 	var ordersDetail struct {
 		Summary struct {
 			TotalMtm     string            `json:"totalMtm"`
 			MtmBreakdown map[string]string `json:"mtmBreakdown"`
 		} `json:"summary"`
 	}
-	if err := json.Unmarshal(body, &ordersDetail); err != nil {
-		t.Fatalf("unmarshal ordersDetail: %v", err)
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/accounts/%s/orders", Follow01AID), nil)
+		if err != nil {
+			t.Fatalf("get orders error: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("get orders status = %d, want 200: %s", resp.StatusCode, string(body))
+		}
+		if err := json.Unmarshal(body, &ordersDetail); err != nil {
+			t.Fatalf("unmarshal ordersDetail: %v", err)
+		}
+		if ordersDetail.Summary.TotalMtm == "2500" || ordersDetail.Summary.TotalMtm == "2500.00" || ordersDetail.Summary.TotalMtm == "2500.0000" {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if ordersDetail.Summary.TotalMtm != "2500" && ordersDetail.Summary.TotalMtm != "2500.00" && ordersDetail.Summary.TotalMtm != "2500.0000" {
@@ -113,14 +127,6 @@ func TestMTMDisplay_BrokerMarginsAndBreakdown(t *testing.T) {
 	}
 
 	// 5. Query /api/v1/groups/:id and verify follower row breakdown
-	resp, body, err = h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s", Group01ID), nil)
-	if err != nil {
-		t.Fatalf("get group detail error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get group detail status = %d, want 200: %s", resp.StatusCode, string(body))
-	}
-
 	var groupDetail struct {
 		Followers []struct {
 			AccountID    string            `json:"accountId"`
@@ -128,8 +134,29 @@ func TestMTMDisplay_BrokerMarginsAndBreakdown(t *testing.T) {
 			MtmBreakdown map[string]string `json:"mtmBreakdown"`
 		} `json:"followers"`
 	}
-	if err := json.Unmarshal(body, &groupDetail); err != nil {
-		t.Fatalf("unmarshal groupDetail: %v", err)
+	deadline = time.Now().Add(4 * time.Second)
+	for {
+		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/groups/%s", Group01ID), nil)
+		if err != nil {
+			t.Fatalf("get group detail error: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("get group detail status = %d, want 200: %s", resp.StatusCode, string(body))
+		}
+		if err := json.Unmarshal(body, &groupDetail); err != nil {
+			t.Fatalf("unmarshal groupDetail: %v", err)
+		}
+		var matched bool
+		for _, f := range groupDetail.Followers {
+			if f.AccountID == Follow01AID && (f.TotalMtm == "2500" || f.TotalMtm == "2500.00" || f.TotalMtm == "2500.0000") {
+				matched = true
+				break
+			}
+		}
+		if matched || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	var foundFollower bool
@@ -226,25 +253,32 @@ func TestRealizedM2M_BrokerSourceOfTruth(t *testing.T) {
 		t.Fatalf("trigger sync failed: resp=%v err=%v", resp, err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	// 5. Query /api/v1/accounts/:id/orders and assert RealizedPnl is sourced from broker M2M Realised
-	resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/accounts/%s/orders", Follow01BID), nil)
-	if err != nil {
-		t.Fatalf("get orders error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get orders status = %d, want 200: %s", resp.StatusCode, string(body))
-	}
-
+	// 5. Query /api/v1/accounts/:id/orders and assert RealizedPnl is sourced from broker M2M Realised (poll until debounced sync completes)
 	var ordersDetail struct {
 		Summary struct {
 			RealizedPnl string `json:"realizedPnl"`
 			TotalMtm    string `json:"totalMtm"`
 		} `json:"summary"`
 	}
-	if err := json.Unmarshal(body, &ordersDetail); err != nil {
-		t.Fatalf("unmarshal ordersDetail: %v", err)
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		resp, body, err := h.EnvoyAPI(http.MethodGet, fmt.Sprintf("/api/v1/accounts/%s/orders", Follow01BID), nil)
+		if err != nil {
+			t.Fatalf("get orders error: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("get orders status = %d, want 200: %s", resp.StatusCode, string(body))
+		}
+		if err := json.Unmarshal(body, &ordersDetail); err != nil {
+			t.Fatalf("unmarshal ordersDetail: %v", err)
+		}
+		if ordersDetail.Summary.RealizedPnl == "1000" || ordersDetail.Summary.RealizedPnl == "1000.00" || ordersDetail.Summary.RealizedPnl == "1000.0000" {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if ordersDetail.Summary.RealizedPnl != "1000" && ordersDetail.Summary.RealizedPnl != "1000.00" && ordersDetail.Summary.RealizedPnl != "1000.0000" {
