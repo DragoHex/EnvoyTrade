@@ -83,6 +83,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "sync-instruments":
+			if err := runSyncInstruments(logger, os.Args[2:]); err != nil {
+				logger.Error("sync-instruments command failed", "error", err)
+				os.Exit(1)
+			}
+			return
 		}
 	}
 
@@ -204,6 +210,97 @@ func runRestore(logger *slog.Logger, args []string) error {
 
 	fmt.Printf("Restored: %d master fills, %d follower orders, %d order events from %d partition(s)\n",
 		summary.MasterFillsRestored, summary.FollowerOrdersRestored, summary.OrderEventsRestored, len(summary.PartitionsRestored))
+	return nil
+}
+
+type instrumentSyncRunner interface {
+	SyncDhan(ctx context.Context) error
+	SyncKite(ctx context.Context, exchanges []string) error
+}
+
+var newInstrumentSyncer = func(store instrument.SyncerStore, logger *slog.Logger) instrumentSyncRunner {
+	return instrument.NewSyncer(store, logger)
+}
+
+var connectPostgres = func(ctx context.Context, dbURL string) (*postgres.Store, func(), error) {
+	pool, err := postgres.NewPool(ctx, dbURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	return postgres.New(pool), pool.Close, nil
+}
+
+func runSyncInstruments(logger *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("sync-instruments", flag.ContinueOnError)
+	var (
+		brokerChoice = fs.String("broker", "all", "Broker to sync: 'all', 'dhan', or 'kite'")
+		exchangesStr = fs.String("exchanges", "MCX,NFO,BFO", "Comma-separated exchanges for Kite")
+		timeoutDur   = fs.Duration("timeout", 10*time.Minute, "Overall sync timeout")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return errors.New("DATABASE_URL is not set")
+	}
+
+	choice := strings.ToLower(strings.TrimSpace(*brokerChoice))
+	syncDhan := choice == "all" || choice == "dhan"
+	syncKite := choice == "all" || choice == "kite"
+
+	if !syncDhan && !syncKite {
+		return fmt.Errorf("invalid broker choice %q: must be 'all', 'dhan', or 'kite'", *brokerChoice)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeoutDur)
+	defer cancel()
+
+	store, cleanup, err := connectPostgres(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("connect db: %w", err)
+	}
+	defer cleanup()
+
+	if store != nil {
+		if err := store.Migrate(ctx); err != nil {
+			return fmt.Errorf("migrate db: %w", err)
+		}
+	}
+
+	var syncerStore instrument.SyncerStore
+	if store != nil {
+		syncerStore = store
+	}
+	syncer := newInstrumentSyncer(syncerStore, logger)
+
+	if syncDhan {
+		logger.Info("sync-instruments: syncing Dhan scrip master...")
+		start := time.Now()
+		if err := syncer.SyncDhan(ctx); err != nil {
+			return fmt.Errorf("sync dhan instruments: %w", err)
+		}
+		logger.Info("sync-instruments: Dhan sync completed", "duration", time.Since(start))
+	}
+
+	if syncKite {
+		var exchanges []string
+		for _, e := range strings.Split(*exchangesStr, ",") {
+			e = strings.TrimSpace(e)
+			if e != "" {
+				exchanges = append(exchanges, e)
+			}
+		}
+		logger.Info("sync-instruments: syncing Kite instruments...", "exchanges", exchanges)
+		start := time.Now()
+		if err := syncer.SyncKite(ctx, exchanges); err != nil {
+			return fmt.Errorf("sync kite instruments: %w", err)
+		}
+		logger.Info("sync-instruments: Kite sync completed", "duration", time.Since(start))
+	}
+
+	logger.Info("sync-instruments: successfully synced all requested instruments")
 	return nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"envoytrade/internal/instrument"
 	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/fake"
+	"envoytrade/internal/store/postgres"
 	"envoytrade/internal/testbroker"
 	"envoytrade/internal/worker"
 )
@@ -732,5 +733,224 @@ func TestMultiBrokerSyncer_RoutesByBroker(t *testing.T) {
 		t.Error("expected dhan sync to be called")
 	}
 }
+
+type fakeInstrumentSyncer struct {
+	dhanCalled    bool
+	dhanErr       error
+	kiteCalled    bool
+	kiteExchanges []string
+	kiteErr       error
+}
+
+func (f *fakeInstrumentSyncer) SyncDhan(_ context.Context) error {
+	f.dhanCalled = true
+	return f.dhanErr
+}
+
+func (f *fakeInstrumentSyncer) SyncKite(_ context.Context, exchanges []string) error {
+	f.kiteCalled = true
+	f.kiteExchanges = exchanges
+	return f.kiteErr
+}
+
+func TestRunSyncInstruments_MissingDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	err := runSyncInstruments(slog.Default(), []string{})
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL is not set") {
+		t.Fatalf("expected DATABASE_URL is not set error, got: %v", err)
+	}
+}
+
+func TestRunSyncInstruments_InvalidFlag(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	err := runSyncInstruments(slog.Default(), []string{"-invalid-flag=true"})
+	if err == nil {
+		t.Fatal("expected error for invalid flag, got nil")
+	}
+}
+
+func TestRunSyncInstruments_InvalidBrokerChoice(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	origConnect := connectPostgres
+	defer func() { connectPostgres = origConnect }()
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+
+	err := runSyncInstruments(slog.Default(), []string{"-broker=unsupported_broker"})
+	if err == nil || !strings.Contains(err.Error(), "invalid broker choice") {
+		t.Fatalf("expected invalid broker choice error, got: %v", err)
+	}
+}
+
+func TestRunSyncInstruments_DBConnectionFailure(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	origConnect := connectPostgres
+	defer func() { connectPostgres = origConnect }()
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, nil, errors.New("network dial failed")
+	}
+
+	err := runSyncInstruments(slog.Default(), []string{})
+	if err == nil || !strings.Contains(err.Error(), "connect db: network dial failed") {
+		t.Fatalf("expected connect db error, got: %v", err)
+	}
+}
+
+func TestRunSyncInstruments_Positive_AllBrokersDefault(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	fakeSyncer := &fakeInstrumentSyncer{}
+
+	origConnect := connectPostgres
+	origFactory := newInstrumentSyncer
+	defer func() {
+		connectPostgres = origConnect
+		newInstrumentSyncer = origFactory
+	}()
+
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+	newInstrumentSyncer = func(_ instrument.SyncerStore, _ *slog.Logger) instrumentSyncRunner {
+		return fakeSyncer
+	}
+
+	err := runSyncInstruments(slog.Default(), []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !fakeSyncer.dhanCalled {
+		t.Error("expected Dhan sync to be called")
+	}
+	if !fakeSyncer.kiteCalled {
+		t.Error("expected Kite sync to be called")
+	}
+	expectedExchanges := []string{"MCX", "NFO", "BFO"}
+	if len(fakeSyncer.kiteExchanges) != len(expectedExchanges) {
+		t.Errorf("kite exchanges = %v, want %v", fakeSyncer.kiteExchanges, expectedExchanges)
+	}
+}
+
+func TestRunSyncInstruments_Positive_DhanOnly(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	fakeSyncer := &fakeInstrumentSyncer{}
+
+	origConnect := connectPostgres
+	origFactory := newInstrumentSyncer
+	defer func() {
+		connectPostgres = origConnect
+		newInstrumentSyncer = origFactory
+	}()
+
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+	newInstrumentSyncer = func(_ instrument.SyncerStore, _ *slog.Logger) instrumentSyncRunner {
+		return fakeSyncer
+	}
+
+	// Case-insensitive test "DHAN"
+	err := runSyncInstruments(slog.Default(), []string{"-broker=DHAN"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !fakeSyncer.dhanCalled {
+		t.Error("expected Dhan sync to be called")
+	}
+	if fakeSyncer.kiteCalled {
+		t.Error("expected Kite sync NOT to be called")
+	}
+}
+
+func TestRunSyncInstruments_Positive_KiteOnly_CustomExchanges(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	fakeSyncer := &fakeInstrumentSyncer{}
+
+	origConnect := connectPostgres
+	origFactory := newInstrumentSyncer
+	defer func() {
+		connectPostgres = origConnect
+		newInstrumentSyncer = origFactory
+	}()
+
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+	newInstrumentSyncer = func(_ instrument.SyncerStore, _ *slog.Logger) instrumentSyncRunner {
+		return fakeSyncer
+	}
+
+	// Comma/whitespace padding test
+	err := runSyncInstruments(slog.Default(), []string{"-broker=kite", "-exchanges= MCX , , NFO "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fakeSyncer.dhanCalled {
+		t.Error("expected Dhan sync NOT to be called")
+	}
+	if !fakeSyncer.kiteCalled {
+		t.Error("expected Kite sync to be called")
+	}
+	expected := []string{"MCX", "NFO"}
+	if len(fakeSyncer.kiteExchanges) != 2 || fakeSyncer.kiteExchanges[0] != "MCX" || fakeSyncer.kiteExchanges[1] != "NFO" {
+		t.Errorf("kite exchanges = %v, want %v", fakeSyncer.kiteExchanges, expected)
+	}
+}
+
+func TestRunSyncInstruments_UpstreamDhanFailure(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	fakeSyncer := &fakeInstrumentSyncer{
+		dhanErr: errors.New("503 Service Unavailable"),
+	}
+
+	origConnect := connectPostgres
+	origFactory := newInstrumentSyncer
+	defer func() {
+		connectPostgres = origConnect
+		newInstrumentSyncer = origFactory
+	}()
+
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+	newInstrumentSyncer = func(_ instrument.SyncerStore, _ *slog.Logger) instrumentSyncRunner {
+		return fakeSyncer
+	}
+
+	err := runSyncInstruments(slog.Default(), []string{"-broker=dhan"})
+	if err == nil || !strings.Contains(err.Error(), "sync dhan instruments: 503 Service Unavailable") {
+		t.Fatalf("expected dhan error, got: %v", err)
+	}
+}
+
+func TestRunSyncInstruments_UpstreamKiteFailure(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	fakeSyncer := &fakeInstrumentSyncer{
+		kiteErr: errors.New("timeout reading csv"),
+	}
+
+	origConnect := connectPostgres
+	origFactory := newInstrumentSyncer
+	defer func() {
+		connectPostgres = origConnect
+		newInstrumentSyncer = origFactory
+	}()
+
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+	newInstrumentSyncer = func(_ instrument.SyncerStore, _ *slog.Logger) instrumentSyncRunner {
+		return fakeSyncer
+	}
+
+	err := runSyncInstruments(slog.Default(), []string{"-broker=kite"})
+	if err == nil || !strings.Contains(err.Error(), "sync kite instruments: timeout reading csv") {
+		t.Fatalf("expected kite error, got: %v", err)
+	}
+}
+
 
 

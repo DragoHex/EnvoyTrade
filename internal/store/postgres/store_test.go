@@ -1779,3 +1779,79 @@ func TestUpdateFollowerOrderByTag_ResolvesInFlightWorkerOrder(t *testing.T) {
 	}
 }
 
+func TestStore_Instruments_AllowsMultipleTokensForSameSymbol(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// 1. Verify idempotency of Migrate
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("second Migrate call failed: %v", err)
+	}
+
+	// 2. Insert Kite instrument for NSE:RELIANCE
+	kiteIns := domain.Instrument{
+		InstrumentToken: 738561,
+		Broker:          "kite",
+		Exchange:        "NSE",
+		Tradingsymbol:   "RELIANCE",
+		LotSize:         1,
+		TickSize:        decimal.NewFromFloat(0.05),
+	}
+	if err := s.UpsertInstrument(ctx, kiteIns); err != nil {
+		t.Fatalf("failed to insert kite instrument: %v", err)
+	}
+
+	// 3. Insert Dhan instrument with same Exchange & Tradingsymbol
+	dhanIns := domain.Instrument{
+		InstrumentToken: 100000002885,
+		Broker:          "dhan",
+		Exchange:        "NSE",
+		Tradingsymbol:   "RELIANCE",
+		LotSize:         1,
+		TickSize:        decimal.NewFromFloat(0.05),
+		SecurityID:      "2885",
+		ExchangeSegment: "NSE_EQ",
+	}
+	if err := s.UpsertInstrument(ctx, dhanIns); err != nil {
+		t.Fatalf("failed to insert dhan instrument with same exchange:tradingsymbol: %v", err)
+	}
+
+	// 4. BatchInsertInstruments with multiple weekly option contracts sharing the same tradingsymbol
+	// (mirroring Dhan's scrip master behavior for weekly options)
+	batch := []domain.Instrument{
+		{
+			InstrumentToken: 1000001129279,
+			Broker:          "dhan",
+			Exchange:        "BSE",
+			Tradingsymbol:   "SENSEX-Nov2026-68400-PE",
+			LotSize:         20,
+			TickSize:        decimal.NewFromFloat(5.0),
+			SecurityID:      "1129279",
+			ExchangeSegment: "BSE_FNO",
+		},
+		{
+			InstrumentToken: 1000001134144,
+			Broker:          "dhan",
+			Exchange:        "BSE",
+			Tradingsymbol:   "SENSEX-Nov2026-68400-PE", // same symbol, distinct token/securityID
+			LotSize:         20,
+			TickSize:        decimal.NewFromFloat(5.0),
+			SecurityID:      "1134144",
+			ExchangeSegment: "BSE_FNO",
+		},
+	}
+	if err := s.BatchInsertInstruments(ctx, batch); err != nil {
+		t.Fatalf("BatchInsertInstruments failed on weekly option duplicates: %v", err)
+	}
+
+	// 5. LotSize resolution returns the expected lot size
+	lot, err := s.InstrumentLotSize(ctx, "BSE", "SENSEX-Nov2026-68400-PE")
+	if err != nil {
+		t.Fatalf("InstrumentLotSize failed: %v", err)
+	}
+	if lot != 20 {
+		t.Errorf("lot size = %d, want 20", lot)
+	}
+}
+
+

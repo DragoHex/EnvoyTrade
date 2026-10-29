@@ -78,7 +78,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ALTER TABLE instruments ADD COLUMN IF NOT EXISTS security_id text;
 		ALTER TABLE instruments ADD COLUMN IF NOT EXISTS exchange_segment text;
 		ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_exchange_tradingsymbol_key;
-		CREATE UNIQUE INDEX IF NOT EXISTS instruments_broker_exchange_symbol_idx ON instruments (broker, exchange, tradingsymbol);
+		ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_broker_exchange_tradingsymbol_key;
+		DROP INDEX IF EXISTS instruments_broker_exchange_symbol_idx;
+		CREATE INDEX IF NOT EXISTS instruments_broker_exchange_sym_idx ON instruments (broker, exchange, tradingsymbol);
 		CREATE INDEX IF NOT EXISTS instruments_expiry_exchange_idx ON instruments (expiry, exchange);
 		CREATE INDEX IF NOT EXISTS instruments_broker_sec_id_idx ON instruments (broker, exchange_segment, security_id);
 	`
