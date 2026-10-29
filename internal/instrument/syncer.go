@@ -84,6 +84,8 @@ func mapDhanExchangeSegment(exchange, segment string) string {
 			return "NSE_FNO"
 		case "C":
 			return "NSE_CURRENCY"
+		case "M":
+			return "MCX_COMM"
 		default:
 			return "NSE_EQ"
 		}
@@ -93,6 +95,8 @@ func mapDhanExchangeSegment(exchange, segment string) string {
 			return "BSE_FNO"
 		case "C":
 			return "BSE_CURRENCY"
+		case "M":
+			return "MCX_COMM"
 		default:
 			return "BSE_EQ"
 		}
@@ -102,8 +106,22 @@ func mapDhanExchangeSegment(exchange, segment string) string {
 		if seg == "D" {
 			return exch + "_FNO"
 		}
+		if seg == "M" {
+			return "MCX_COMM"
+		}
 		return exch + "_EQ"
 	}
+}
+
+// isDhanEquity reports whether a Dhan scrip record is a cash equity or index instrument.
+// In Dhan's scrip master:
+//   - Cash equities strictly have SEM_INSTRUMENT_NAME == "EQUITY" and SEM_SEGMENT == "E" (or "G" for EGRs).
+//   - Indices have SEM_INSTRUMENT_NAME == "INDEX" and SEM_SEGMENT == "I".
+//   - Derivatives strictly have SEM_INSTRUMENT_NAME starting with "OPT" or "FUT" (OPTSTK, OPTIDX, OPTFUT, OPTCUR, FUTSTK, FUTIDX, FUTCOM, FUTCUR).
+func isDhanEquity(segment, instrumentName string) bool {
+	seg := strings.ToUpper(strings.TrimSpace(segment))
+	name := strings.ToUpper(strings.TrimSpace(instrumentName))
+	return seg == "E" || seg == "G" || seg == "I" || name == "EQUITY" || name == "INDEX"
 }
 
 // SyncDhan streams Dhan scrip master CSV, parses all rows, and upon 100% success replaces Dhan records.
@@ -131,14 +149,20 @@ func (s *Syncer) SyncDhan(ctx context.Context) error {
 		return errors.New("dhan returned 0 instruments, skipping replacement")
 	}
 
-	// Map to domain.Instrument
-	instruments := make([]domain.Instrument, len(rawInsts))
-	for i, inst := range rawInsts {
+	// Map to domain.Instrument, filtering out equities to match Kite Zerodha (saving only non-equity/derivatives/commodities)
+	instruments := make([]domain.Instrument, 0, len(rawInsts))
+	for _, inst := range rawInsts {
+		if isDhanEquity(inst.Segment, inst.InstrumentName) {
+			continue
+		}
+
+		exSeg := mapDhanExchangeSegment(inst.Exchange, inst.Segment)
+
 		secIDInt, _ := strconv.ParseInt(inst.SecurityID, 10, 64)
 		// Offset token to avoid collisions with Kite tokens (token >= 10^12)
 		token := 1000000000000 + secIDInt
 		if token <= 1000000000000 {
-			token = 1000000000000 + int64(i+1)
+			token = 1000000000000 + int64(len(instruments)+1)
 		}
 
 		lot := int(inst.LotSize)
@@ -156,7 +180,7 @@ func (s *Syncer) SyncDhan(ctx context.Context) error {
 			}
 		}
 
-		instruments[i] = domain.Instrument{
+		instruments = append(instruments, domain.Instrument{
 			InstrumentToken: token,
 			Broker:          "dhan",
 			Exchange:        strings.ToUpper(strings.TrimSpace(inst.Exchange)),
@@ -164,9 +188,13 @@ func (s *Syncer) SyncDhan(ctx context.Context) error {
 			LotSize:         lot,
 			Segment:         strings.TrimSpace(inst.Segment),
 			SecurityID:      inst.SecurityID,
-			ExchangeSegment: mapDhanExchangeSegment(inst.Exchange, inst.Segment),
+			ExchangeSegment: exSeg,
 			Expiry:          exp,
-		}
+		})
+	}
+
+	if len(instruments) == 0 {
+		return errors.New("dhan returned 0 non-equity instruments, skipping replacement")
 	}
 
 	// 100% Successful parse: Prune existing dhan records

@@ -17,6 +17,7 @@ Every broker maintains unique symbol naming conventions, exchange segment identi
 
 ### B. Save to Database (`instruments` Table)
 - [ ] **Broker Tagging**: Every inserted row must have `broker = '<broker_name>'` (e.g. `'kite'`, `'dhan'`).
+- [ ] **Skip Cash Equities**: Skip saving plain cash equity scrips to the database (matching Kite Zerodha, which syncs only F&O derivatives and commodities) to keep the `instruments` table compact.
 - [ ] **Conflict Resolution & Unique Keys**: Ensure uniqueness on `(broker, exchange, tradingsymbol)`. If using integer tokens, offset tokens (e.g. `10^12 + security_id`) to prevent collisions across brokers.
 - [ ] **Transactional Pruning (All-or-Nothing Guard)**:
   - Prune existing records (`DELETE FROM instruments WHERE broker = $1`) **strictly only after 100% of the feed is successfully downloaded and parsed**.
