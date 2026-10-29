@@ -554,6 +554,10 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			if h.followerRegistrar != nil {
 				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 			}
+		} else {
+			if h.followerRegistrar != nil {
+				h.followerRegistrar.UnregisterFollower(id)
+			}
 		}
 		if h.rebalanceSvc != nil {
 			if masterID, err := h.store.ResolveMasterID(r.Context(), id); err == nil {
