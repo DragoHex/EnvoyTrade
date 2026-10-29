@@ -232,7 +232,7 @@ VALUES
   (1008,   'kite', 'MCX', 'CRUDEOILM21SEP26',       10, 0.0500, 'MCX-FUT', '2026-09-21', now()),
   (1009,   'kite', 'MCX', 'CRUDEOIL17SEP26P8200',  100, 0.0500, 'MCX-OPT', '2026-09-17', now()),
   (1010,   'kite', 'MCX', 'CRUDEOIL21SEP26',       100, 0.0500, 'MCX-FUT', '2026-09-21', now())
-ON CONFLICT (broker, exchange, tradingsymbol) DO UPDATE SET
+ON CONFLICT (instrument_token) DO UPDATE SET
   lot_size     = EXCLUDED.lot_size,
   tick_size    = EXCLUDED.tick_size,
   segment      = EXCLUDED.segment,
