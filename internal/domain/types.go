@@ -258,11 +258,14 @@ type Group struct {
 // stale or spoofed value on the fill payload must never drive sizing.
 type Instrument struct {
 	InstrumentToken int64
+	Broker          string
 	Exchange        string
 	Tradingsymbol   string
 	LotSize         int
 	TickSize        decimal.Decimal
 	Segment         string
+	SecurityID      string
+	ExchangeSegment string
 	Expiry          *time.Time
 	RefreshedAt     time.Time
 }

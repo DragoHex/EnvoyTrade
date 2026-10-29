@@ -27,15 +27,20 @@ type API interface {
 // ProxyConfig aliases godhan.ProxyConfig for native forward proxy routing.
 type ProxyConfig = godhan.ProxyConfig
 
+// InstrumentLookup maps (exchange, tradingsymbol) to Dhan's (ExchangeSegment, SecurityID, lotSize).
+type InstrumentLookup interface {
+	ResolveToSecurityID(exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, err error)
+}
+
 // Broker adapts DhanHQ API v2 Client to the broker-agnostic broker.Broker interface (PLAN.md §1).
 type Broker struct {
 	api      API
 	proxied  bool
-	resolver *InstrumentResolver
+	resolver InstrumentLookup
 }
 
-// NewBroker constructs a Broker wrapping an API implementation and an InstrumentResolver.
-func NewBroker(api API, proxied bool, resolver *InstrumentResolver) *Broker {
+// NewBroker constructs a Broker wrapping an API implementation and an InstrumentLookup.
+func NewBroker(api API, proxied bool, resolver InstrumentLookup) *Broker {
 	return &Broker{
 		api:      api,
 		proxied:  proxied,
@@ -44,7 +49,7 @@ func NewBroker(api API, proxied bool, resolver *InstrumentResolver) *Broker {
 }
 
 // NewLiveBroker constructs a live Dhan Broker client with optional static proxy routing.
-func NewLiveBroker(clientID, accessToken string, proxyCfg *ProxyConfig, resolver *InstrumentResolver) (*Broker, error) {
+func NewLiveBroker(clientID, accessToken string, proxyCfg *ProxyConfig, resolver InstrumentLookup) (*Broker, error) {
 	opts := BuildClientOptions(proxyCfg)
 	proxied := proxyCfg != nil && proxyCfg.Host != ""
 	client := godhan.NewClient(clientID, accessToken, opts...)

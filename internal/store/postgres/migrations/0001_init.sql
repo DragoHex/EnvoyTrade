@@ -218,15 +218,25 @@ CREATE INDEX IF NOT EXISTS order_events_follower_order_id_id_idx ON order_events
 -- 9. Instrument Master Cache
 CREATE TABLE IF NOT EXISTS instruments (
     instrument_token bigint PRIMARY KEY,
+    broker           text NOT NULL DEFAULT 'kite',
     exchange         text NOT NULL,
     tradingsymbol    text NOT NULL,
     lot_size         integer NOT NULL,
     tick_size        numeric(10,4) NOT NULL,
     segment          text,
+    security_id      text,
+    exchange_segment text,
     expiry           date,
     refreshed_at     timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (exchange, tradingsymbol)
+    UNIQUE (broker, exchange, tradingsymbol)
 );
+
+ALTER TABLE instruments ADD COLUMN IF NOT EXISTS broker text NOT NULL DEFAULT 'kite';
+ALTER TABLE instruments ADD COLUMN IF NOT EXISTS security_id text;
+ALTER TABLE instruments ADD COLUMN IF NOT EXISTS exchange_segment text;
+
+CREATE INDEX IF NOT EXISTS instruments_expiry_exchange_idx ON instruments (expiry, exchange);
+CREATE INDEX IF NOT EXISTS instruments_broker_sec_id_idx ON instruments (broker, exchange_segment, security_id);
 
 -- 10. Portfolio: Positions, Holdings, and Margins
 CREATE TABLE IF NOT EXISTS account_positions (

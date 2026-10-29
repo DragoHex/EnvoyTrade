@@ -17,6 +17,7 @@ type Querier interface {
 	AccountByBrokerUserID(ctx context.Context, brokerUserID string) (AccountByBrokerUserIDRow, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 	Accounts(ctx context.Context, arg AccountsParams) ([]AccountsRow, error)
+	ActiveFOInstrumentsForCache(ctx context.Context) ([]ActiveFOInstrumentsForCacheRow, error)
 	AppendOrderEvent(ctx context.Context, arg AppendOrderEventParams) error
 	AvailableProxyIPs(ctx context.Context, arg AvailableProxyIPsParams) ([]AvailableProxyIPsRow, error)
 	ClearAccountHoldings(ctx context.Context, accountID uuid.UUID) error
@@ -86,6 +87,7 @@ type Querier interface {
 	OrderEventsByFollowerOrder(ctx context.Context, followerOrderID *int64) ([]OrderEventsByFollowerOrderRow, error)
 	PendingFollowerOrders(ctx context.Context, createdAt pgtype.Timestamptz) ([]FollowerOrder, error)
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (ProxyIp, error)
+	PruneInstrumentsByBroker(ctx context.Context, broker string) (int64, error)
 	ReactivateAccountWithCredentials(ctx context.Context, arg ReactivateAccountWithCredentialsParams) (uuid.UUID, error)
 	SetAccountAPIKey(ctx context.Context, arg SetAccountAPIKeyParams) (int64, error)
 	SetAccountAPISecret(ctx context.Context, arg SetAccountAPISecretParams) (int64, error)
@@ -96,6 +98,7 @@ type Querier interface {
 	SetAccountName(ctx context.Context, arg SetAccountNameParams) (int64, error)
 	SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) (int64, error)
 	SetFollowLinkEnabled(ctx context.Context, arg SetFollowLinkEnabledParams) (int64, error)
+	SetGroupImbalance(ctx context.Context, arg SetGroupImbalanceParams) (int64, error)
 	SetMasterFillDispatchState(ctx context.Context, arg SetMasterFillDispatchStateParams) error
 	SoftDeleteAccount(ctx context.Context, id uuid.UUID) (int64, error)
 	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)

@@ -113,21 +113,25 @@ type FollowerOrder struct {
 }
 
 type Group struct {
-	ID        uuid.UUID
-	UserID    *uuid.UUID
-	Name      string
-	MasterID  uuid.UUID
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
+	ID           uuid.UUID
+	UserID       *uuid.UUID
+	Name         string
+	MasterID     uuid.UUID
+	HasImbalance bool
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type Instrument struct {
 	InstrumentToken int64
+	Broker          string
 	Exchange        string
 	Tradingsymbol   string
 	LotSize         int32
 	TickSize        decimal.Decimal
 	Segment         *string
+	SecurityID      *string
+	ExchangeSegment *string
 	Expiry          pgtype.Date
 	RefreshedAt     pgtype.Timestamptz
 }
@@ -201,18 +205,20 @@ type Session struct {
 }
 
 type User struct {
-	ID           uuid.UUID
-	Email        string
-	Username     string
-	Name         string
-	PasswordHash string
-	TotpSecret   *string
-	TotpEnabled  bool
-	Role         string
-	Phone        string
-	Address      string
-	GstNumber    string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	Active       bool
+	ID             uuid.UUID
+	Email          string
+	Username       string
+	Name           string
+	PasswordHash   string
+	TotpSecret     *string
+	TotpEnabled    bool
+	Role           string
+	Phone          string
+	Address        string
+	GstNumber      string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	Active         bool
+	MaxIps         int32
+	BrokerIpLimits []byte
 }

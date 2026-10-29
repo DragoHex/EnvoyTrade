@@ -71,6 +71,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, initSchema); err != nil {
 		return fmt.Errorf("0001_init: %w", err)
 	}
+
+	// Idempotent column additions for existing live deployments
+	alterStatements := `
+		ALTER TABLE instruments ADD COLUMN IF NOT EXISTS broker text NOT NULL DEFAULT 'kite';
+		ALTER TABLE instruments ADD COLUMN IF NOT EXISTS security_id text;
+		ALTER TABLE instruments ADD COLUMN IF NOT EXISTS exchange_segment text;
+		ALTER TABLE instruments DROP CONSTRAINT IF EXISTS instruments_exchange_tradingsymbol_key;
+		CREATE UNIQUE INDEX IF NOT EXISTS instruments_broker_exchange_symbol_idx ON instruments (broker, exchange, tradingsymbol);
+		CREATE INDEX IF NOT EXISTS instruments_expiry_exchange_idx ON instruments (expiry, exchange);
+		CREATE INDEX IF NOT EXISTS instruments_broker_sec_id_idx ON instruments (broker, exchange_segment, security_id);
+	`
+	if _, err := s.pool.Exec(ctx, alterStatements); err != nil {
+		return fmt.Errorf("migrate instruments columns: %w", err)
+	}
+
 	return nil
 }
 
@@ -884,15 +899,144 @@ func (s *Store) OrderEventsByFollowerOrder(ctx context.Context, followerOrderID 
 // tests use it to seed the lot sizes fan-out depends on.
 func (s *Store) UpsertInstrument(ctx context.Context, ins domain.Instrument) error {
 	segment := ins.Segment
+	brokerName := ins.Broker
+	if brokerName == "" {
+		brokerName = "kite"
+	}
+	var secID, exSeg *string
+	if ins.SecurityID != "" {
+		secID = &ins.SecurityID
+	}
+	if ins.ExchangeSegment != "" {
+		exSeg = &ins.ExchangeSegment
+	}
 	return s.queries.UpsertInstrument(ctx, sqlcgen.UpsertInstrumentParams{
 		InstrumentToken: ins.InstrumentToken,
+		Broker:          brokerName,
 		Exchange:        ins.Exchange,
 		Tradingsymbol:   ins.Tradingsymbol,
 		LotSize:         int32(ins.LotSize),
 		TickSize:        ins.TickSize,
 		Segment:         &segment,
+		SecurityID:      secID,
+		ExchangeSegment: exSeg,
 		Expiry:          pgdate(ins.Expiry),
 	})
+}
+
+// PruneInstrumentsByBroker deletes all instruments belonging to the specified broker.
+func (s *Store) PruneInstrumentsByBroker(ctx context.Context, broker string) (int64, error) {
+	return s.queries.PruneInstrumentsByBroker(ctx, broker)
+}
+
+// ActiveFOInstrumentsForCache loads up to 10,000 F&O contracts for the current month and next 3 weeks.
+func (s *Store) ActiveFOInstrumentsForCache(ctx context.Context) ([]domain.Instrument, error) {
+	rows, err := s.queries.ActiveFOInstrumentsForCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]domain.Instrument, len(rows))
+	for i, r := range rows {
+		var exp *time.Time
+		if r.Expiry.Valid {
+			t := r.Expiry.Time
+			exp = &t
+		}
+		res[i] = domain.Instrument{
+			Broker:          r.Broker,
+			Exchange:        r.Exchange,
+			Tradingsymbol:   r.Tradingsymbol,
+			LotSize:         int(r.LotSize),
+			SecurityID:      r.SecurityID,
+			ExchangeSegment: r.ExchangeSegment,
+			Expiry:          exp,
+		}
+	}
+	return res, nil
+}
+
+// VacuumInstruments runs VACUUM (ANALYZE) instruments to reclaim storage and update statistics.
+func (s *Store) VacuumInstruments(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, "VACUUM (ANALYZE) instruments;")
+	return err
+}
+
+// BatchInsertInstruments inserts a slice of instruments in a single bulk UNNEST statement.
+func (s *Store) BatchInsertInstruments(ctx context.Context, instruments []domain.Instrument) error {
+	if len(instruments) == 0 {
+		return nil
+	}
+
+	tokens := make([]int64, len(instruments))
+	brokers := make([]string, len(instruments))
+	exchanges := make([]string, len(instruments))
+	symbols := make([]string, len(instruments))
+	lots := make([]int32, len(instruments))
+	ticks := make([]decimal.Decimal, len(instruments))
+	segments := make([]*string, len(instruments))
+	secIDs := make([]*string, len(instruments))
+	exSegs := make([]*string, len(instruments))
+	expiries := make([]*time.Time, len(instruments))
+
+	for i, ins := range instruments {
+		tokens[i] = ins.InstrumentToken
+		b := ins.Broker
+		if b == "" {
+			b = "kite"
+		}
+		brokers[i] = b
+		exchanges[i] = ins.Exchange
+		symbols[i] = ins.Tradingsymbol
+		lots[i] = int32(ins.LotSize)
+		ticks[i] = ins.TickSize
+		if ins.Segment != "" {
+			seg := ins.Segment
+			segments[i] = &seg
+		}
+		if ins.SecurityID != "" {
+			sec := ins.SecurityID
+			secIDs[i] = &sec
+		}
+		if ins.ExchangeSegment != "" {
+			es := ins.ExchangeSegment
+			exSegs[i] = &es
+		}
+		expiries[i] = ins.Expiry
+	}
+
+	query := `
+		INSERT INTO instruments (
+			instrument_token, broker, exchange, tradingsymbol, lot_size, tick_size, segment, security_id, exchange_segment, expiry, refreshed_at
+		)
+		SELECT 
+			t.token, t.broker, t.exchange, t.symbol, t.lot, t.tick, t.seg, t.sec_id, t.ex_seg, t.exp::date, now()
+		FROM UNNEST(
+			$1::bigint[],
+			$2::text[],
+			$3::text[],
+			$4::text[],
+			$5::integer[],
+			$6::numeric[],
+			$7::text[],
+			$8::text[],
+			$9::text[],
+			$10::date[]
+		) AS t(token, broker, exchange, symbol, lot, tick, seg, sec_id, ex_seg, exp)
+		ON CONFLICT (instrument_token) DO UPDATE SET
+			broker = EXCLUDED.broker,
+			exchange = EXCLUDED.exchange,
+			tradingsymbol = EXCLUDED.tradingsymbol,
+			lot_size = EXCLUDED.lot_size,
+			tick_size = EXCLUDED.tick_size,
+			segment = EXCLUDED.segment,
+			security_id = EXCLUDED.security_id,
+			exchange_segment = EXCLUDED.exchange_segment,
+			expiry = EXCLUDED.expiry,
+			refreshed_at = now();
+	`
+
+	_, err := s.pool.Exec(ctx, query, tokens, brokers, exchanges, symbols, lots, ticks, segments, secIDs, exSegs, expiries)
+	return err
 }
 
 // InstrumentLotSize resolves the canonical lot size for an
