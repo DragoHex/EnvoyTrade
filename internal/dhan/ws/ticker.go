@@ -163,21 +163,26 @@ func (t *MasterTicker) handleOrderUpdate(update dhanticker.OrderUpdate) {
 		return
 	}
 
-	exchange := "NSE"
-	symbol := update.TradingSymbol
-
-	if t.resolver != nil && (symbol == "" || exchange == "") {
+	var exchange, symbol string
+	if t.resolver != nil && update.ExchangeSegment != "" && update.SecurityID != "" {
 		if ex, sym, err := t.resolver.ResolveToSymbol(update.ExchangeSegment, update.SecurityID); err == nil {
 			exchange = ex
 			symbol = sym
 		}
-	} else if strings.HasPrefix(update.ExchangeSegment, "BSE") {
-		exchange = "BSE"
-	} else if strings.HasPrefix(update.ExchangeSegment, "MCX") {
-		exchange = "MCX"
 	}
-	if strings.Contains(update.ExchangeSegment, "FNO") && exchange == "NSE" {
-		exchange = "NFO"
+	if symbol == "" {
+		symbol = update.TradingSymbol
+	}
+	if exchange == "" {
+		exchange = "NSE"
+		if strings.HasPrefix(update.ExchangeSegment, "BSE") {
+			exchange = "BSE"
+		} else if strings.HasPrefix(update.ExchangeSegment, "MCX") {
+			exchange = "MCX"
+		}
+		if strings.Contains(update.ExchangeSegment, "FNO") && exchange == "NSE" {
+			exchange = "NFO"
+		}
 	}
 
 	raw, _ := json.Marshal(update)
