@@ -66,6 +66,7 @@ type Querier interface {
 	InsertFollowerOrder(ctx context.Context, arg InsertFollowerOrderParams) (int64, error)
 	InsertMasterFill(ctx context.Context, arg InsertMasterFillParams) (int64, error)
 	InstrumentLotSize(ctx context.Context, arg InstrumentLotSizeParams) (int32, error)
+	InstrumentSecurityID(ctx context.Context, arg InstrumentSecurityIDParams) (InstrumentSecurityIDRow, error)
 	LatestMasterFill(ctx context.Context, masterID uuid.UUID) (LatestMasterFillRow, error)
 	ListAccountHoldings(ctx context.Context, accountID uuid.UUID) ([]AccountHolding, error)
 	ListAccountHoldingsPaginated(ctx context.Context, arg ListAccountHoldingsPaginatedParams) ([]AccountHolding, error)

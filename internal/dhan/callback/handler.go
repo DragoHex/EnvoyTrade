@@ -120,21 +120,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exchange := "NSE"
-	symbol := p.TradingSymbol
-
-	if h.Resolver != nil && (symbol == "" || exchange == "") {
+	var exchange, symbol string
+	if h.Resolver != nil && p.ExchangeSegment != "" && p.SecurityID != "" {
 		if ex, sym, err := h.Resolver.ResolveToSymbol(p.ExchangeSegment, p.SecurityID); err == nil {
 			exchange = ex
 			symbol = sym
 		}
-	} else if strings.HasPrefix(p.ExchangeSegment, "BSE") {
-		exchange = "BSE"
-	} else if strings.HasPrefix(p.ExchangeSegment, "MCX") {
-		exchange = "MCX"
 	}
-	if strings.Contains(p.ExchangeSegment, "FNO") && exchange == "NSE" {
-		exchange = "NFO"
+	if symbol == "" {
+		symbol = p.TradingSymbol
+	}
+	if exchange == "" {
+		exchange = "NSE"
+		if strings.HasPrefix(p.ExchangeSegment, "BSE") {
+			exchange = "BSE"
+		} else if strings.HasPrefix(p.ExchangeSegment, "MCX") {
+			exchange = "MCX"
+		}
+		if strings.Contains(p.ExchangeSegment, "FNO") && exchange == "NSE" {
+			exchange = "NFO"
+		}
 	}
 
 	raw, _ := json.Marshal(p)

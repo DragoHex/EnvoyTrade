@@ -3,7 +3,7 @@ module envoytrade
 go 1.27.1
 
 require (
-	github.com/DragoHex/godhan v0.1.4
+	github.com/DragoHex/godhan v0.1.5
 	github.com/DragoHex/gokotakneo v0.2.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

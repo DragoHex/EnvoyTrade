@@ -72,6 +72,8 @@ func MapExchangeSegment(exchange, segment string) string {
 			return "NSE_FNO"
 		case "C":
 			return "NSE_CURRENCY"
+		case "M":
+			return "MCX_COMM"
 		default:
 			return "NSE_EQ"
 		}
@@ -81,6 +83,8 @@ func MapExchangeSegment(exchange, segment string) string {
 			return "BSE_FNO"
 		case "C":
 			return "BSE_CURRENCY"
+		case "M":
+			return "MCX_COMM"
 		default:
 			return "BSE_EQ"
 		}
@@ -89,6 +93,9 @@ func MapExchangeSegment(exchange, segment string) string {
 	default:
 		if seg == "D" {
 			return exch + "_FNO"
+		}
+		if seg == "M" {
+			return "MCX_COMM"
 		}
 		return exch + "_EQ"
 	}

@@ -199,6 +199,8 @@ func TestE2E_FollowerActivationFlow_And_CopyTradeScenarios(t *testing.T) {
 		t.Fatalf("DB state check failed: accActive=%v (want true), linkEnabled=%v (want true), err=%v", accActive, linkEnabled, err)
 	}
 
+	time.Sleep(200 * time.Millisecond)
+
 	initialCount = countFollowerOrders()
 	_, err = masterCli.PlaceOrder("regular", sdk.OrderParams{
 		Exchange:        "MCX",
@@ -298,6 +300,8 @@ func TestE2E_FollowerActivationFlow_And_CopyTradeScenarios(t *testing.T) {
 	if err != nil || accActive != true || linkEnabled != true {
 		t.Fatalf("DB state check failed: accActive=%v (want true), linkEnabled=%v (want true), err=%v", accActive, linkEnabled, err)
 	}
+
+	time.Sleep(200 * time.Millisecond)
 
 	initialCount = countFollowerOrders()
 	_, err = masterCli.PlaceOrder("regular", sdk.OrderParams{

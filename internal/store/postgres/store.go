@@ -1056,6 +1056,23 @@ func (s *Store) InstrumentLotSize(ctx context.Context, exchange, tradingsymbol s
 	return int(lotSize), err
 }
 
+// InstrumentSecurityID resolves native (security_id, exchange_segment, lot_size) for an
+// (exchange, tradingsymbol) pair from the instruments table. Returns domain.ErrNotFound
+// if no matching row exists.
+func (s *Store) InstrumentSecurityID(ctx context.Context, exchange, tradingsymbol string) (string, string, int, error) {
+	row, err := s.queries.InstrumentSecurityID(ctx, sqlcgen.InstrumentSecurityIDParams{
+		Exchange:      exchange,
+		Tradingsymbol: tradingsymbol,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", 0, domain.ErrNotFound
+	}
+	if err != nil {
+		return "", "", 0, err
+	}
+	return row.SecurityID, row.ExchangeSegment, int(row.LotSize), nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
