@@ -32,21 +32,23 @@ type HTTPClient interface {
 
 // Syncer manages streaming downloads and transactional replacements of instrument masters.
 type Syncer struct {
-	store      SyncerStore
-	httpClient HTTPClient
-	logger     *slog.Logger
-	dhanURL    string
+	store       SyncerStore
+	httpClient  HTTPClient
+	logger      *slog.Logger
+	dhanURL     string
 	kiteBaseURL string
+	kotakBaseURL string
 }
 
 // NewSyncer constructs an initialized Syncer.
 func NewSyncer(store SyncerStore, logger *slog.Logger) *Syncer {
 	return &Syncer{
-		store:       store,
-		httpClient:  &http.Client{Timeout: 90 * time.Second},
-		logger:      logger,
-		dhanURL:     godhan.DefaultScripMasterURL,
-		kiteBaseURL: "https://api.kite.trade/instruments",
+		store:        store,
+		httpClient:   &http.Client{Timeout: 90 * time.Second},
+		logger:       logger,
+		dhanURL:      godhan.DefaultScripMasterURL,
+		kiteBaseURL:  "https://api.kite.trade/instruments",
+		kotakBaseURL: "https://lapi.kotaksecurities.com/script-details/1.0/masterscrip",
 	}
 }
 
@@ -65,6 +67,11 @@ func (s *Syncer) SetDhanURL(url string) {
 // SetKiteBaseURL overrides the default Kite instruments base endpoint (useful for tests).
 func (s *Syncer) SetKiteBaseURL(url string) {
 	s.kiteBaseURL = url
+}
+
+// SetKotakBaseURL overrides the default Kotak masterscrip base endpoint (useful for tests).
+func (s *Syncer) SetKotakBaseURL(url string) {
+	s.kotakBaseURL = url
 }
 
 // SetHTTPClient overrides the default HTTP client (useful for tests).
@@ -311,6 +318,199 @@ func (s *Syncer) SyncKite(ctx context.Context, exchanges []string) error {
 	return nil
 }
 
+// SyncKotak downloads and transactionally syncs Kotak Neo instruments (nse_cm, nse_fo, bse_fo, mcx_fo).
+func (s *Syncer) SyncKotak(ctx context.Context, segments []string) error {
+	if len(segments) == 0 {
+		segments = []string{"nse_cm", "nse_fo", "bse_fo", "mcx_fo"}
+	}
+
+	var allInstruments []domain.Instrument
+
+	for _, seg := range segments {
+		reqURL := s.kotakSegmentURL(seg)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return fmt.Errorf("create kotak request for %s: %w", seg, err)
+		}
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("fetch kotak scrips for %s: %w", seg, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected http status %d fetching kotak %s scrips", resp.StatusCode, seg)
+		}
+
+		insts, err := parseKotakCSV(resp.Body, seg)
+		if err != nil {
+			return fmt.Errorf("parse kotak %s instruments: %w", seg, err)
+		}
+		allInstruments = append(allInstruments, insts...)
+	}
+
+	if len(allInstruments) == 0 {
+		return errors.New("kotak returned 0 instruments across all segments, skipping replacement")
+	}
+
+	// Transactional replacement guard: only prune once 100% of files are parsed
+	if _, err := s.store.PruneInstrumentsByBroker(ctx, "kotakneo"); err != nil {
+		return fmt.Errorf("prune kotak instruments: %w", err)
+	}
+
+	// Chunked batch insertion (5,000 per slice)
+	chunkSize := 5000
+	for i := 0; i < len(allInstruments); i += chunkSize {
+		end := i + chunkSize
+		if end > len(allInstruments) {
+			end = len(allInstruments)
+		}
+		if err := s.store.BatchInsertInstruments(ctx, allInstruments[i:end]); err != nil {
+			return fmt.Errorf("batch insert kotak instruments chunk [%d:%d]: %w", i, end, err)
+		}
+	}
+
+	if err := s.store.VacuumInstruments(ctx); err != nil {
+		s.log().Warn("vacuum instruments after kotak sync failed", "error", err)
+	}
+
+	s.log().Info("kotak instruments successfully synced", "count", len(allInstruments))
+	return nil
+}
+
+func (s *Syncer) kotakSegmentURL(seg string) string {
+	base := strings.TrimRight(s.kotakBaseURL, "/")
+	if strings.Contains(base, "wso2-scripmaster") {
+		today := time.Now().Format("2006-01-02")
+		if seg == "nse_cm" {
+			return fmt.Sprintf("%s/%s/transformed-v1/nse_cm-v1.csv", base, today)
+		}
+		if seg == "bse_cm" {
+			return fmt.Sprintf("%s/%s/transformed-v1/bse_cm-v1.csv", base, today)
+		}
+		return fmt.Sprintf("%s/%s/transformed/%s.csv", base, today, seg)
+	}
+	return fmt.Sprintf("%s/%s.csv", base, seg)
+}
+
+func parseKotakCSV(r io.Reader, segment string) ([]domain.Instrument, error) {
+	reader := csv.NewReader(r)
+	reader.ReuseRecord = true
+	reader.FieldsPerRecord = -1
+
+	// Read header
+	header, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("read header: %w", err)
+	}
+
+	colIdx := make(map[string]int)
+	for i, col := range header {
+		colIdx[strings.TrimSpace(col)] = i
+	}
+
+	idxSymbol := -1
+	idxTrdSymbol := -1
+	idxLotSize := -1
+	idxExpiry := -1
+
+	for name, idx := range colIdx {
+		switch strings.ToLower(name) {
+		case "psymbol", "symbol", "token":
+			idxSymbol = idx
+		case "ptrdsymbol", "tradingsymbol", "trdsymbol":
+			idxTrdSymbol = idx
+		case "llotsize", "lotsize":
+			idxLotSize = idx
+		case "pexpirydate", "expiry", "expirydate":
+			idxExpiry = idx
+		}
+	}
+
+	var results []domain.Instrument
+	rowIdx := 0
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue // skip malformed row
+		}
+		rowIdx++
+
+		var rawSymbol, trdSymbol string
+		if idxSymbol >= 0 && idxSymbol < len(record) {
+			rawSymbol = strings.TrimSpace(record[idxSymbol])
+		}
+		if idxTrdSymbol >= 0 && idxTrdSymbol < len(record) {
+			trdSymbol = strings.TrimSpace(record[idxTrdSymbol])
+		}
+		if rawSymbol == "" || trdSymbol == "" {
+			continue
+		}
+
+		secIDInt, _ := strconv.ParseInt(rawSymbol, 10, 64)
+		// Offset by 20*10^11 to avoid collision with Kite & Dhan
+		token := 2000000000000 + secIDInt
+		if token <= 2000000000000 {
+			token = 2000000000000 + int64(rowIdx)
+		}
+
+		lotSize := 1
+		if idxLotSize >= 0 && idxLotSize < len(record) {
+			if parsedLot, err := strconv.Atoi(strings.TrimSpace(record[idxLotSize])); err == nil && parsedLot > 0 {
+				lotSize = parsedLot
+			}
+		}
+
+		var exp *time.Time
+		if idxExpiry >= 0 && idxExpiry < len(record) {
+			expStr := strings.TrimSpace(record[idxExpiry])
+			if expStr != "" {
+				for _, layout := range []string{"02-Jan-2006", "2006-01-02", "02/01/2006", "2006-01-02 15:04:05"} {
+					if t, parseErr := time.Parse(layout, expStr); parseErr == nil {
+						exp = &t
+						break
+					}
+				}
+			}
+		}
+
+		exchange := "NSE"
+		switch {
+		case strings.HasPrefix(segment, "nse_fo") || strings.HasPrefix(segment, "nfo"):
+			exchange = "NFO"
+		case strings.HasPrefix(segment, "bse_fo") || strings.HasPrefix(segment, "bfo"):
+			exchange = "BFO"
+		case strings.HasPrefix(segment, "mcx"):
+			exchange = "MCX"
+		case strings.HasPrefix(segment, "bse"):
+			exchange = "BSE"
+		default:
+			exchange = "NSE"
+		}
+
+		results = append(results, domain.Instrument{
+			InstrumentToken: token,
+			Broker:          "kotakneo",
+			Exchange:        exchange,
+			Tradingsymbol:   trdSymbol,
+			LotSize:         lotSize,
+			TickSize:        decimal.NewFromFloat(0.05),
+			Segment:         segment,
+			SecurityID:      rawSymbol,
+			ExchangeSegment: segment,
+			Expiry:          exp,
+			RefreshedAt:     time.Now(),
+		})
+	}
+
+	return results, nil
+}
+
 // NextRunDuration calculates the duration until the next target hour:minute in IST (Asia/Kolkata).
 func NextRunDuration(now time.Time, targetHour, targetMinute int) time.Duration {
 	istLocation, locErr := time.LoadLocation("Asia/Kolkata")
@@ -353,6 +553,11 @@ func (s *Syncer) StartDailyRoutine(ctx context.Context, targetHour, targetMinute
 				// Run Kite sync
 				if err := s.SyncKite(ctx, nil); err != nil {
 					s.log().Error("daily sync kite failed", "error", err)
+				}
+
+				// Run Kotak sync
+				if err := s.SyncKotak(ctx, nil); err != nil {
+					s.log().Error("daily sync kotak failed", "error", err)
 				}
 
 				// Trigger cache refresh
