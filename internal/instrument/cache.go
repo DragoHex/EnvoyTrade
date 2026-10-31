@@ -15,6 +15,7 @@ import (
 type Store interface {
 	ActiveFOInstrumentsForCache(ctx context.Context) ([]domain.Instrument, error)
 	InstrumentLotSize(ctx context.Context, exchange, tradingsymbol string) (int, error)
+	InstrumentSecurityID(ctx context.Context, exchange, tradingsymbol string) (string, string, int, error)
 }
 
 // Info holds the cached metadata for a single instrument.
@@ -89,12 +90,20 @@ func (c *Cache) AutoLoadActiveFO(ctx context.Context) error {
 			Tradingsymbol:   inst.Tradingsymbol,
 			Broker:          inst.Broker,
 		}
-		c.entries[key] = info
 
+		// Always register reverse mapping for this security ID, even if another expiry already claimed the forward key
 		if inst.ExchangeSegment != "" && inst.SecurityID != "" {
 			revKey := strings.ToUpper(strings.TrimSpace(inst.ExchangeSegment)) + ":" + strings.TrimSpace(inst.SecurityID)
 			c.revSec[revKey] = key
 		}
+
+		// Preserve nearest expiry: since ActiveFOInstrumentsForCache orders by expiry ASC,
+		// do not overwrite if key already exists.
+		if _, exists := c.entries[key]; exists {
+			continue
+		}
+
+		c.entries[key] = info
 		loaded++
 	}
 
@@ -112,9 +121,20 @@ func (c *Cache) ResolveLotSize(ctx context.Context, exchange, tradingsymbol stri
 	}
 	key := ex + ":" + sym
 
-	// 1. Fast RLock check
+	// 1. Fast RLock check (with derivative alias check)
 	c.mu.RLock()
 	info, ok := c.entries[key]
+	if !ok {
+		if ex == "NFO" {
+			info, ok = c.entries["NSE:"+sym]
+		} else if ex == "NSE" {
+			info, ok = c.entries["NFO:"+sym]
+		} else if ex == "BFO" {
+			info, ok = c.entries["BSE:"+sym]
+		} else if ex == "BSE" {
+			info, ok = c.entries["BFO:"+sym]
+		}
+	}
 	c.mu.RUnlock()
 	if ok {
 		if info.LotSize <= 0 {
@@ -153,27 +173,65 @@ func (c *Cache) ResolveLotSize(ctx context.Context, exchange, tradingsymbol stri
 // ResolveToSecurityID maps (exchange, tradingsymbol) to Dhan's (ExchangeSegment, SecurityID, lotSize).
 func (c *Cache) ResolveToSecurityID(exchange, tradingsymbol string) (string, string, int, error) {
 	ex := strings.ToUpper(strings.TrimSpace(exchange))
-	sym := strings.ToUpper(strings.TrimSpace(tradingsymbol))
+	rawSym := strings.TrimSpace(tradingsymbol)
+	sym := strings.ToUpper(rawSym)
 	if ex == "" || sym == "" {
 		return "", "", 0, fmt.Errorf("%w: empty exchange or symbol", domain.ErrNotFound)
 	}
 
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	key := ex + ":" + sym
-	if info, ok := c.entries[key]; ok && info.SecurityID != "" {
+
+	// 1. Fast in-memory check
+	c.mu.RLock()
+	info, ok := c.entries[key]
+	if ok && info.SecurityID != "" {
+		c.mu.RUnlock()
 		return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
 	}
 
-	// Secondary check for derivative aliases (e.g. NFO vs NSE)
+	// Secondary check for derivative aliases (e.g. NFO vs NSE, BFO vs BSE)
 	if ex == "NFO" {
 		if info, ok := c.entries["NSE:"+sym]; ok && info.SecurityID != "" {
+			c.mu.RUnlock()
 			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
 		}
 	} else if ex == "NSE" {
 		if info, ok := c.entries["NFO:"+sym]; ok && info.SecurityID != "" {
+			c.mu.RUnlock()
 			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+		}
+	} else if ex == "BFO" {
+		if info, ok := c.entries["BSE:"+sym]; ok && info.SecurityID != "" {
+			c.mu.RUnlock()
+			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+		}
+	} else if ex == "BSE" {
+		if info, ok := c.entries["BFO:"+sym]; ok && info.SecurityID != "" {
+			c.mu.RUnlock()
+			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+		}
+	}
+	c.mu.RUnlock()
+
+	// 2. Fall back to store if available
+	if c.store != nil {
+		secID, exSeg, lot, err := c.store.InstrumentSecurityID(context.Background(), ex, rawSym)
+		if err == nil && secID != "" {
+			c.mu.Lock()
+			if len(c.entries) < c.capacity {
+				c.entries[key] = Info{
+					LotSize:         lot,
+					SecurityID:      secID,
+					ExchangeSegment: exSeg,
+					Tradingsymbol:   rawSym,
+				}
+				if exSeg != "" && secID != "" {
+					revKey := strings.ToUpper(strings.TrimSpace(exSeg)) + ":" + strings.TrimSpace(secID)
+					c.revSec[revKey] = key
+				}
+			}
+			c.mu.Unlock()
+			return exSeg, secID, lot, nil
 		}
 	}
 

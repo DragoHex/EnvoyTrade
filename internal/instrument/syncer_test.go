@@ -321,3 +321,62 @@ func TestNextRunDuration_CalculatesAccurately(t *testing.T) {
 		t.Fatalf("expected 23h wait, got %v", durAfter)
 	}
 }
+
+func TestSyncer_SyncDhan_NormalizesDerivativeExchangeToNFOAndBFO(t *testing.T) {
+	csvData := `SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXPIRY_CODE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_TICK_SIZE,SEM_EXPIRY_FLAG,SEM_EXCH_INSTRUMENT_TYPE,SEM_SERIES,SM_SYMBOL_NAME
+NSE,D,53376,OPTIDX,0,NIFTY-Nov2026-21000-PE,65.0,NIFTY 03 NOV 21000 PUT,2026-11-03 14:30:00,21000.00000,PE,5.0000,W,OP,,
+BSE,D,80012,OPTIDX,0,SENSEX-Nov2026-80000-CE,10.0,SENSEX 05 NOV 80000 CALL,2026-11-05 14:30:00,80000.00000,CE,5.0000,W,OP,,
+MCX,M,582024,OPTFUT,0,GOLDM-29Oct2026-130000-PE,1.0,GOLDM 29 OCT 130000 PUT,2026-10-29 23:30:00,130000.00000,PE,50.0000,M,OPTFUT,2,GOLDM
+`
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"dhan": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(csvData)),
+			},
+		},
+	}
+
+	store := &mockSyncerStore{}
+	syncer := NewSyncer(store, nil)
+	syncer.SetHTTPClient(client)
+	syncer.SetDhanURL("http://mock/dhan")
+
+	if err := syncer.SyncDhan(context.Background()); err != nil {
+		t.Fatalf("SyncDhan failed: %v", err)
+	}
+
+	if len(store.insertedInstruments) != 3 {
+		t.Fatalf("expected 3 inserted instruments, got %d", len(store.insertedInstruments))
+	}
+
+	// 1. NSE derivative must be normalized to NFO
+	nfoInst := store.insertedInstruments[0]
+	if nfoInst.Exchange != "NFO" {
+		t.Errorf("nfoInst.Exchange = %q, want 'NFO'", nfoInst.Exchange)
+	}
+	if nfoInst.ExchangeSegment != "NSE_FNO" {
+		t.Errorf("nfoInst.ExchangeSegment = %q, want 'NSE_FNO'", nfoInst.ExchangeSegment)
+	}
+	if nfoInst.LotSize != 65 {
+		t.Errorf("nfoInst.LotSize = %d, want 65", nfoInst.LotSize)
+	}
+
+	// 2. BSE derivative must be normalized to BFO
+	bfoInst := store.insertedInstruments[1]
+	if bfoInst.Exchange != "BFO" {
+		t.Errorf("bfoInst.Exchange = %q, want 'BFO'", bfoInst.Exchange)
+	}
+	if bfoInst.ExchangeSegment != "BSE_FNO" {
+		t.Errorf("bfoInst.ExchangeSegment = %q, want 'BSE_FNO'", bfoInst.ExchangeSegment)
+	}
+	if bfoInst.LotSize != 10 {
+		t.Errorf("bfoInst.LotSize = %d, want 10", bfoInst.LotSize)
+	}
+
+	// 3. MCX remains MCX
+	mcxInst := store.insertedInstruments[2]
+	if mcxInst.Exchange != "MCX" {
+		t.Errorf("mcxInst.Exchange = %q, want 'MCX'", mcxInst.Exchange)
+	}
+}

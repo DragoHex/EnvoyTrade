@@ -180,13 +180,24 @@ func (s *Syncer) SyncDhan(ctx context.Context) error {
 			}
 		}
 
+		canonicalExchange := strings.ToUpper(strings.TrimSpace(inst.Exchange))
+		segment := strings.TrimSpace(inst.Segment)
+		if segment == "D" {
+			switch canonicalExchange {
+			case "NSE":
+				canonicalExchange = "NFO"
+			case "BSE":
+				canonicalExchange = "BFO"
+			}
+		}
+
 		instruments = append(instruments, domain.Instrument{
 			InstrumentToken: token,
 			Broker:          "dhan",
-			Exchange:        strings.ToUpper(strings.TrimSpace(inst.Exchange)),
+			Exchange:        canonicalExchange,
 			Tradingsymbol:   strings.TrimSpace(inst.TradingSymbol),
 			LotSize:         lot,
-			Segment:         strings.TrimSpace(inst.Segment),
+			Segment:         segment,
 			SecurityID:      inst.SecurityID,
 			ExchangeSegment: exSeg,
 			Expiry:          exp,

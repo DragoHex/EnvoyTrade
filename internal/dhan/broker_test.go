@@ -352,3 +352,68 @@ func TestBroker_CancelOrder(t *testing.T) {
 		t.Errorf("got resp.OrderID=%s, want ord-to-cancel", resp.OrderID)
 	}
 }
+
+func TestBroker_PlaceOrder_ResolvesNFOTradingSymbolToDhanSecurityID(t *testing.T) {
+	resolver := dhan.NewInstrumentResolver(nil)
+	csvData := `SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_TRADING_SYMBOL,SEM_LOT_UNITS
+NSE,D,53376,NIFTY-Nov2026-21000-PE,65
+`
+	if err := resolver.LoadFromReader(strings.NewReader(csvData)); err != nil {
+		t.Fatalf("LoadFromReader failed: %v", err)
+	}
+
+	api := &fakeDhanAPI{orderID: "dhan-fno-101"}
+	b := dhan.NewBroker(api, true, resolver)
+
+	// Placing order with canonical exchange "NFO" should resolve to Dhan security ID "53376" and "NSE_FNO"
+	params := broker.OrderParams{
+		Exchange:        "NFO",
+		Tradingsymbol:   "NIFTY-Nov2026-21000-PE",
+		TransactionType: "BUY",
+		Product:         "MIS",
+		OrderType:       "MARKET",
+		Quantity:        65,
+		Tag:             "tag-fno-101",
+	}
+
+	resp, err := b.PlaceOrder(context.Background(), "regular", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder failed: %v", err)
+	}
+	if resp.OrderID != "dhan-fno-101" {
+		t.Errorf("got orderID=%s, want dhan-fno-101", resp.OrderID)
+	}
+
+	if api.placedReq.SecurityID != "53376" {
+		t.Errorf("got SecurityID=%s, want 53376", api.placedReq.SecurityID)
+	}
+	if api.placedReq.ExchangeSegment != "NSE_FNO" {
+		t.Errorf("got ExchangeSegment=%s, want NSE_FNO", api.placedReq.ExchangeSegment)
+	}
+	if api.placedReq.TradingSymbol != "NIFTY-Nov2026-21000-PE" {
+		t.Errorf("got TradingSymbol=%s, want NIFTY-Nov2026-21000-PE", api.placedReq.TradingSymbol)
+	}
+}
+
+func TestBroker_PlaceOrder_UnresolvedSymbolReturnsNotFound(t *testing.T) {
+	resolver := dhan.NewInstrumentResolver(nil)
+	api := &fakeDhanAPI{orderID: "should-not-reach"}
+	b := dhan.NewBroker(api, true, resolver)
+
+	params := broker.OrderParams{
+		Exchange:        "NFO",
+		Tradingsymbol:   "UNKNOWN-OPT",
+		TransactionType: "BUY",
+		Product:         "MIS",
+		OrderType:       "MARKET",
+		Quantity:        65,
+	}
+
+	_, err := b.PlaceOrder(context.Background(), "regular", params)
+	if err == nil {
+		t.Fatal("expected error for unknown symbol, got nil")
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected domain.ErrNotFound, got: %v", err)
+	}
+}
