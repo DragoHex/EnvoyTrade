@@ -36,15 +36,50 @@ describe('BrokerLogo', () => {
     expect(logoEl).toHaveStyle({ height: '24px', width: '36px' })
   })
 
-  it('ensures identical dimensions between Kite and Dhan for standardized UI layout', () => {
+  it('ensures identical dimensions between Kite, Dhan, and Kotak Neo for standardized UI layout', () => {
     const { unmount: unmountKite } = render(() => <BrokerLogo broker="kite" size={20} />)
     const kiteSvg = screen.getByLabelText('Zerodha Kite').querySelector('svg')
     expect(kiteSvg).toHaveStyle({ height: '20px', width: '30px' })
     unmountKite()
 
-    render(() => <BrokerLogo broker="dhan" size={20} />)
+    const { unmount: unmountDhan } = render(() => <BrokerLogo broker="dhan" size={20} />)
     const dhanSvg = screen.getByLabelText('Dhan').querySelector('svg')
     expect(dhanSvg).toHaveStyle({ height: '20px', width: '30px' })
+    unmountDhan()
+
+    render(() => <BrokerLogo broker="kotakneo" size={20} />)
+    const kotakSvg = screen.getByLabelText('Kotak Neo').querySelector('svg')
+    expect(kotakSvg).toHaveStyle({ height: '20px', width: '30px' })
+  })
+
+  it('renders official Kotak Neo logo for "kotakneo"', () => {
+    render(() => <BrokerLogo broker="kotakneo" />)
+    const logoEl = screen.getByLabelText('Kotak Neo')
+    expect(logoEl).toBeInTheDocument()
+    expect(logoEl).toHaveAttribute('data-tooltip', 'Kotak Neo')
+    expect(logoEl).toHaveAttribute('title', 'Kotak Neo')
+    const svg = logoEl.querySelector('svg.broker-logo-svg')
+    expect(svg).not.toBeNull()
+    expect(svg).toHaveAttribute('viewBox', '-15 0 135 90')
+    const paths = svg?.querySelectorAll('path')
+    expect(paths?.length).toBe(2)
+    expect(paths?.[0]).toHaveAttribute('fill', '#ED1C24')
+    expect(paths?.[1]).toHaveAttribute('fill', '#FFFFFF')
+  })
+
+  it('renders official Kotak Neo logo for alias "kotak"', () => {
+    render(() => <BrokerLogo broker="kotak" />)
+    const logoEl = screen.getByLabelText('Kotak Neo')
+    expect(logoEl).toBeInTheDocument()
+    expect(logoEl.querySelector('svg.broker-logo-svg')).not.toBeNull()
+  })
+
+  it('supports custom size for Kotak Neo logo with 1.5 aspect ratio', () => {
+    render(() => <BrokerLogo broker="kotakneo" size={24} />)
+    const logoEl = screen.getByLabelText('Kotak Neo')
+    const svg = logoEl.querySelector('svg')
+    expect(svg).toHaveStyle({ height: '24px', width: '36px' })
+    expect(logoEl).toHaveStyle({ height: '24px', width: '36px' })
   })
 
   it('renders fallback badge for unknown brokers without crashing', () => {
@@ -93,6 +128,9 @@ describe('BrokerLogo', () => {
     expect(getBrokerConfig('zerodha').name).toBe('Zerodha Kite')
     expect(getBrokerConfig('dhan').name).toBe('Dhan')
     expect(getBrokerConfig('DHAN').name).toBe('Dhan')
+    expect(getBrokerConfig('kotakneo').name).toBe('Kotak Neo')
+    expect(getBrokerConfig('KOTAKNEO').name).toBe('Kotak Neo')
+    expect(getBrokerConfig('kotak').name).toBe('Kotak Neo')
     expect(getBrokerConfig('other').name).toBe('Other')
     expect(getBrokerConfig('').name).toBe('Unknown Broker')
   })

@@ -79,6 +79,31 @@ function FallbackBrokerLogo(props: { name: string; size?: number }) {
   )
 }
 
+export function KotakLogo(props: { size?: number }) {
+  const height = () => props.size ?? 18
+  const width = () => Math.round(height() * 1.5)
+
+  return (
+    <svg
+      viewBox="-15 0 135 90"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      class="broker-logo-svg"
+      style={{ height: `${height()}px`, width: `${width()}px`, display: 'block' }}
+      aria-hidden="true"
+    >
+      <path
+        d="M0 45.096C0 20.192 23.474 0 52.434 0s52.432 20.192 52.432 45.096-23.474 45.096-52.432 45.096S0 70.003 0 45.096"
+        fill="#ED1C24"
+      />
+      <path
+        d="M91.866 49.636c-1.143 9.42-6.427 18.937-17.965 18.955-6.736.012-11.998-4.6-15.642-10.243v-6.536c4.56 2.264 8.822 4.694 13.993 4.768 6.37.094 12.13-2.355 14.512-6.945h5.103zm-38.57 5.915c-5.293 6.38-10.408 12.897-19.992 12.897-13.537 0-19.958-13.088-19.958-24.03 0-10.514 5.018-22.96 18.206-22.96 5.72 0 11.226 3.498 14.508 7.198l-.01 8.925c-2.742-1.846-8.884-3.657-12.894-3.722-8.363-.14-15.736 3.485-15.608 11.74.087 5.683 5.718 9.546 11.32 9.546 8.58 0 13.778-7.838 18.122-13.787a490.38 490.38 0 0 0 5.165-6.858c4.825-6.742 10.408-12.897 19.992-12.897 11.29 0 17.628 9.1 19.42 18.468h-5.1c-2.05-3.038-5.993-4.897-9.877-4.897-8.87 0-14.17 8.16-18.606 14.168l-4.7 6.208"
+        fill="#FFFFFF"
+      />
+    </svg>
+  )
+}
+
 const KITE_CONFIG: BrokerConfig = {
   id: 'kite',
   name: 'Zerodha Kite',
@@ -91,18 +116,26 @@ const DHAN_CONFIG: BrokerConfig = {
   Logo: DhanLogo,
 }
 
+const KOTAK_CONFIG: BrokerConfig = {
+  id: 'kotakneo',
+  name: 'Kotak Neo',
+  Logo: KotakLogo,
+}
+
 const TESTBROKER_CONFIG: BrokerConfig = {
   id: 'testbroker',
   name: 'Test Broker (Mock)',
   Logo: (props) => <FallbackBrokerLogo name="TEST" size={props.size} />,
 }
 
-export const SUPPORTED_BROKERS: BrokerConfig[] = [KITE_CONFIG, DHAN_CONFIG]
+export const SUPPORTED_BROKERS: BrokerConfig[] = [KITE_CONFIG, DHAN_CONFIG, KOTAK_CONFIG]
 
 export const BROKER_REGISTRY: Record<string, BrokerConfig> = {
   kite: KITE_CONFIG,
   zerodha: KITE_CONFIG,
   dhan: DHAN_CONFIG,
+  kotakneo: KOTAK_CONFIG,
+  kotak: KOTAK_CONFIG,
   testbroker: TESTBROKER_CONFIG,
 }
 
@@ -129,7 +162,7 @@ export function BrokerLogo(props: {
   const config = () => getBrokerConfig(props.broker)
   const isSvg = () => {
     const k = (props.broker ?? '').toLowerCase().trim()
-    return k === 'kite' || k === 'zerodha' || k === 'dhan'
+    return k === 'kite' || k === 'zerodha' || k === 'dhan' || k === 'kotakneo' || k === 'kotak'
   }
   const height = () => props.size ?? 18
   const width = () => Math.round(height() * 1.5)

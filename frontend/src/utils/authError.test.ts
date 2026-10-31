@@ -41,6 +41,20 @@ describe('formatAuthError', () => {
     }
   })
 
+  it('translates Kotak Neo errors into clear user-facing messages', () => {
+    expect(
+      formatAuthError(
+        'kotak-neo api error [424]: HTTP 424: {"error":[{"code":"10564","message":"User not found for given ucc"}]}'
+      )
+    ).toBe('Invalid Kotak Neo Client ID (UCC) or Trade API not enabled for this user')
+
+    expect(
+      formatAuthError(
+        'kotak-neo api error [400]: HTTP 400: {"error":[{"code":"400","message":"Invalid field \'MobileNumber\'"}]}'
+      )
+    ).toBe('Invalid Kotak Neo registered mobile number')
+  })
+
   it('translates 401 and unauthorized API errors into clean session messages', () => {
     expect(
       formatAuthError('session token request: Post "https://api.kite.trade/session/token": 401 Unauthorized')
