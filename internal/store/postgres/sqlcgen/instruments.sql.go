@@ -23,7 +23,10 @@ SELECT
     expiry
 FROM instruments
 WHERE expiry IS NOT NULL
-  AND exchange = ANY(ARRAY['NFO', 'BFO', 'MCX']::text[])
+  AND (
+      exchange = ANY(ARRAY['NFO', 'BFO', 'MCX']::text[])
+      OR exchange_segment = ANY(ARRAY['NSE_FNO', 'BSE_FNO', 'MCX_COMM']::text[])
+  )
   AND expiry >= CURRENT_DATE
   AND (
       (expiry >= date_trunc('month', CURRENT_DATE) AND expiry < (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'))
@@ -72,7 +75,18 @@ func (q *Queries) ActiveFOInstrumentsForCache(ctx context.Context) ([]ActiveFOIn
 }
 
 const instrumentLotSize = `-- name: InstrumentLotSize :one
-SELECT lot_size FROM instruments WHERE exchange = $1 AND tradingsymbol = $2 LIMIT 1
+SELECT lot_size FROM instruments
+WHERE (
+    exchange = $1
+    OR ($1 = 'NFO' AND exchange = 'NSE' AND (segment IN ('D', 'NFO', 'NSE_FNO') OR exchange_segment = 'NSE_FNO'))
+    OR ($1 = 'NSE' AND exchange = 'NFO')
+    OR ($1 = 'BFO' AND exchange = 'BSE' AND (segment IN ('D', 'BFO', 'BSE_FNO') OR exchange_segment = 'BSE_FNO'))
+    OR ($1 = 'BSE' AND exchange = 'BFO')
+) AND (tradingsymbol = $2 OR UPPER(tradingsymbol) = UPPER($2))
+ORDER BY 
+    CASE WHEN expiry >= CURRENT_DATE THEN 0 ELSE 1 END,
+    expiry ASC NULLS LAST
+LIMIT 1
 `
 
 type InstrumentLotSizeParams struct {
@@ -85,6 +99,45 @@ func (q *Queries) InstrumentLotSize(ctx context.Context, arg InstrumentLotSizePa
 	var lot_size int32
 	err := row.Scan(&lot_size)
 	return lot_size, err
+}
+
+const instrumentSecurityID = `-- name: InstrumentSecurityID :one
+SELECT 
+    COALESCE(security_id, '')::text AS security_id,
+    COALESCE(exchange_segment, '')::text AS exchange_segment,
+    lot_size
+FROM instruments
+WHERE (
+    exchange = $1
+    OR ($1 = 'NFO' AND exchange = 'NSE' AND (segment IN ('D', 'NFO', 'NSE_FNO') OR exchange_segment = 'NSE_FNO'))
+    OR ($1 = 'NSE' AND exchange = 'NFO')
+    OR ($1 = 'BFO' AND exchange = 'BSE' AND (segment IN ('D', 'BFO', 'BSE_FNO') OR exchange_segment = 'BSE_FNO'))
+    OR ($1 = 'BSE' AND exchange = 'BFO')
+)
+  AND (tradingsymbol = $2 OR UPPER(tradingsymbol) = UPPER($2))
+  AND security_id IS NOT NULL AND security_id != ''
+ORDER BY 
+    CASE WHEN expiry >= CURRENT_DATE THEN 0 ELSE 1 END,
+    expiry ASC NULLS LAST
+LIMIT 1
+`
+
+type InstrumentSecurityIDParams struct {
+	Exchange      string
+	Tradingsymbol string
+}
+
+type InstrumentSecurityIDRow struct {
+	SecurityID      string
+	ExchangeSegment string
+	LotSize         int32
+}
+
+func (q *Queries) InstrumentSecurityID(ctx context.Context, arg InstrumentSecurityIDParams) (InstrumentSecurityIDRow, error) {
+	row := q.db.QueryRow(ctx, instrumentSecurityID, arg.Exchange, arg.Tradingsymbol)
+	var i InstrumentSecurityIDRow
+	err := row.Scan(&i.SecurityID, &i.ExchangeSegment, &i.LotSize)
+	return i, err
 }
 
 const pruneInstrumentsByBroker = `-- name: PruneInstrumentsByBroker :execrows
