@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"envoytrade/internal/instrument"
 	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/fake"
+	"envoytrade/internal/kotak"
 	"envoytrade/internal/store/postgres"
 	"envoytrade/internal/testbroker"
 	"envoytrade/internal/worker"
@@ -158,6 +160,29 @@ func setupTestResolver(store brokerResolverStore) *serverBrokerResolver {
 		return dhan.NewLiveBroker(clientID, acc.AccessToken, proxyCfg, dhanResolver)
 	})
 	reg.Register("dhan", dhanFactory)
+
+	kotakResolver := instrument.NewCache(1000, nil, nil)
+	kotakFactory := broker.FactoryFunc(func(_ context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
+		var proxyURL string
+		if acc.ProxyHost != "" {
+			u := url.URL{
+				Scheme: "https",
+				Host:   fmt.Sprintf("%s:%d", acc.ProxyHost, acc.ProxyPort),
+			}
+			if acc.ProxyUsername != "" {
+				u.User = url.UserPassword(acc.ProxyUsername, acc.ProxyPassword)
+			}
+			proxyURL = u.String()
+		}
+		consumerKey := strings.TrimSpace(acc.ApiSecret)
+		var session *kotak.TradeSessionJSON
+		if acc.AccessToken != "" {
+			session, _ = kotak.DeserializeTradeSession(acc.AccessToken)
+		}
+		return kotak.NewLiveBroker(consumerKey, session, proxyURL, kotakResolver)
+	})
+	reg.Register("kotak", kotakFactory)
+	reg.Register("kotakneo", kotakFactory)
 
 	return &serverBrokerResolver{
 		store:    store,
@@ -686,10 +711,88 @@ func TestResolveBroker_DhanFollower_RequiresProxyAndResolvesProxied(t *testing.T
 	}
 }
 
+func TestResolveBroker_KotakMaster_ResolvesKotakBroker(t *testing.T) {
+	ctx := context.Background()
+	mid := uuid.New()
+	store := &mockResolverStore{
+		accounts: map[uuid.UUID]domain.AccountAuthInfo{
+			mid: {
+				ID:          mid,
+				Role:        "master",
+				Broker:      "kotakneo",
+				ApiKey:      "+919876543210",
+				ApiSecret:   "consumer-key-123",
+				AccessToken: `{"token":"trade-token","sid":"trade-sid","baseUrl":"https://api.kotak","feedUrl":"wss://feed.kotak","rtUrl":"wss://rt.kotak"}`,
+			},
+		},
+	}
+	resolver := setupTestResolver(store)
+
+	b, err := resolver.ResolveBroker(ctx, mid)
+	if err != nil {
+		t.Fatalf("unexpected error resolving Kotak master broker: %v", err)
+	}
+	if b == nil {
+		t.Fatal("expected non-nil broker for Kotak master")
+	}
+}
+
+func TestResolveBroker_KotakFollower_RequiresProxyAndResolvesProxied(t *testing.T) {
+	ctx := context.Background()
+	fid := uuid.New()
+	store := &mockResolverStore{
+		accounts: map[uuid.UUID]domain.AccountAuthInfo{
+			fid: {
+				ID:          fid,
+				Role:        "follower",
+				Broker:      "kotakneo",
+				ApiKey:      "+919876543210",
+				ApiSecret:   "consumer-key-123",
+				AccessToken: `{"token":"trade-token","sid":"trade-sid","baseUrl":"https://api.kotak","feedUrl":"wss://feed.kotak","rtUrl":"wss://rt.kotak"}`,
+				IPAddress:   "", // Missing IP
+			},
+		},
+		proxies: map[string]domain.ProxyIP{
+			"198.51.100.30": {
+				IPAddress:          "198.51.100.30",
+				Host:               "proxy.kotak.corp",
+				Port:               8080,
+				Username:           "kotak_user",
+				Password:           "kotak_pass",
+				WhitelistedBrokers: "KotakNeo",
+			},
+		},
+	}
+	resolver := setupTestResolver(store)
+
+	// Negative: missing IP should fail with ErrIPRequired
+	_, err := resolver.ResolveBroker(ctx, fid)
+	if err == nil {
+		t.Fatal("expected ErrIPRequired for Kotak follower without IP, got nil")
+	}
+	if !errors.Is(err, domain.ErrIPRequired) {
+		t.Fatalf("expected ErrIPRequired, got: %v", err)
+	}
+
+	// Positive: with assigned proxy IP
+	acc := store.accounts[fid]
+	acc.IPAddress = "198.51.100.30"
+	store.accounts[fid] = acc
+
+	b, err := resolver.ResolveBroker(ctx, fid)
+	if err != nil {
+		t.Fatalf("unexpected error resolving Kotak follower with proxy: %v", err)
+	}
+	if b == nil {
+		t.Fatal("expected non-nil broker for Kotak follower with proxy")
+	}
+}
+
 func TestMultiBrokerSyncer_RoutesByBroker(t *testing.T) {
 	ctx := context.Background()
 	kiteAccID := uuid.New()
 	dhanAccID := uuid.New()
+	kotakAccID := uuid.New()
 
 	store := &mockResolverStore{
 		accounts: map[uuid.UUID]domain.AccountAuthInfo{
@@ -701,18 +804,26 @@ func TestMultiBrokerSyncer_RoutesByBroker(t *testing.T) {
 				ID:     dhanAccID,
 				Broker: "dhan",
 			},
+			kotakAccID: {
+				ID:     kotakAccID,
+				Broker: "kotakneo",
+			},
 		},
 	}
 
 	kiteSyncCalled := false
 	dhanSyncCalled := false
+	kotakSyncCalled := false
 
 	multi := &multiBrokerSyncer{
 		store: store,
 		syncAccount: func(ctx context.Context, brokerName string, id uuid.UUID) error {
-			if brokerName == "dhan" {
+			switch brokerName {
+			case "dhan":
 				dhanSyncCalled = true
-			} else {
+			case "kotak", "kotakneo":
+				kotakSyncCalled = true
+			default:
 				kiteSyncCalled = true
 			}
 			return nil
@@ -732,6 +843,13 @@ func TestMultiBrokerSyncer_RoutesByBroker(t *testing.T) {
 	if !dhanSyncCalled {
 		t.Error("expected dhan sync to be called")
 	}
+
+	if err := multi.SyncAccountPortfolio(ctx, kotakAccID); err != nil {
+		t.Fatalf("SyncAccountPortfolio kotak failed: %v", err)
+	}
+	if !kotakSyncCalled {
+		t.Error("expected kotak sync to be called")
+	}
 }
 
 type fakeInstrumentSyncer struct {
@@ -740,6 +858,9 @@ type fakeInstrumentSyncer struct {
 	kiteCalled    bool
 	kiteExchanges []string
 	kiteErr       error
+	kotakCalled   bool
+	kotakSegments []string
+	kotakErr      error
 }
 
 func (f *fakeInstrumentSyncer) SyncDhan(_ context.Context) error {
@@ -751,6 +872,12 @@ func (f *fakeInstrumentSyncer) SyncKite(_ context.Context, exchanges []string) e
 	f.kiteCalled = true
 	f.kiteExchanges = exchanges
 	return f.kiteErr
+}
+
+func (f *fakeInstrumentSyncer) SyncKotak(_ context.Context, segments []string) error {
+	f.kotakCalled = true
+	f.kotakSegments = segments
+	return f.kotakErr
 }
 
 func TestRunSyncInstruments_MissingDatabaseURL(t *testing.T) {
@@ -826,9 +953,46 @@ func TestRunSyncInstruments_Positive_AllBrokersDefault(t *testing.T) {
 	if !fakeSyncer.kiteCalled {
 		t.Error("expected Kite sync to be called")
 	}
+	if !fakeSyncer.kotakCalled {
+		t.Error("expected Kotak sync to be called")
+	}
 	expectedExchanges := []string{"MCX", "NFO", "BFO"}
 	if len(fakeSyncer.kiteExchanges) != len(expectedExchanges) {
 		t.Errorf("kite exchanges = %v, want %v", fakeSyncer.kiteExchanges, expectedExchanges)
+	}
+}
+
+func TestRunSyncInstruments_Positive_KotakOnly(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	fakeSyncer := &fakeInstrumentSyncer{}
+
+	origConnect := connectPostgres
+	origFactory := newInstrumentSyncer
+	defer func() {
+		connectPostgres = origConnect
+		newInstrumentSyncer = origFactory
+	}()
+
+	connectPostgres = func(_ context.Context, _ string) (*postgres.Store, func(), error) {
+		return nil, func() {}, nil
+	}
+	newInstrumentSyncer = func(_ instrument.SyncerStore, _ *slog.Logger) instrumentSyncRunner {
+		return fakeSyncer
+	}
+
+	err := runSyncInstruments(slog.Default(), []string{"-broker=kotak"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fakeSyncer.dhanCalled {
+		t.Error("expected Dhan sync NOT to be called")
+	}
+	if fakeSyncer.kiteCalled {
+		t.Error("expected Kite sync NOT to be called")
+	}
+	if !fakeSyncer.kotakCalled {
+		t.Error("expected Kotak sync to be called")
 	}
 }
 

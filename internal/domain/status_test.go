@@ -108,6 +108,8 @@ func TestSanitizeAuthError(t *testing.T) {
 		{"session token request with 401", "session token request: Post \"https://api.kite.trade/session/token\": 401 Unauthorized", "Broker session expired or token invalid"},
 		{"kite login error with incorrect password", "kite login error: Incorrect password or user id", "Invalid broker credentials or password"},
 		{"kite 2fa error with invalid totp", "kite 2fa error: Invalid TOTP code (External TOTP is not enabled)", "Invalid 2FA TOTP code or external TOTP not enabled"},
+		{"kotak neo api error user not found for ucc", "kotak-neo api error [424]: HTTP 424: {\"error\":[{\"code\":\"10564\",\"message\":\"User not found for given ucc\"}]}", "Invalid Kotak Neo Client ID (UCC) or Trade API not enabled for this user"},
+		{"kotak neo invalid mobile number", "kotak-neo api error [400]: HTTP 400: {\"error\":[{\"code\":\"400\",\"message\":\"Invalid field 'MobileNumber'\"}]}", "Invalid Kotak Neo registered mobile number"},
 		{"get dhan fund limits 401", "get dhan fund limits: 401 unauthorized token expired", "Broker session expired or token invalid"},
 		{"unknown backend failure with endpoint", "unknown backend failure in POST /api/v2/user/margins", "Authentication failed with broker"},
 	}

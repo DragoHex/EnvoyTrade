@@ -101,7 +101,11 @@ export function AccountDetailDrawer(props: {
         setRole(currentRole)
         setBroker(currentBroker)
         setBrokerAccountId(a?.brokerAccountId ?? '')
-        setApiKey(a?.apiKey ?? '')
+        let initialApiKey = a?.apiKey ?? ''
+        if ((currentBroker === 'kotakneo' || currentBroker === 'kotak') && initialApiKey.startsWith('+91')) {
+          initialApiKey = initialApiKey.slice(3)
+        }
+        setApiKey(initialApiKey)
         setApiSecret(a?.apiSecret ?? '')
         setPassword('')
         setTotpSecret('')
@@ -309,7 +313,14 @@ export function AccountDetailDrawer(props: {
         const patch: Record<string, unknown> = {}
         if (name() !== (a.name ?? '')) patch.name = name()
         if (broker() !== 'dhan') {
-          const trimmedApiKey = apiKey().trim()
+          let trimmedApiKey = apiKey().trim()
+          if (broker() === 'kotakneo' || broker() === 'kotak') {
+            if (trimmedApiKey.length !== 10) {
+              setError(`Kotak Neo registered mobile number must be exactly 10 digits (currently ${trimmedApiKey.length} digits).`)
+              return
+            }
+            trimmedApiKey = `+91${trimmedApiKey}`
+          }
           if (trimmedApiKey !== (a.apiKey ?? '')) patch.apiKey = trimmedApiKey
           const trimmedApiSecret = apiSecret().trim()
           if (trimmedApiSecret !== (a.apiSecret ?? '')) patch.apiSecret = trimmedApiSecret
@@ -347,7 +358,14 @@ export function AccountDetailDrawer(props: {
           brokerAccountId: brokerAccountId().trim(),
         }
         if (broker() !== 'dhan') {
-          const trimmedApiKey = apiKey().trim()
+          let trimmedApiKey = apiKey().trim()
+          if (broker() === 'kotakneo' || broker() === 'kotak') {
+            if (trimmedApiKey.length !== 10) {
+              setError(`Kotak Neo registered mobile number must be exactly 10 digits (currently ${trimmedApiKey.length} digits).`)
+              return
+            }
+            trimmedApiKey = `+91${trimmedApiKey}`
+          }
           if (trimmedApiKey) body.apiKey = trimmedApiKey
           const trimmedApiSecret = apiSecret().trim()
           if (trimmedApiSecret) body.apiSecret = trimmedApiSecret
@@ -497,12 +515,12 @@ export function AccountDetailDrawer(props: {
               />
             </label>
             <label>
-              {broker() === 'dhan' ? 'Dhan Client ID' : 'Broker User ID'}
+              {broker() === 'dhan' ? 'Dhan Client ID' : broker() === 'kotakneo' || broker() === 'kotak' ? 'Kotak Neo Client ID (UCC)' : 'Broker User ID'}
               <input
                 value={brokerAccountId()}
                 disabled={isEdit()}
                 onInput={(e) => setBrokerAccountId(e.currentTarget.value)}
-                placeholder={broker() === 'dhan' ? 'e.g. 1000000001' : ''}
+                placeholder={broker() === 'dhan' ? 'e.g. 1000000001' : broker() === 'kotakneo' || broker() === 'kotak' ? 'e.g. X12345' : ''}
                 required
               />
             </label>
@@ -518,7 +536,82 @@ export function AccountDetailDrawer(props: {
                 />
               </label>
             </Show>
-            <Show when={broker() !== 'dhan'}>
+            <Show when={broker() === 'kotakneo' || broker() === 'kotak'}>
+              <label>
+                Registered Mobile Number
+                <div style={{ display: 'flex', 'align-items': 'center', gap: '0.5rem', width: '100%' }}>
+                  <span
+                    class="country-prefix"
+                    style={{
+                      background: 'var(--color-bg-secondary, rgba(255, 255, 255, 0.05))',
+                      border: '1px solid var(--color-border)',
+                      'border-radius': '6px',
+                      padding: '0.45rem 0.75rem',
+                      'font-size': '0.9rem',
+                      'font-weight': 600,
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    +91
+                  </span>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={apiKey()}
+                    onInput={(e) => {
+                      const clean = e.currentTarget.value.replace(/\D/g, '').slice(0, 10)
+                      setApiKey(clean)
+                    }}
+                    placeholder="10-digit mobile number"
+                    style={{ flex: 1 }}
+                    required
+                  />
+                </div>
+              </label>
+              <Show when={apiKey().length > 0 && apiKey().length < 10}>
+                <span
+                  style={{
+                    'font-size': '0.75rem',
+                    color: '#e5484d',
+                    'margin-top': '-0.25rem',
+                    'margin-bottom': '0.5rem',
+                    display: 'block',
+                  }}
+                >
+                  {apiKey().length}/10 digits (must be exactly 10 digits)
+                </span>
+              </Show>
+              <label>
+                Consumer Key (Developer Portal)
+                <input
+                  value={apiSecret()}
+                  onInput={(e) => setApiSecret(e.currentTarget.value.trim())}
+                  placeholder="Bearer token from developer portal"
+                  required
+                />
+              </label>
+              <label>
+                MPIN (6-digit)
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={password()}
+                  onInput={(e) => setPassword(e.currentTarget.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder={isEdit() ? '•••••••• (leave blank to keep unchanged)' : '6-digit login MPIN'}
+                  autocomplete="new-password"
+                />
+              </label>
+              <label>
+                TOTP Secret Key
+                <input
+                  type="text"
+                  value={totpSecret()}
+                  onInput={(e) => setTotpSecret(e.currentTarget.value)}
+                  placeholder={isEdit() ? 'Leave blank to keep unchanged' : 'Base32 2FA secret (e.g. JBSWY3DPEHPK3PXP)'}
+                />
+              </label>
+            </Show>
+            <Show when={broker() !== 'dhan' && broker() !== 'kotakneo' && broker() !== 'kotak'}>
               <label>
                 API Key
                 <input value={apiKey()} onInput={(e) => setApiKey(e.currentTarget.value)} />

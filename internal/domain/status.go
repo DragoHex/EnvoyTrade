@@ -88,7 +88,8 @@ func SanitizeAuthError(raw string) string {
 		strings.Contains(lower, "dhan sync failed") ||
 		strings.Contains(lower, "connect login") ||
 		strings.Contains(lower, "kite login error") ||
-		strings.Contains(lower, "kite 2fa error")
+		strings.Contains(lower, "kite 2fa error") ||
+		strings.Contains(lower, "kotak-neo api error")
 
 	// If no backend API traces and already a clean user-facing message, preserve it
 	if !hasBackendAPITraces {
@@ -97,6 +98,15 @@ func SanitizeAuthError(raw string) string {
 
 	// Translate technical / backend API errors into clear, safe user-facing explanations
 	switch {
+	case strings.Contains(lower, "user not found") || strings.Contains(lower, "ucc") || strings.Contains(lower, "10564"):
+		return "Invalid Kotak Neo Client ID (UCC) or Trade API not enabled for this user"
+
+	case strings.Contains(lower, "mobilenumber") || strings.Contains(lower, "mobile number"):
+		return "Invalid Kotak Neo registered mobile number"
+
+	case strings.Contains(lower, "mpin"):
+		return "Invalid Kotak Neo MPIN"
+
 	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") ||
 		strings.Contains(lower, "token expired") || strings.Contains(lower, "invalid token") ||
 		strings.Contains(lower, "token revoked"):
