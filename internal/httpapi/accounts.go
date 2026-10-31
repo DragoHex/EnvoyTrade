@@ -13,6 +13,7 @@ import (
 	"envoytrade/internal/crypto"
 	"envoytrade/internal/dhan"
 	"envoytrade/internal/domain"
+	"envoytrade/internal/kotak"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -191,8 +192,11 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	broker := strings.ToLower(strings.TrimSpace(req.Broker))
-	if broker != "kite" && broker != "testbroker" && broker != "dhan" {
-		writeError(w, http.StatusBadRequest, `broker must be "kite", "dhan", or "testbroker"`)
+	if broker == "kotak" {
+		broker = "kotakneo"
+	}
+	if broker != "kite" && broker != "testbroker" && broker != "dhan" && broker != "kotakneo" {
+		writeError(w, http.StatusBadRequest, `broker must be "kite", "dhan", "kotakneo", or "testbroker"`)
 		return
 	}
 	req.Broker = broker
@@ -211,6 +215,15 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ApiKey = strings.TrimSpace(req.ApiKey)
 	req.ApiSecret = strings.TrimSpace(req.ApiSecret)
+
+	if broker == "kotakneo" {
+		normMobile, err := kotak.NormalizeMobileNumber(req.ApiKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid Kotak Neo mobile number: "+err.Error())
+			return
+		}
+		req.ApiKey = normMobile
+	}
 
 	if u, ok := domain.UserFromContext(r.Context()); ok && u != nil {
 		if err := h.store.CheckAccountQuota(r.Context(), u.ID, broker); err != nil {
