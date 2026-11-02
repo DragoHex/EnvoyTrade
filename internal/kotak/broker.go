@@ -11,7 +11,6 @@ import (
 
 	gokotak "github.com/DragoHex/gokotakneo"
 	"github.com/DragoHex/gokotakneo/models"
-	"github.com/shopspring/decimal"
 )
 
 // API abstracts the *gokotak.Client methods required by Broker adapter.
@@ -157,7 +156,7 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		Pf: "N",
 		Pr: priceStr,
 		Pt: ot,
-		Qt: strconv.Itoa(params.Quantity),
+		Qt: strconv.Itoa(models.ToMCXOrderUnits(ts, segment, params.Quantity)),
 		Rt: "DAY",
 		Tp: trigPriceStr,
 		Ts: ts,
@@ -241,9 +240,10 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 	out := make([]broker.Position, 0, len(kPositions))
 	for _, p := range kPositions {
 		avgPrice := 0.0
-		if p.FilledBuyQty > 0 && !p.BuyAmount.IsZero() {
-			f, _ := p.BuyAmount.Div(decimal.NewFromInt(int64(p.FilledBuyQty))).Float64()
-			avgPrice = f
+		if p.Quantity < 0 {
+			avgPrice, _ = p.AverageSellPrice().Float64()
+		} else {
+			avgPrice, _ = p.AverageBuyPrice().Float64()
 		}
 
 		out = append(out, broker.Position{
@@ -260,13 +260,13 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 func mapOrder(o models.Order) broker.Order {
 	return broker.Order{
 		OrderID:         o.OrderNumber,
-		Tradingsymbol:   o.TradingSymbol,
-		Exchange:        normalizeExchange(o.ExchangeSegment),
-		TransactionType: o.TransactionType,
-		OrderType:       o.PriceType,
-		Product:         o.ProductCode,
-		Quantity:        o.Quantity,
-		FilledQuantity:  o.FilledQuantity,
+		Tradingsymbol:   o.SymbolName(),
+		Exchange:        o.NormalizedExchange(),
+		TransactionType: o.NormalizedTransactionType(),
+		OrderType:       o.NormalizedOrderType(),
+		Product:         o.NormalizedProduct(),
+		Quantity:        o.NormalizedMCXQuantity(),
+		FilledQuantity:  o.NormalizedMCXFilledQuantity(),
 		Price:           o.Price,
 		TriggerPrice:    o.TriggerPrice,
 		AveragePrice:    o.AveragePrice,

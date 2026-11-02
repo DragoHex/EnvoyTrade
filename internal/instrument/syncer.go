@@ -23,6 +23,7 @@ type SyncerStore interface {
 	PruneInstrumentsByBroker(ctx context.Context, broker string) (int64, error)
 	BatchInsertInstruments(ctx context.Context, instruments []domain.Instrument) error
 	VacuumInstruments(ctx context.Context) error
+	InstrumentCountByBroker(ctx context.Context) (map[string]int64, error)
 }
 
 // HTTPClient narrows the HTTP client interface for easy mocking.
@@ -563,6 +564,47 @@ func NextRunDuration(now time.Time, targetHour, targetMinute int) time.Duration 
 		nextRun = nextRun.Add(24 * time.Hour)
 	}
 	return nextRun.Sub(nowIST)
+}
+
+// EnsureBrokerInstrumentsSynced checks if the specified brokers have instruments in the store.
+// If any broker has 0 instruments, it triggers an initial sync for that broker.
+func (s *Syncer) EnsureBrokerInstrumentsSynced(ctx context.Context, brokers []string, onComplete func(context.Context) error) error {
+	counts, err := s.store.InstrumentCountByBroker(ctx)
+	if err != nil {
+		s.log().Warn("failed to check instrument counts by broker", "error", err)
+		return err
+	}
+
+	syncedAny := false
+	for _, b := range brokers {
+		bLower := strings.ToLower(strings.TrimSpace(b))
+		if counts[bLower] == 0 {
+			s.log().Info("empty instruments table detected for broker, running initial sync", "broker", bLower)
+			var syncErr error
+			switch bLower {
+			case "dhan":
+				syncErr = s.SyncDhan(ctx)
+			case "kite", "zerodha":
+				syncErr = s.SyncKite(ctx, nil)
+			case "kotak", "kotakneo":
+				syncErr = s.SyncKotak(ctx, nil)
+			}
+			if syncErr != nil {
+				s.log().Error("initial instrument sync failed", "broker", bLower, "error", syncErr)
+			} else {
+				s.log().Info("initial instrument sync completed successfully", "broker", bLower)
+				syncedAny = true
+			}
+		}
+	}
+
+	if syncedAny && onComplete != nil {
+		if err := onComplete(ctx); err != nil {
+			s.log().Warn("onComplete callback after initial instrument sync failed", "error", err)
+		}
+	}
+
+	return nil
 }
 
 // StartDailyRoutine starts an in-process daily ticker loop targeting targetHour:targetMinute in IST.

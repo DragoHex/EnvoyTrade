@@ -76,13 +76,18 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// Trigger headless login if session is absent, expired, or invalid
 	needsLogin := sess == nil || sess.Token == "" || (authInfo.TokenExpiresAt != nil && time.Now().After(*authInfo.TokenExpiresAt))
 	var renewErr error
+	var renewed bool
 	if needsLogin && s.Renewer != nil {
 		if renewErr = s.Renewer.RenewAccount(ctx, accountID); renewErr == nil {
+			renewed = true
 			if freshAuth, err := s.Store.AccountAuthInfo(ctx, accountID); err == nil {
 				authInfo = freshAuth
 				sess, _ = DeserializeTradeSession(authInfo.AccessToken)
 			}
 		}
+	}
+	if renewed && s.OnTokenRefreshed != nil {
+		_ = s.OnTokenRefreshed(ctx, accountID)
 	}
 
 	if sess == nil || sess.Token == "" {
@@ -131,6 +136,9 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		if strings.Contains(strings.ToLower(err.Error()), "401") || strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
 			if s.Renewer != nil {
 				if rErr := s.Renewer.RenewAccount(ctx, accountID); rErr == nil {
+					if s.OnTokenRefreshed != nil {
+						_ = s.OnTokenRefreshed(ctx, accountID)
+					}
 					return s.SyncAccountPortfolio(ctx, accountID) // retry once with renewed credentials
 				}
 			}
@@ -139,16 +147,13 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		return fmt.Errorf("get positions: %w", translateBrokerError(err))
 	}
 
+	metrics := models.CalculatePositionMetrics(kPositions)
+
 	posParams := make([]domain.PositionSyncParam, 0, len(kPositions))
 	for _, p := range kPositions {
-		buyPrice := decimal.Zero
-		if p.FilledBuyQty > 0 && !p.BuyAmount.IsZero() {
-			buyPrice = p.BuyAmount.Div(decimal.NewFromInt(int64(p.FilledBuyQty)))
-		}
-		sellPrice := decimal.Zero
-		if p.FilledSellQty > 0 && !p.SellAmount.IsZero() {
-			sellPrice = p.SellAmount.Div(decimal.NewFromInt(int64(p.FilledSellQty)))
-		}
+		buyPrice := p.AverageBuyPrice()
+		sellPrice := p.AverageSellPrice()
+		pnl := p.RealizedPnL()
 
 		posParams = append(posParams, domain.PositionSyncParam{
 			Product:    p.Product,
@@ -158,7 +163,7 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 			SellPrice:  sellPrice,
 			Ltp:        decimal.Zero,
 			Mtm:        decimal.Zero,
-			Pnl:        decimal.Zero,
+			Pnl:        pnl,
 		})
 	}
 
@@ -199,13 +204,17 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		return fmt.Errorf("get limits: %w", translateBrokerError(err))
 	}
 
-	availCash := kLimits.NotionalCash
-	availMargin := kLimits.Net
+	availCash := kLimits.AvailableCash()
+	availMargin := kLimits.AvailableMargin()
+	accountVal := availMargin.Add(metrics.TotalMTM)
 
 	marginParam := domain.MarginSyncParam{
 		AvailableCash:   &availCash,
 		AvailableMargin: &availMargin,
-		TotalMtm:        decimal.Zero,
+		NetQty:          metrics.NetQuantity,
+		TotalMtm:        metrics.TotalMTM,
+		RealizedPnl:     metrics.RealizedPnL,
+		AccountValue:    accountVal,
 		Status:          "online",
 	}
 

@@ -273,6 +273,63 @@ func TestBroker_Execution(t *testing.T) {
 		}
 	})
 
+	t.Run("Positive: GetOrders Normalizes Kotak Neo Order Fields", func(t *testing.T) {
+		api := &mockKotakAPI{
+			getOrdersFunc: func(ctx context.Context) ([]models.Order, error) {
+				return []models.Order{
+					{
+						OrderNumber:     "24110200001",
+						Symbol:          "CRUDEOIL17NOV265000PE",
+						TradingSymbol:   "", // Kotak returns Symbol in order book
+						ExchangeSegment: "mcx_fo",
+						TransactionType: "B",
+						PriceType:       "L",
+						ProductCode:     "NRML",
+						Status:          "TRAD",
+						Quantity:        10,
+						FilledQuantity:  10,
+						AveragePrice:    decimal.NewFromFloat(15.5),
+					},
+				}, nil
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+
+		orders, err := b.GetOrders(context.Background())
+		if err != nil {
+			t.Fatalf("GetOrders failed: %v", err)
+		}
+		if len(orders) != 1 {
+			t.Fatalf("expected 1 order, got %d", len(orders))
+		}
+
+		o := orders[0]
+		if o.OrderID != "24110200001" {
+			t.Errorf("OrderID = %s, want 24110200001", o.OrderID)
+		}
+		if o.Tradingsymbol != "CRUDEOIL17NOV265000PE" {
+			t.Errorf("Tradingsymbol = %s, want CRUDEOIL17NOV265000PE", o.Tradingsymbol)
+		}
+		if o.Exchange != "MCX" {
+			t.Errorf("Exchange = %s, want MCX", o.Exchange)
+		}
+		if o.TransactionType != "BUY" {
+			t.Errorf("TransactionType = %s, want BUY", o.TransactionType)
+		}
+		if o.OrderType != "LIMIT" {
+			t.Errorf("OrderType = %s, want LIMIT", o.OrderType)
+		}
+		if o.Product != "NRML" {
+			t.Errorf("Product = %s, want NRML", o.Product)
+		}
+		if o.Status != "TRAD" {
+			t.Errorf("Status = %s, want TRAD", o.Status)
+		}
+		if !o.AveragePrice.Equal(decimal.NewFromFloat(15.5)) {
+			t.Errorf("AveragePrice = %v, want 15.5", o.AveragePrice)
+		}
+	})
+
 	t.Run("Negative: 100008 IP Whitelist Rejection is NOT Auth Expired", func(t *testing.T) {
 		api := &mockKotakAPI{
 			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
@@ -373,6 +430,100 @@ func TestBroker_Execution(t *testing.T) {
 		}
 		if captured.Es != "nse_fo" {
 			t.Errorf("captured.Es = %q, want 'nse_fo'", captured.Es)
+		}
+		if captured.Qt != "75" {
+			t.Errorf("captured.Qt = %q, want '75'", captured.Qt)
+		}
+
+		// Case 5: MCX Derivative (CRUDEOIL) 1 lot -> 100 barrels
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "MCX",
+			Tradingsymbol:   "CRUDEOIL17NOV265000PE",
+			TransactionType: "BUY",
+			Product:         "NRML",
+			OrderType:       "LIMIT",
+			Quantity:        1,
+			Price:           6.8,
+		})
+		if captured.Es != "mcx_fo" {
+			t.Errorf("captured.Es = %q, want 'mcx_fo'", captured.Es)
+		}
+		if captured.Qt != "100" {
+			t.Errorf("captured.Qt = %q, want '100' (1 lot = 100 barrels)", captured.Qt)
+		}
+
+		// Case 6: MCX Derivative (NATURALGAS) 2 lots -> 2500 mmBtu
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "MCX",
+			Tradingsymbol:   "NATURALGAS26NOVFUT",
+			TransactionType: "BUY",
+			Product:         "NRML",
+			OrderType:       "LIMIT",
+			Quantity:        2,
+			Price:           220,
+		})
+		if captured.Qt != "2500" {
+			t.Errorf("captured.Qt = %q, want '2500' (2 lots = 2500 mmBtu)", captured.Qt)
+		}
+	})
+
+	t.Run("Positive: GetOrders Normalizes MCX Quantities To Lots", func(t *testing.T) {
+		mockAPI := &mockKotakAPI{
+			getOrdersFunc: func(ctx context.Context) ([]models.Order, error) {
+				return []models.Order{
+					{
+						OrderNumber:     "261102000496969",
+						ExchangeSegment: "mcx_fo",
+						TradingSymbol:   "CRUDEOIL17NOV265000PE",
+						TransactionType: "B",
+						PriceType:       "L",
+						ProductCode:     "NRML",
+						Quantity:        200,
+						FilledQuantity:  100,
+						Price:           decimal.NewFromFloat(6.8),
+						AveragePrice:    decimal.NewFromFloat(6.8),
+						Status:          "TRADED",
+					},
+					{
+						OrderNumber:     "261102000496970",
+						ExchangeSegment: "nse_fo",
+						TradingSymbol:   "NIFTY26NOV24000CE",
+						TransactionType: "B",
+						PriceType:       "L",
+						ProductCode:     "NRML",
+						Quantity:        50,
+						FilledQuantity:  25,
+						Price:           decimal.NewFromFloat(150),
+						AveragePrice:    decimal.NewFromFloat(150),
+						Status:          "TRADED",
+					},
+				}, nil
+			},
+		}
+
+		b := kotak.NewBroker(mockAPI, true, nil)
+		orders, err := b.GetOrders(context.Background())
+		if err != nil {
+			t.Fatalf("GetOrders failed: %v", err)
+		}
+		if len(orders) != 2 {
+			t.Fatalf("len(orders) = %d, want 2", len(orders))
+		}
+
+		// MCX order: 200 units -> 2 lots, 100 filled units -> 1 filled lot
+		if orders[0].Quantity != 2 {
+			t.Errorf("MCX orders[0].Quantity = %d, want 2 (lots)", orders[0].Quantity)
+		}
+		if orders[0].FilledQuantity != 1 {
+			t.Errorf("MCX orders[0].FilledQuantity = %d, want 1 (lot)", orders[0].FilledQuantity)
+		}
+
+		// Non-MCX order: 50 shares -> 50, 25 filled shares -> 25
+		if orders[1].Quantity != 50 {
+			t.Errorf("NSE orders[1].Quantity = %d, want 50 (shares)", orders[1].Quantity)
+		}
+		if orders[1].FilledQuantity != 25 {
+			t.Errorf("NSE orders[1].FilledQuantity = %d, want 25 (shares)", orders[1].FilledQuantity)
 		}
 	})
 }

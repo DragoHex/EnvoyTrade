@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	envoytradecrypto "envoytrade/internal/crypto"
 	"envoytrade/internal/domain"
 	"envoytrade/internal/kotak"
 
@@ -52,6 +53,12 @@ func (m *mockPortfolioStore) SetAccountAccessToken(ctx context.Context, id uuid.
 	m.tokensUpdated[id] = token
 	m.authStatus[id] = authStatus
 	m.authError[id] = authError
+	if info, ok := m.authInfo[id]; ok {
+		info.AccessToken = token
+		info.TokenExpiresAt = expiresAt
+		info.AuthStatus = authStatus
+		m.authInfo[id] = info
+	}
 	return nil
 }
 
@@ -73,6 +80,10 @@ func (m *mockPortfolioStore) SyncAccountPositions(ctx context.Context, accountID
 func (m *mockPortfolioStore) SyncAccountMargins(ctx context.Context, accountID uuid.UUID, marg domain.MarginSyncParam) error {
 	m.margins[accountID] = marg
 	return nil
+}
+
+func (m *mockPortfolioStore) Accounts(ctx context.Context, ids []uuid.UUID) ([]domain.Account, error) {
+	return nil, nil
 }
 
 func (m *mockPortfolioStore) ProxyIPByAddress(ctx context.Context, ip string) (domain.ProxyIP, error) {
@@ -223,6 +234,143 @@ func TestPortfolioSyncer_Execution(t *testing.T) {
 		}
 		if store.accountStatus[emptyAccID] != domain.AccountStatusActive {
 			t.Errorf("account status = %s, want active", store.accountStatus[emptyAccID])
+		}
+	})
+
+	t.Run("Positive: Kotak Limits Cash Derivation and Position Metrics", func(t *testing.T) {
+		calcAccID := uuid.New()
+		store.authInfo[calcAccID] = domain.AccountAuthInfo{
+			BrokerAccountID: "KOTAK970",
+			ApiSecret:       "consumer-key",
+			AccessToken:     sessRaw,
+			TokenExpiresAt:  &future,
+			AuthStatus:      "authenticated",
+		}
+
+		calcAPI := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{
+					{
+						Product:         "NRML",
+						TradingSymbol:   "CRUDEOILM17NOV265000PE",
+						Quantity:        0,
+						FilledBuyQty:    10,
+						BuyAmount:       decimal.NewFromFloat(1000),
+						FilledSellQty:   10,
+						SellAmount:      decimal.NewFromFloat(1200),
+						ExchangeSegment: "mcx_fo",
+					},
+					{
+						Product:         "MIS",
+						TradingSymbol:   "RELIANCE",
+						Quantity:        5,
+						FilledBuyQty:    5,
+						BuyAmount:       decimal.NewFromFloat(12500),
+						FilledSellQty:   0,
+						ExchangeSegment: "nse_cm",
+					},
+				}, nil
+			},
+			getHoldingsFunc: func(ctx context.Context) ([]models.Holding, error) {
+				return []models.Holding{}, nil
+			},
+			getLimitsFunc: func(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+				return &models.Limits{
+					NotionalCash: decimal.Zero, // Real Kotak Neo returns 0 NotionalCash
+					Net:          decimal.NewFromFloat(970),
+				}, nil
+			},
+		}
+
+		calcSyncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return calcAPI, nil
+			},
+		}
+
+		err := calcSyncer.SyncAccountPortfolio(context.Background(), calcAccID)
+		if err != nil {
+			t.Fatalf("SyncAccountPortfolio failed: %v", err)
+		}
+
+		m := store.margins[calcAccID]
+		if m.AvailableCash == nil || !m.AvailableCash.Equal(decimal.NewFromFloat(970)) {
+			t.Errorf("AvailableCash = %v, want 970", m.AvailableCash)
+		}
+		if m.AvailableMargin == nil || !m.AvailableMargin.Equal(decimal.NewFromFloat(970)) {
+			t.Errorf("AvailableMargin = %v, want 970", m.AvailableMargin)
+		}
+		if m.NetQty != 5 {
+			t.Errorf("NetQty = %d, want 5", m.NetQty)
+		}
+		if !m.TotalMtm.Equal(decimal.NewFromFloat(200)) {
+			t.Errorf("TotalMtm = %s, want 200", m.TotalMtm)
+		}
+		if !m.RealizedPnl.Equal(decimal.NewFromFloat(200)) {
+			t.Errorf("RealizedPnl = %s, want 200", m.RealizedPnl)
+		}
+		if !m.AccountValue.Equal(decimal.NewFromFloat(1170)) {
+			t.Errorf("AccountValue = %s, want 1170", m.AccountValue)
+		}
+	})
+
+	t.Run("Positive: Successful Login Triggers OnTokenRefreshed", func(t *testing.T) {
+		t.Setenv("ENCRYPTION_KEY", "test-key-32-bytes-long-for-test!")
+		renewAccID := uuid.New()
+		store.authInfo[renewAccID] = domain.AccountAuthInfo{
+			BrokerAccountID: "RENEW1",
+			ApiSecret:       "consumer-key",
+			AccessToken:     "", // empty -> needs login
+		}
+
+		var tokenRefreshedCalled bool
+		var refreshedAccountID uuid.UUID
+
+		renewer := kotak.NewRenewer(store, nil)
+		renewer.LoginFunc = func(ctx context.Context, creds kotak.HeadlessLoginCredentials) (*kotak.TradeSessionJSON, error) {
+			return &kotak.TradeSessionJSON{
+				Token:   "new-token",
+				Sid:     "new-sid",
+				BaseURL: "https://api.kotakneo.com",
+			}, nil
+		}
+
+		renewSyncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return mockAPI, nil
+			},
+			Renewer: renewer,
+			OnTokenRefreshed: func(ctx context.Context, accID uuid.UUID) error {
+				tokenRefreshedCalled = true
+				refreshedAccountID = accID
+				return nil
+			},
+		}
+
+		// Set encrypted credentials in store for renewer
+		encMPIN, _ := envoytradecrypto.Encrypt("123456")
+		encTOTP, _ := envoytradecrypto.Encrypt("JBSWY3DPEHPK3PXP")
+		store.authInfo[renewAccID] = domain.AccountAuthInfo{
+			BrokerAccountID:       "RENEW1",
+			ApiKey:                "9876543210",
+			ApiSecret:             "consumer-key",
+			AccessToken:           "",
+			EncryptedPassword:     encMPIN,
+			EncryptedTotpSecret:   encTOTP,
+		}
+
+		err := renewSyncer.SyncAccountPortfolio(context.Background(), renewAccID)
+		if err != nil {
+			t.Fatalf("SyncAccountPortfolio with renewer failed: %v", err)
+		}
+
+		if !tokenRefreshedCalled {
+			t.Error("expected OnTokenRefreshed to be called, but was not")
+		}
+		if refreshedAccountID != renewAccID {
+			t.Errorf("refreshedAccountID = %s, want %s", refreshedAccountID, renewAccID)
 		}
 	})
 }

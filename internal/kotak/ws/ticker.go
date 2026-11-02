@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -162,7 +164,8 @@ func (t *MasterTicker) Stop() error {
 }
 
 func (t *MasterTicker) handleOrderUpdate(update orderstream.OrderUpdate) {
-	if !domain.IsTerminal(update.Status) {
+	normStatus := update.NormalizedStatus()
+	if !domain.IsTerminal(normStatus) {
 		return // Drop non-terminal intermediate updates
 	}
 
@@ -200,9 +203,9 @@ func (t *MasterTicker) handleOrderUpdate(update orderstream.OrderUpdate) {
 		TransactionType: normalizeTransactionType(update.TransactionType),
 		Product:         normalizeProduct(update.ProductCode),
 		OrderType:       normalizeOrderType(update.PriceType),
-		FilledQuantity:  update.FilledQuantity,
+		FilledQuantity:  models.NormalizeMCXQuantity(tradingsymbol, exchange, update.FilledQuantity),
 		AveragePrice:    update.AveragePrice,
-		Status:          strings.ToUpper(update.Status),
+		Status:          normStatus,
 		OrderTimestamp:  ordTimestamp,
 		RawPayload:      rawPayload,
 		ReceivedAt:      time.Now(),
@@ -271,11 +274,17 @@ func normalizeExchange(seg string) string {
 	}
 }
 
+// ProxyResolver looks up forward proxy configuration for a static IP address.
+type ProxyResolver interface {
+	ProxyIPByAddress(ctx context.Context, ip string) (domain.ProxyIP, error)
+}
+
 // TickerFactory implements ticker.Factory for Kotak Neo accounts.
 type TickerFactory struct {
-	queue    queue.Publisher[domain.MasterFill]
-	resolver SymbolResolver
-	logger   *slog.Logger
+	queue         queue.Publisher[domain.MasterFill]
+	resolver      SymbolResolver
+	proxyResolver ProxyResolver
+	logger        *slog.Logger
 }
 
 // NewMasterTickerFactory creates a new ticker.Factory for Kotak Neo accounts.
@@ -283,12 +292,17 @@ func NewMasterTickerFactory(
 	queue queue.Publisher[domain.MasterFill],
 	resolver SymbolResolver,
 	logger *slog.Logger,
-) ticker.Factory {
+) *TickerFactory {
 	return &TickerFactory{
 		queue:    queue,
 		resolver: resolver,
 		logger:   logger,
 	}
+}
+
+// SetProxyResolver configures a proxy lookup resolver for the ticker factory.
+func (f *TickerFactory) SetProxyResolver(resolver ProxyResolver) {
+	f.proxyResolver = resolver
 }
 
 // CreateTicker satisfies ticker.Factory.
@@ -298,9 +312,27 @@ func (f *TickerFactory) CreateTicker(
 	auth domain.AccountAuthInfo,
 	catchUp func(context.Context) error,
 ) (ticker.Ticker, error) {
+	if strings.TrimSpace(auth.AccessToken) == "" {
+		return nil, nil
+	}
+
 	sess, err := kotak.DeserializeTradeSession(auth.AccessToken)
 	if err != nil || sess.Token == "" || sess.RTURL == "" {
 		return nil, fmt.Errorf("%w: invalid Kotak Neo session token for ticker", domain.ErrAuthExpired)
+	}
+
+	var opts []MasterTickerOption
+	if f.proxyResolver != nil && auth.IPAddress != "" {
+		if proxy, err := f.proxyResolver.ProxyIPByAddress(ctx, auth.IPAddress); err == nil {
+			u := &url.URL{
+				Scheme: "https",
+				Host:   proxy.Host + ":" + strconv.Itoa(proxy.Port),
+			}
+			if proxy.Username != "" {
+				u.User = url.UserPassword(proxy.Username, proxy.Password)
+			}
+			opts = append(opts, WithProxyURL(u.String()))
+		}
 	}
 
 	t := NewMasterTicker(
@@ -311,6 +343,7 @@ func (f *TickerFactory) CreateTicker(
 		f.queue,
 		f.resolver,
 		f.logger,
+		opts...,
 	)
 	t.SetCatchUpHook(catchUp)
 	return t, nil
