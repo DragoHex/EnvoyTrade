@@ -208,8 +208,8 @@ func runRestore(logger *slog.Logger, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Restored: %d master fills, %d follower orders, %d order events from %d partition(s)\n",
-		summary.MasterFillsRestored, summary.FollowerOrdersRestored, summary.OrderEventsRestored, len(summary.PartitionsRestored))
+	fmt.Printf("Restored: %d master fills, %d follower orders, %d order events from %s (partitions: %v)\n",
+		summary.MasterFillsRestored, summary.FollowerOrdersRestored, summary.OrderEventsRestored, *archiveDir, summary.PartitionsRestored)
 	return nil
 }
 
@@ -683,6 +683,20 @@ func run(logger *slog.Logger) error {
 					}
 				}
 			}
+		}
+	}()
+
+	// Periodic parquet archival routine
+	archiver := archive.NewArchiver(pool, logger)
+	archiveRoutine := archive.NewRoutine(archiver, archive.RoutineConfig{}, logger)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("archive routine panicked", "panic", r)
+			}
+		}()
+		if err := archiveRoutine.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("archive routine stopped unexpectedly", "error", err)
 		}
 	}()
 

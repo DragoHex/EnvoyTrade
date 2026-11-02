@@ -48,7 +48,10 @@ func (r *Restorer) Restore(ctx context.Context, archiveDir string, fromDate *tim
 	}
 
 	if archiveDir == "" {
-		archiveDir = "/var/backups/envoytrade/archive"
+		archiveDir = os.Getenv("ARCHIVE_DIR")
+		if archiveDir == "" {
+			archiveDir = "/var/backups/envoytrade/archive"
+		}
 	}
 
 	// 1. Discover all matching date partitions across tables

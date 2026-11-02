@@ -168,6 +168,23 @@ func TestArchiveAndRestore_EndToEnd(t *testing.T) {
 		t.Fatalf("insert mfOpen: %v", err)
 	}
 
+	// mfRejected: terminal rejected master fill with dispatch_state=pending (must be archived!)
+	var mfRejectedID int64
+	err = pool.QueryRow(ctx, `
+		INSERT INTO master_fills (
+			master_id, broker_order_id, exchange, tradingsymbol, instrument_token,
+			transaction_type, product, order_type, filled_quantity, average_price,
+			status, order_timestamp, raw_payload, received_at, dispatch_state
+		) VALUES (
+			$1, 'M_ORD_REJ', 'NSE', 'RELIANCE', 1004,
+			'BUY', 'MIS', 'MARKET', 0, 0,
+			'REJECTED', $2, '{}', $2, 'pending'
+		) RETURNING id
+	`, masterID, d1).Scan(&mfRejectedID)
+	if err != nil {
+		t.Fatalf("insert mfRejected: %v", err)
+	}
+
 	// 2. Seed Follower Orders
 	// fo1: terminal on d1
 	var fo1ID int64
@@ -246,8 +263,8 @@ func TestArchiveAndRestore_EndToEnd(t *testing.T) {
 	if summary.FollowerOrdersArchived != 2 {
 		t.Errorf("expected 2 follower orders archived, got %d", summary.FollowerOrdersArchived)
 	}
-	if summary.MasterFillsArchived != 2 {
-		t.Errorf("expected 2 master fills archived, got %d", summary.MasterFillsArchived)
+	if summary.MasterFillsArchived != 3 {
+		t.Errorf("expected 3 master fills archived (2 complete + 1 rejected), got %d", summary.MasterFillsArchived)
 	}
 	if summary.OrderEventsArchived != 2 {
 		t.Errorf("expected 2 order events archived, got %d", summary.OrderEventsArchived)

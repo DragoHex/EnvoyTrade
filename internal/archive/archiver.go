@@ -57,7 +57,10 @@ func (a *Archiver) Archive(ctx context.Context, cutoff time.Time, archiveDir str
 	}
 
 	if archiveDir == "" {
-		archiveDir = "/var/backups/envoytrade/archive"
+		archiveDir = os.Getenv("ARCHIVE_DIR")
+		if archiveDir == "" {
+			archiveDir = "/var/backups/envoytrade/archive"
+		}
 	}
 
 	// 1. Fetch terminal follower orders
@@ -262,7 +265,7 @@ func (a *Archiver) fetchEligibleMasterFills(ctx context.Context, cutoff time.Tim
 			dispatch_state, dispatched_at
 		FROM master_fills mf
 		WHERE received_at <= $1
-		  AND dispatch_state IN ('dispatched', 'dead')
+		  AND (dispatch_state IN ('dispatched', 'dead') OR status IN ('REJECTED', 'CANCELLED'))
 		  AND NOT EXISTS (
 			  SELECT 1 FROM follower_orders fo
 			  WHERE fo.master_fill_id = mf.id
