@@ -176,6 +176,9 @@ func (e *Engine) HandleMasterFill(ctx context.Context, fill domain.MasterFill) e
 			"broker_order_id", fill.BrokerOrderID,
 			"status", fill.Status,
 		)
+		if fill.ID > 0 {
+			_ = e.store.SetMasterFillDispatchState(ctx, fill.ID, domain.DispatchDead)
+		}
 		return nil
 	}
 

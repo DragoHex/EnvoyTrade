@@ -15,6 +15,7 @@ import (
 	"envoytrade/internal/store/postgres"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -50,6 +51,11 @@ func (f *fakeDispatcher) jobCount() int {
 }
 
 func newTestStore(t *testing.T) *postgres.Store {
+	s, _ := newTestStoreWithPool(t)
+	return s
+}
+
+func newTestStoreWithPool(t *testing.T) (*postgres.Store, *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -79,7 +85,19 @@ func newTestStore(t *testing.T) *postgres.Store {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return store
+	return store, pool
+}
+
+func masterFillDispatchState(t *testing.T, pool *pgxpool.Pool, fillID int64) string {
+	t.Helper()
+	var state string
+	err := pool.QueryRow(context.Background(),
+		`SELECT dispatch_state FROM master_fills WHERE id = $1`, fillID,
+	).Scan(&state)
+	if err != nil {
+		t.Fatalf("read dispatch_state: %v", err)
+	}
+	return state
 }
 
 func seedAccount(t *testing.T, s *postgres.Store, role string) uuid.UUID {
@@ -550,5 +568,49 @@ func TestHandleMasterFill_ForceFailOneFollowerOthersUnaffected(t *testing.T) {
 		if disp.dispatch[f] != 1 {
 			t.Fatalf("follower %v was dispatched to %d times, want 1", f, disp.dispatch[f])
 		}
+	}
+}
+
+func TestHandleMasterFill_NonCompleteStatusSetsDispatchDead(t *testing.T) {
+	s, pool := newTestStoreWithPool(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+	seedFollowLink(t, s, domain.FollowLink{FollowerID: follower, MasterID: master, CloneFactor: decimal.NewFromFloat(1), Enabled: true})
+
+	fill := domain.MasterFill{
+		MasterID:        master,
+		BrokerOrderID:   uuid.NewString(),
+		Exchange:        "NSE",
+		Tradingsymbol:   "INFY",
+		TransactionType: "BUY",
+		Product:         "MIS",
+		OrderType:       "MARKET",
+		FilledQuantity:  0,
+		Status:          domain.TerminalRejected,
+		OrderTimestamp:  time.Now(),
+		RawPayload:      []byte(`{}`),
+	}
+	id, err := s.InsertMasterFill(ctx, fill)
+	if err != nil {
+		t.Fatalf("InsertMasterFill: %v", err)
+	}
+	fill.ID = id
+
+	disp := newFakeDispatcher()
+	e := engine.New(s, disp)
+
+	if err := e.HandleMasterFill(ctx, fill); err != nil {
+		t.Fatalf("HandleMasterFill: %v", err)
+	}
+
+	if disp.jobCount() != 0 {
+		t.Fatalf("expected 0 dispatched jobs for rejected fill, got %d", disp.jobCount())
+	}
+
+	// Verify dispatch_state transitioned to 'dead'
+	state := masterFillDispatchState(t, pool, fill.ID)
+	if state != string(domain.DispatchDead) {
+		t.Fatalf("dispatch_state = %q, want %q", state, domain.DispatchDead)
 	}
 }
