@@ -294,20 +294,23 @@ describe('AdminUsersPage', () => {
     const generalInput = screen.getByLabelText(/Generalist Allowed IPs/i)
     const kiteInput = screen.getByLabelText(/Zerodha Kite Allowed IPs/i)
     const dhanInput = screen.getByLabelText(/Dhan Allowed IPs/i)
+    const kotakneoInput = screen.getByLabelText(/Kotak Neo Allowed IPs/i)
     const testbrokerInput = screen.getByLabelText(/Test Broker Allowed IPs/i)
     const saveBtn = screen.getByRole('button', { name: /^Save$/i })
 
-    // Negative case: Total 6, sum 5 (general 2 + kite 2 + dhan 1 + testbroker 0) -> mismatch, save disabled
-    fireEvent.input(totalInput, { target: { value: '6' } })
+    // Negative case: Total 7, sum 5 (general 2 + kite 2 + dhan 1 + kotakneo 0 + testbroker 0) -> mismatch, save disabled
+    fireEvent.input(totalInput, { target: { value: '7' } })
     fireEvent.input(generalInput, { target: { value: '2' } })
     fireEvent.input(kiteInput, { target: { value: '2' } })
     fireEvent.input(dhanInput, { target: { value: '1' } })
+    fireEvent.input(kotakneoInput, { target: { value: '0' } })
     fireEvent.input(testbrokerInput, { target: { value: '0' } })
 
     expect(saveBtn).toBeDisabled()
-    expect(screen.getByText(/Sum of broker accounts \(5\) must match total \(6\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/Sum of broker accounts \(5\) must match total \(7\)/i)).toBeInTheDocument()
 
-    // Positive case: Total 6, sum 6 (2 + 2 + 1 + 1) -> valid, save enabled
+    // Positive case: Total 7, sum 7 (2 + 2 + 1 + 1 + 1) -> valid, save enabled
+    fireEvent.input(kotakneoInput, { target: { value: '1' } })
     fireEvent.input(testbrokerInput, { target: { value: '1' } })
     expect(saveBtn).not.toBeDisabled()
 
@@ -316,8 +319,8 @@ describe('AdminUsersPage', () => {
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith('22222222-2222-2222-2222-222222222222', {
         role: 'user',
-        maxIPs: 6,
-        brokerIPLimits: { general: 2, kite: 2, dhan: 1, testbroker: 1 },
+        maxIPs: 7,
+        brokerIPLimits: { general: 2, kite: 2, dhan: 1, kotakneo: 1, testbroker: 1 },
       })
     })
   })

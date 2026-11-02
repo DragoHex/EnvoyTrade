@@ -281,6 +281,13 @@ func TestNormalizeWhitelistedBrokers(t *testing.T) {
 		{"dhan", "Dhan"},
 		{"Dhan", "Dhan"},
 		{"dhan, kite", "Dhan, Zerodha"},
+		{"kotak", "Kotak"},
+		{"Kotak", "Kotak"},
+		{"kotakneo", "Kotak"},
+		{"KotakNeo", "Kotak"},
+		{"kotak_neo", "Kotak"},
+		{"kotak-neo", "Kotak"},
+		{"Kotak, Zerodha", "Kotak, Zerodha"},
 		{"unknown_broker", "unknown_broker"},
 	}
 
@@ -343,6 +350,33 @@ func TestProxyIP_MatchesBroker(t *testing.T) {
 		t.Errorf("pDhan should NOT match 'zerodha'")
 	}
 
+	// pKotak
+	pKotak := domain.ProxyIP{WhitelistedBrokers: "Kotak"}
+	if !pKotak.MatchesBroker("kotak") {
+		t.Errorf("pKotak should match 'kotak'")
+	}
+	if !pKotak.MatchesBroker("Kotak") {
+		t.Errorf("pKotak should match 'Kotak'")
+	}
+	if !pKotak.MatchesBroker("kotakneo") {
+		t.Errorf("pKotak should match 'kotakneo'")
+	}
+	if !pKotak.MatchesBroker("KotakNeo") {
+		t.Errorf("pKotak should match 'KotakNeo'")
+	}
+	if !pKotak.MatchesBroker("kotak_neo") {
+		t.Errorf("pKotak should match 'kotak_neo'")
+	}
+	if !pKotak.MatchesBroker("kotak-neo") {
+		t.Errorf("pKotak should match 'kotak-neo'")
+	}
+	if pKotak.MatchesBroker("zerodha") {
+		t.Errorf("pKotak should NOT match 'zerodha'")
+	}
+	if pKotak.MatchesBroker("dhan") {
+		t.Errorf("pKotak should NOT match 'dhan'")
+	}
+
 	// pEmpty matches all (backwards compatible)
 	if !pEmpty.MatchesBroker("zerodha") {
 		t.Errorf("pEmpty should match 'zerodha'")
@@ -353,11 +387,15 @@ func TestProxyIP_MatchesBroker(t *testing.T) {
 	if !pEmpty.MatchesBroker("testbroker") {
 		t.Errorf("pEmpty should match 'testbroker'")
 	}
+	if !pEmpty.MatchesBroker("kotakneo") {
+		t.Errorf("pEmpty should match 'kotakneo'")
+	}
 }
 
 func TestProxyIP_BrokerPriority(t *testing.T) {
 	pZerodha := domain.ProxyIP{WhitelistedBrokers: "Zerodha"}
 	pDhan := domain.ProxyIP{WhitelistedBrokers: "Dhan"}
+	pKotak := domain.ProxyIP{WhitelistedBrokers: "Kotak"}
 	pBoth := domain.ProxyIP{WhitelistedBrokers: "Zerodha, TestBroker"}
 	pEmpty := domain.ProxyIP{WhitelistedBrokers: ""}
 
@@ -393,5 +431,131 @@ func TestProxyIP_BrokerPriority(t *testing.T) {
 	if p := pBoth.BrokerPriority("dhan"); p != 0 {
 		t.Errorf("pBoth for 'dhan' got priority %d, want 0", p)
 	}
+
+	// For Kotak Neo
+	if p := pKotak.BrokerPriority("kotakneo"); p != 1 {
+		t.Errorf("pKotak for 'kotakneo' got priority %d, want 1", p)
+	}
+	if p := pKotak.BrokerPriority("kotak"); p != 1 {
+		t.Errorf("pKotak for 'kotak' got priority %d, want 1", p)
+	}
+	if p := pEmpty.BrokerPriority("kotakneo"); p != 2 {
+		t.Errorf("pEmpty for 'kotakneo' got priority %d, want 2", p)
+	}
+	if p := pZerodha.BrokerPriority("kotakneo"); p != 0 {
+		t.Errorf("pZerodha for 'kotakneo' got priority %d, want 0", p)
+	}
+	if p := pDhan.BrokerPriority("kotakneo"); p != 0 {
+		t.Errorf("pDhan for 'kotakneo' got priority %d, want 0", p)
+	}
 }
+
+func TestParseProxyConfigText(t *testing.T) {
+	rawConfig := `IP (to be whitelisted in broker): 2401:c080:2400:16b8:7c15:2ea3:64b6:5a00
+Host: dc6-mum-01.algoip.in
+Port: 443
+user_id: aip_live_lq0z72n0s2uagmm6
+password: aip_sec_pctja3asoghh021117cl1gtw5i1h4566
+Whitelisted Brokers: Kotak
+Valid From: 2026-11-02 11:17:55 (IST)
+Valid Until: 2027-02-02 11:17:55 (IST)
+Plan: QUARTERLY`
+
+	input, err := domain.ParseProxyConfigText(rawConfig)
+	if err != nil {
+		t.Fatalf("unexpected error parsing proxy config text: %v", err)
+	}
+
+	if input.IP != "2401:c080:2400:16b8:7c15:2ea3:64b6:5a00" {
+		t.Errorf("expected IP 2401:c080:2400:16b8:7c15:2ea3:64b6:5a00, got %q", input.IP)
+	}
+	if input.Host != "dc6-mum-01.algoip.in" {
+		t.Errorf("expected Host dc6-mum-01.algoip.in, got %q", input.Host)
+	}
+	if input.Port != 443 {
+		t.Errorf("expected Port 443, got %d", input.Port)
+	}
+	if input.UserID != "aip_live_lq0z72n0s2uagmm6" {
+		t.Errorf("expected UserID aip_live_lq0z72n0s2uagmm6, got %q", input.UserID)
+	}
+	if input.Password != "aip_sec_pctja3asoghh021117cl1gtw5i1h4566" {
+		t.Errorf("expected Password aip_sec_pctja3asoghh021117cl1gtw5i1h4566, got %q", input.Password)
+	}
+	if input.WhitelistedBrokers != "Kotak" {
+		t.Errorf("expected WhitelistedBrokers Kotak, got %q", input.WhitelistedBrokers)
+	}
+	if input.ValidFrom != "2026-11-02 11:17:55 (IST)" {
+		t.Errorf("expected ValidFrom 2026-11-02 11:17:55 (IST), got %q", input.ValidFrom)
+	}
+	if input.ValidUntil != "2027-02-02 11:17:55 (IST)" {
+		t.Errorf("expected ValidUntil 2027-02-02 11:17:55 (IST), got %q", input.ValidUntil)
+	}
+	if input.Plan != "QUARTERLY" {
+		t.Errorf("expected Plan QUARTERLY, got %q", input.Plan)
+	}
+
+	// Now validate through ParseAndValidateProxyIP
+	p, err := domain.ParseAndValidateProxyIP(input, time.Now())
+	if err != nil {
+		t.Fatalf("unexpected error validating parsed proxy IP: %v", err)
+	}
+	if p.IPType != "ipv6" {
+		t.Errorf("expected IPType ipv6, got %q", p.IPType)
+	}
+	if p.WhitelistedBrokers != "Kotak" {
+		t.Errorf("expected WhitelistedBrokers Kotak, got %q", p.WhitelistedBrokers)
+	}
+	if p.Port != 443 {
+		t.Errorf("expected Port 443, got %d", p.Port)
+	}
+
+	// Negative tests
+	t.Run("missing IP", func(t *testing.T) {
+		_, err := domain.ParseProxyConfigText("Host: test.com\nPort: 443\n")
+		if err == nil {
+			t.Errorf("expected error for missing IP, got nil")
+		}
+	})
+
+	t.Run("missing Host", func(t *testing.T) {
+		_, err := domain.ParseProxyConfigText("IP: 10.0.0.1\nPort: 443\n")
+		if err == nil {
+			t.Errorf("expected error for missing Host, got nil")
+		}
+	})
+
+	t.Run("json text input", func(t *testing.T) {
+		jsonText := `{
+  "ip": "2401:c080:2400:16b8:c19:6ec5:4ebd:4e5f",
+  "host": "dc6-mum-01.algoip.in",
+  "port": 443,
+  "user_id": "aip_live_inx8bbazx5to5w6e",
+  "password": "",
+  "valid_until": "2027-01-27 23:59:59 (IST)",
+  "plan": "QUARTERLY",
+  "type": "IPV6",
+  "whitelisted_brokers": "Dhan"
+}`
+		parsed, err := domain.ParseProxyConfigText(jsonText)
+		if err != nil {
+			t.Fatalf("unexpected error parsing json text in ParseProxyConfigText: %v", err)
+		}
+		if parsed.IP != "2401:c080:2400:16b8:c19:6ec5:4ebd:4e5f" {
+			t.Errorf("expected IP 2401:c080:2400:16b8:c19:6ec5:4ebd:4e5f, got %q", parsed.IP)
+		}
+		if parsed.Host != "dc6-mum-01.algoip.in" {
+			t.Errorf("expected Host dc6-mum-01.algoip.in, got %q", parsed.Host)
+		}
+		if parsed.Port != 443 {
+			t.Errorf("expected Port 443, got %d", parsed.Port)
+		}
+		if parsed.UserID != "aip_live_inx8bbazx5to5w6e" {
+			t.Errorf("expected UserID aip_live_inx8bbazx5to5w6e, got %q", parsed.UserID)
+		}
+		if parsed.WhitelistedBrokers != "Dhan" {
+			t.Errorf("expected WhitelistedBrokers Dhan, got %q", parsed.WhitelistedBrokers)
+		}
+	})
+}
+
 

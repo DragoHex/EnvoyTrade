@@ -672,6 +672,7 @@ describe('AdminIPsPage', () => {
     const addOptions = Array.from(addBrokerSelect.options).map((o) => o.text)
     expect(addOptions).toContain('Dhan')
     expect(addOptions).toContain('Zerodha')
+    expect(addOptions).toContain('Kotak Neo')
     expect(addOptions).toContain('TestBroker')
     expect(addOptions).toContain('All Brokers (Unrestricted)')
     expect(addOptions).not.toContain('Zerodha, TestBroker')
@@ -713,6 +714,7 @@ describe('AdminIPsPage', () => {
     
     const editOptions = Array.from(editBrokerSelect.options).map((o) => o.text)
     expect(editOptions).toContain('Dhan')
+    expect(editOptions).toContain('Kotak Neo')
     expect(editOptions).not.toContain('Zerodha, TestBroker')
 
     fireEvent.change(editBrokerSelect, { target: { value: 'Dhan' } })
@@ -833,6 +835,70 @@ describe('AdminIPsPage', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /Add Proxy IP/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('supports Paste Config tab in Add modal in 2nd position, parses config, and submits raw text to API', async () => {
+    vi.spyOn(api, 'getAdminProxyIPs').mockResolvedValue(mockIPsResponse)
+    const postSpy = vi.spyOn(api, 'postAdminProxyIP').mockResolvedValue({
+      status: 'ok',
+      ip: mockIPsResponse.ips[0],
+    })
+
+    renderIPsPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('+ Add IP')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('+ Add IP'))
+
+    const addDialog = screen.getByRole('dialog', { name: 'Add Proxy IP' })
+    expect(addDialog).toBeInTheDocument()
+
+    // Verify tabs order: Form Fields, Paste Config, JSON Text
+    const tabButtons = addDialog.querySelectorAll('.tab-group button')
+    expect(tabButtons.length).toBe(3)
+    expect(tabButtons[0]).toHaveTextContent('Form Fields')
+    expect(tabButtons[1]).toHaveTextContent('Paste Config')
+    expect(tabButtons[2]).toHaveTextContent('JSON Text')
+
+    // Click Paste Config tab (2nd place)
+    fireEvent.click(tabButtons[1])
+
+    const configTextarea = screen.getByRole('textbox', { name: /Paste Config|Raw Config Text/i }) as HTMLTextAreaElement
+    const addBtn = screen.getByRole('button', { name: 'Add Proxy IP' })
+
+    // Negative case: empty textarea disables Add button
+    expect(addBtn).toBeDisabled()
+
+    // Negative case: missing IP shows error and disables button
+    fireEvent.input(configTextarea, { target: { value: 'Host: dc6-mum-01.algoip.in\nPort: 443' } })
+    expect(screen.getByText(/Missing IP address in config text/i)).toBeInTheDocument()
+    expect(addBtn).toBeDisabled()
+
+    // Positive case: valid config text
+    const sampleConfig = `IP (to be whitelisted in broker): 2401:c080:2400:16b8:7c15:2ea3:64b6:5a00
+Host: dc6-mum-01.algoip.in
+Port: 443
+user_id: aip_live_lq0z72n0s2uagmm6
+password: aip_sec_pctja3asoghh021117cl1gtw5i1h4566
+Whitelisted Brokers: Kotak
+Valid From: 2026-11-02 11:17:55 (IST)
+Valid Until: 2027-02-02 11:17:55 (IST)
+Plan: QUARTERLY`
+
+    fireEvent.input(configTextarea, { target: { value: sampleConfig } })
+    expect(addBtn).not.toBeDisabled()
+
+    // Preview assertions
+    expect(screen.getByText(/2401:c080:2400:16b8:7c15:2ea3:64b6:5a00/)).toBeInTheDocument()
+    expect(screen.getByText(/Kotak/)).toBeInTheDocument()
+
+    fireEvent.click(addBtn)
+
+    await waitFor(() => {
+      expect(postSpy).toHaveBeenCalledWith(sampleConfig)
     })
   })
 })

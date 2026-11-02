@@ -486,6 +486,153 @@ describe('AccountDetailDrawer', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
+  it('prioritizes Kotak Neo specialized proxy IP over unrestricted IPs when broker is kotakneo', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '10.0.0.1',
+          ipType: 'ipv4',
+          host: 'host1',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: '', // unrestricted
+        },
+        {
+          ipAddress: '10.0.0.9',
+          ipType: 'ipv4',
+          host: 'host9',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: 'Kotak', // Kotak specialized
+        },
+      ],
+      ipv6: [],
+    })
+
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    // Switch broker to Kotak Neo
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'kotakneo')
+
+    const ipInput = await screen.findByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('10.0.0.9')
+
+    // Open dropdown to check specialized badge
+    const toggleBtn = screen.getByRole('button', { name: 'Toggle IP dropdown' })
+    await userEvent.click(toggleBtn)
+
+    const listbox = screen.getByRole('listbox', { name: 'Compatible Proxy IPs' })
+    const options = Array.from(listbox.querySelectorAll('[role="option"]'))
+    expect(options[0]).toHaveTextContent('10.0.0.9')
+    expect(options[0]).toHaveTextContent('Kotak Specialized')
+  })
+
+  it('auto-switches follower from IPv4 to IPv6 when switching to Kotak Neo with only IPv6 specialized IP in pool', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '148.113.41.51',
+          ipType: 'ipv4',
+          host: 'host1',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: 'Zerodha',
+        },
+      ],
+      ipv6: [
+        {
+          ipAddress: '2401:c080:2400:16b8:7c15:2ea3:64b6:5a00',
+          ipType: 'ipv6',
+          host: 'dc6-mum-01.algoip.in',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'QUARTERLY',
+          whitelistedBrokers: 'Kotak',
+        },
+      ],
+    })
+
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    // Initial follower defaults to Kite and IPv4
+    const ipInput = await screen.findByLabelText(/IP Address/)
+    expect(ipInput).toHaveValue('148.113.41.51')
+
+    // Switch broker to Kotak Neo
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'kotakneo')
+
+    // Expect follower to auto-switch to IPv6 and assign Kotak IPv6 address
+    expect(screen.getByLabelText('IP Type')).toHaveValue('ipv6')
+    expect(screen.getByLabelText(/IP Address/)).toHaveValue('2401:c080:2400:16b8:7c15:2ea3:64b6:5a00')
+
+    // Open dropdown to check specialized badge
+    const toggleBtn = screen.getByRole('button', { name: 'Toggle IP dropdown' })
+    await userEvent.click(toggleBtn)
+
+    const listbox = screen.getByRole('listbox', { name: 'Compatible Proxy IPs' })
+    const options = Array.from(listbox.querySelectorAll('[role="option"]'))
+    expect(options[0]).toHaveTextContent('2401:c080:2400:16b8:7c15:2ea3:64b6:5a00')
+    expect(options[0]).toHaveTextContent('Kotak Specialized')
+  })
+
+  it('preserves master account IP flow without auto-assignment when selecting Kotak Neo', async () => {
+    vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
+      ipv4: [
+        {
+          ipAddress: '148.113.41.51',
+          ipType: 'ipv4',
+          host: 'host1',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'MONTHLY',
+          whitelistedBrokers: 'Zerodha',
+        },
+      ],
+      ipv6: [
+        {
+          ipAddress: '2401:c080:2400:16b8:7c15:2ea3:64b6:5a00',
+          ipType: 'ipv6',
+          host: 'dc6-mum-01.algoip.in',
+          port: 443,
+          validFrom: '',
+          validUntil: '',
+          plan: 'QUARTERLY',
+          whitelistedBrokers: 'Kotak',
+        },
+      ],
+    })
+
+    render(() => (
+      <AccountDetailDrawer open account={null} groups={[mockGroup]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    // Switch Role to Master
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'master')
+
+    // Master IP flow must remain untouched: IP Type is 'na' and IP is empty
+    expect(screen.getByLabelText('IP Type')).toHaveValue('na')
+    expect(screen.getByLabelText(/IP Address/)).toHaveValue('')
+
+    // Switch broker to Kotak Neo
+    await userEvent.selectOptions(screen.getByLabelText('Broker'), 'kotakneo')
+
+    // Master account remains untouched (no auto-assignment to proxy IP)
+    expect(screen.getByLabelText('IP Type')).toHaveValue('na')
+    expect(screen.getByLabelText(/IP Address/)).toHaveValue('')
+  })
+
   it('falls back to unrestricted IP when no specialized IP exists for the broker', async () => {
     vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
       ipv4: [

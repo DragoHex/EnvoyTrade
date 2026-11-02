@@ -103,6 +103,27 @@ describe('AccountQuotaPopover', () => {
     expect(screen.getAllByText('4 / 6')).toHaveLength(2)
   })
 
+  it('renders breakdown rows for Kotak Neo with limit and used count', async () => {
+    render(() => (
+      <AccountQuotaPopover
+        maxAccounts={6}
+        usedAccounts={3}
+        brokerLimits={{ general: 1, kite: 2, dhan: 1, kotakneo: 2 }}
+        brokerUsed={{ kite: 1, dhan: 0, kotakneo: 2 }}
+      />
+    ))
+
+    const triggerBtn = screen.getByRole('button', { name: /View Account Quota/i })
+    fireEvent.click(triggerBtn)
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Account Quota Breakdown/i })).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('Kotak Neo')).toBeInTheDocument()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+  })
+
   it('does not turn quota red on complete usage (e.g. 6/6), turning red only when exceeding (e.g. 7/6)', async () => {
     const { container: container6 } = render(() => (
       <AccountQuotaPopover
@@ -202,9 +223,10 @@ describe('AccountQuotaPopover', () => {
 
     expect(screen.getByText('Zerodha Kite')).toBeInTheDocument()
     expect(screen.getByText('1 / 3')).toBeInTheDocument()
-    // Dhan limit is 0 -> MUST show 0 / 0, NEVER 0 / ∞
+    // Dhan and Kotak Neo limit are 0 -> MUST show 0 / 0, NEVER 0 / ∞
     expect(screen.getByText('Dhan')).toBeInTheDocument()
-    expect(screen.getByText('0 / 0')).toBeInTheDocument()
+    expect(screen.getByText('Kotak Neo')).toBeInTheDocument()
+    expect(screen.getAllByText('0 / 0')).toHaveLength(2)
     expect(screen.getByText('Generalist')).toBeInTheDocument()
     expect(screen.getByText('0 / 2')).toBeInTheDocument()
     expect(screen.getByText('Total Accounts')).toBeInTheDocument()

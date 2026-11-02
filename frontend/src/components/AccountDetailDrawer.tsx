@@ -12,14 +12,21 @@ import { ThemedSelect } from './ThemedSelect'
 import { isValidIP } from '../utils/ip'
 import { formatAuthError } from '../utils/authError'
 
+function normalizeBroker(b: string): string {
+  const s = b.toLowerCase().trim()
+  if (s === 'kite') return 'zerodha'
+  if (s === 'kotakneo' || s === 'kotak neo' || s === 'kotak-neo' || s === 'kotak_neo') return 'kotak'
+  if (s === 'test_broker') return 'testbroker'
+  return s
+}
+
 export function isCompatibleIP(ipBrokers: string | undefined, brokerVal: string): boolean {
   if (!ipBrokers || !ipBrokers.trim()) return true
-  const b = brokerVal.toLowerCase()
+  const b = normalizeBroker(brokerVal)
   return ipBrokers
-    .toLowerCase()
     .split(',')
-    .map((s) => s.trim())
-    .some((c) => c === b || (b === 'kite' && c === 'zerodha') || (b === 'zerodha' && c === 'kite'))
+    .map((s) => normalizeBroker(s))
+    .some((c) => c === b)
 }
 
 export function getPrioritizedCompatibleIPs(ips: ProxyIP[], brokerVal: string): ProxyIP[] {
@@ -165,7 +172,12 @@ export function AccountDetailDrawer(props: {
 
   const brokerUsed = createMemo(() => {
     const list = props.existingAccounts ?? []
-    return list.filter((a) => (a.broker || 'kite').toLowerCase() === currentBroker()).length
+    const cur = currentBroker() === 'kotak' ? 'kotakneo' : currentBroker()
+    return list.filter((a) => {
+      let b = (a.broker || 'kite').toLowerCase()
+      if (b === 'kotak') b = 'kotakneo'
+      return b === cur
+    }).length
   })
 
   // Calculate excess accounts consuming generalist capacity across all brokers
@@ -175,7 +187,8 @@ export function AccountDetailDrawer(props: {
     const accounts = props.existingAccounts ?? []
     const counts: Record<string, number> = {}
     for (const a of accounts) {
-      const b = (a.broker || 'kite').toLowerCase()
+      let b = (a.broker || 'kite').toLowerCase()
+      if (b === 'kotak') b = 'kotakneo'
       counts[b] = (counts[b] || 0) + 1
     }
     let excessSum = 0
@@ -193,9 +206,14 @@ export function AccountDetailDrawer(props: {
     if (props.maxAccounts === -1) return false
     const limits = props.brokerLimits
     if (!limits || Object.keys(limits).length === 0) return false
-    const b = brokerName.toLowerCase()
-    const bLimit = limits[b] ?? 0
-    const bUsed = (props.existingAccounts ?? []).filter((a) => (a.broker || 'kite').toLowerCase() === b).length
+    let b = brokerName.toLowerCase()
+    if (b === 'kotak') b = 'kotakneo'
+    const bLimit = limits[b] ?? limits['kotak'] ?? 0
+    const bUsed = (props.existingAccounts ?? []).filter((a) => {
+      let ab = (a.broker || 'kite').toLowerCase()
+      if (ab === 'kotak') ab = 'kotakneo'
+      return ab === b
+    }).length
     if (bUsed < bLimit) return false
     const genRemaining = generalLimit() - generalUsed()
     return genRemaining <= 0

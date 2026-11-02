@@ -40,21 +40,27 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*domain.User,
 		}
 		return nil, err
 	}
+	var limits map[string]int
+	if len(row.BrokerIpLimits) > 0 {
+		_ = json.Unmarshal(row.BrokerIpLimits, &limits)
+	}
 	return &domain.User{
-		ID:           row.ID,
-		Email:        row.Email,
-		Username:     row.Username,
-		Name:         row.Name,
-		Phone:        row.Phone,
-		Address:      row.Address,
-		GSTNumber:    row.GstNumber,
-		PasswordHash: row.PasswordHash,
-		Role:         row.Role,
-		Active:       row.Active,
-		TotpSecret:   row.TotpSecret,
-		TotpEnabled:  row.TotpEnabled,
-		CreatedAt:    row.CreatedAt.Time,
-		UpdatedAt:    row.UpdatedAt.Time,
+		ID:             row.ID,
+		Email:          row.Email,
+		Username:       row.Username,
+		Name:           row.Name,
+		Phone:          row.Phone,
+		Address:        row.Address,
+		GSTNumber:      row.GstNumber,
+		PasswordHash:   row.PasswordHash,
+		Role:           row.Role,
+		Active:         row.Active,
+		TotpSecret:     row.TotpSecret,
+		TotpEnabled:    row.TotpEnabled,
+		MaxIPs:         int(row.MaxIps),
+		BrokerIPLimits: limits,
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
 	}, nil
 }
 
@@ -67,21 +73,27 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*domain
 		}
 		return nil, err
 	}
+	var limits map[string]int
+	if len(row.BrokerIpLimits) > 0 {
+		_ = json.Unmarshal(row.BrokerIpLimits, &limits)
+	}
 	return &domain.User{
-		ID:           row.ID,
-		Email:        row.Email,
-		Username:     row.Username,
-		Name:         row.Name,
-		Phone:        row.Phone,
-		Address:      row.Address,
-		GSTNumber:    row.GstNumber,
-		PasswordHash: row.PasswordHash,
-		Role:         row.Role,
-		Active:       row.Active,
-		TotpSecret:   row.TotpSecret,
-		TotpEnabled:  row.TotpEnabled,
-		CreatedAt:    row.CreatedAt.Time,
-		UpdatedAt:    row.UpdatedAt.Time,
+		ID:             row.ID,
+		Email:          row.Email,
+		Username:       row.Username,
+		Name:           row.Name,
+		Phone:          row.Phone,
+		Address:        row.Address,
+		GSTNumber:      row.GstNumber,
+		PasswordHash:   row.PasswordHash,
+		Role:           row.Role,
+		Active:         row.Active,
+		TotpSecret:     row.TotpSecret,
+		TotpEnabled:    row.TotpEnabled,
+		MaxIPs:         int(row.MaxIps),
+		BrokerIPLimits: limits,
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
 	}, nil
 }
 

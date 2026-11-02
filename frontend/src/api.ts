@@ -752,13 +752,22 @@ export function getAdminProxyIPs(status?: string, type?: string): Promise<AdminP
 export function postAdminProxyIPsBulk(items: any[]): Promise<BulkUploadResult> {
   return apiFetch(`${BASE}/admin/proxy-ips/bulk`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(items),
   }).then((r) => json(r))
 }
 
 export function postAdminProxyIP(item: any): Promise<{ status: string; ip: AdminProxyIP }> {
+  if (typeof item === 'string') {
+    return apiFetch(`${BASE}/admin/proxy-ips`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: item,
+    }).then((r) => json(r))
+  }
   return apiFetch(`${BASE}/admin/proxy-ips`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(item),
   }).then((r) => json(r))
 }

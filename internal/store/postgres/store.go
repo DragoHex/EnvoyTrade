@@ -963,6 +963,26 @@ func (s *Store) VacuumInstruments(ctx context.Context) error {
 	return err
 }
 
+// InstrumentCountByBroker returns the count of instruments grouped by broker name.
+func (s *Store) InstrumentCountByBroker(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.pool.Query(ctx, "SELECT broker, count(*)::bigint FROM instruments GROUP BY broker;")
+	if err != nil {
+		return nil, fmt.Errorf("query instrument counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var broker string
+		var count int64
+		if err := rows.Scan(&broker, &count); err != nil {
+			return nil, fmt.Errorf("scan instrument count: %w", err)
+		}
+		counts[strings.ToLower(strings.TrimSpace(broker))] = count
+	}
+	return counts, rows.Err()
+}
+
 // BatchInsertInstruments inserts a slice of instruments in a single bulk UNNEST statement.
 func (s *Store) BatchInsertInstruments(ctx context.Context, instruments []domain.Instrument) error {
 	if len(instruments) == 0 {

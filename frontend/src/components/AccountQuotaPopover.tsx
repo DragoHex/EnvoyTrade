@@ -114,7 +114,7 @@ export function AccountQuotaPopover(props: AccountQuotaPopoverProps) {
       calcGeneralUsed = excess
     }
 
-    const coreKeys = ['kite', 'dhan', 'general']
+    const coreKeys = ['kite', 'dhan', 'kotakneo', 'general']
     const allKeys = new Set([
       ...coreKeys,
       ...Object.keys(limits),
@@ -124,12 +124,15 @@ export function AccountQuotaPopover(props: AccountQuotaPopoverProps) {
     const result: Array<{ id: string; name: string; limit: number; used: number }> = []
 
     for (const key of allKeys) {
-      const bKey = key.toLowerCase()
+      let bKey = key.toLowerCase()
+      if (bKey === 'kotak') {
+        bKey = 'kotakneo'
+      }
       if (bKey === 'testbroker') {
         continue // dev mock broker strictly hidden from client breakdown
       }
-      const limit = limits[bKey] ?? 0
-      const u = bKey === 'general' ? calcGeneralUsed : (used[bKey] ?? 0)
+      const limit = limits[bKey] ?? limits['kotak'] ?? 0
+      const u = bKey === 'general' ? calcGeneralUsed : (used[bKey] ?? used['kotak'] ?? 0)
 
       if (!coreKeys.includes(bKey) && limit <= 0 && u <= 0) {
         continue
@@ -150,7 +153,7 @@ export function AccountQuotaPopover(props: AccountQuotaPopoverProps) {
       })
     }
 
-    const order = ['kite', 'dhan', 'general']
+    const order = ['kite', 'dhan', 'kotakneo', 'general']
     return result.sort((a, b) => {
       const idxA = order.indexOf(a.id)
       const idxB = order.indexOf(b.id)

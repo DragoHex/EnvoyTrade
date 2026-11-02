@@ -8,8 +8,8 @@ BEGIN;
 -- Password for both accounts is: password123 (bcrypt cost 12 hash)
 INSERT INTO users (id, email, username, name, password_hash, role, active, max_ips, broker_ip_limits, phone, address, gst_number, created_at, updated_at)
 VALUES
-  ('a0000000-0000-0000-0000-000000000001', 'trader@envoytrade.com', 'trader', 'Demo Trader', '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'admin', true, -1, '{"general": 100, "kite": 50, "dhan": 50, "testbroker": 50}'::jsonb, '+919876543210', '123 Dalal Street, Fort, Mumbai, Maharashtra 400001', '27AABCU9603R1ZM', now(), now()),
-  ('a0000000-0000-0000-0000-000000000002', 'bob@envoytrade.com',    'bob',    'Bob Trader',  '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'user',  true, -1, '{"general": 100, "kite": 50, "dhan": 50, "testbroker": 50}'::jsonb, '+919876543211', '456 MG Road, Bengaluru, Karnataka 560001',          '',                now(), now())
+  ('a0000000-0000-0000-0000-000000000001', 'trader@envoytrade.com', 'trader', 'Demo Trader', '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'admin', true, -1, '{"general": 100, "kite": 50, "dhan": 50, "kotakneo": 50, "testbroker": 50}'::jsonb, '+919876543210', '123 Dalal Street, Fort, Mumbai, Maharashtra 400001', '27AABCU9603R1ZM', now(), now()),
+  ('a0000000-0000-0000-0000-000000000002', 'bob@envoytrade.com',    'bob',    'Bob Trader',  '$2a$12$Ut7Sf7HsyDpwWGURAB4zUOBDdeYELVYMybmk6cCNrUD3nOD5o68ci', 'user',  true, -1, '{"general": 100, "kite": 50, "dhan": 50, "kotakneo": 50, "testbroker": 50}'::jsonb, '+919876543211', '456 MG Road, Bengaluru, Karnataka 560001',          '',                now(), now())
 ON CONFLICT (id) DO UPDATE SET
   email            = EXCLUDED.email,
   username         = EXCLUDED.username,

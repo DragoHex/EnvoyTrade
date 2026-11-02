@@ -16,6 +16,7 @@ import {
   getAdminServiceStatus,
   postAdminKillSwitch,
   getAdminProxyIPs,
+  postAdminProxyIP,
   putAdminProxyIP,
   testAdminProxyIP,
   getAdminUsers,
@@ -360,6 +361,28 @@ describe('api client', () => {
     expect((globalThis.fetch as any).mock.calls[2][0]).toBe('/api/v1/admin/proxy-ips/10.0.0.1')
     expect((globalThis.fetch as any).mock.calls[2][1].method).toBe('PUT')
     expect(JSON.parse((globalThis.fetch as any).mock.calls[2][1].body)).toEqual({ ip: '10.0.0.1', host: 'dc1.algoip.in' })
+
+    // postAdminProxyIP with raw text
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok', ip: { ipAddress: '10.0.0.1' } }), { status: 201, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const postTextRes = await postAdminProxyIP('IP: 10.0.0.1\nHost: dc1.algoip.in\n')
+    expect(postTextRes.status).toBe('ok')
+    expect((globalThis.fetch as any).mock.calls[3][0]).toBe('/api/v1/admin/proxy-ips')
+    expect((globalThis.fetch as any).mock.calls[3][1].method).toBe('POST')
+    expect((globalThis.fetch as any).mock.calls[3][1].headers['Content-Type']).toBe('text/plain')
+    expect((globalThis.fetch as any).mock.calls[3][1].body).toBe('IP: 10.0.0.1\nHost: dc1.algoip.in\n')
+
+    // postAdminProxyIP with JSON object
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok', ip: { ipAddress: '10.0.0.2' } }), { status: 201, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const postJsonRes = await postAdminProxyIP({ ip: '10.0.0.2', host: 'dc2.algoip.in' })
+    expect(postJsonRes.status).toBe('ok')
+    expect((globalThis.fetch as any).mock.calls[4][0]).toBe('/api/v1/admin/proxy-ips')
+    expect((globalThis.fetch as any).mock.calls[4][1].method).toBe('POST')
+    expect((globalThis.fetch as any).mock.calls[4][1].headers['Content-Type']).toBe('application/json')
+    expect(JSON.parse((globalThis.fetch as any).mock.calls[4][1].body)).toEqual({ ip: '10.0.0.2', host: 'dc2.algoip.in' })
   })
 
   it('admin users APIs send correct requests', async () => {

@@ -800,6 +800,20 @@ export function AdminUsersPage() {
                 </div>
 
                 <div style={{ 'margin-bottom': '0.85rem' }}>
+                  <label for="edit-kotakneo-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
+                    Kotak Neo Allowed IPs
+                  </label>
+                  <ThemedNumberInput
+                    id="edit-kotakneo-ips"
+                    aria-label="Kotak Neo Allowed IPs"
+                    min="0"
+                    value={editBrokerLimits()['kotakneo'] ?? editBrokerLimits()['kotak'] ?? 0}
+                    onInput={(e) => setEditBrokerLimits({ ...editBrokerLimits(), kotakneo: Math.max(0, parseInt(e.currentTarget.value) || 0) })}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--color-border)', 'border-radius': '6px', background: 'var(--color-surface)', color: 'var(--color-text)', 'box-sizing': 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ 'margin-bottom': '0.85rem' }}>
                   <label for="edit-testbroker-ips" style={{ display: 'block', 'font-size': '0.85rem', 'font-weight': 600, 'margin-bottom': '0.3rem', color: 'var(--color-text)' }}>
                     Test Broker (Mock) Allowed IPs
                   </label>

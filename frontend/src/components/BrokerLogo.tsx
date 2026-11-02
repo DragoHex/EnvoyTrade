@@ -136,6 +136,9 @@ export const BROKER_REGISTRY: Record<string, BrokerConfig> = {
   dhan: DHAN_CONFIG,
   kotakneo: KOTAK_CONFIG,
   kotak: KOTAK_CONFIG,
+  'kotak neo': KOTAK_CONFIG,
+  'kotak-neo': KOTAK_CONFIG,
+  kotak_neo: KOTAK_CONFIG,
   testbroker: TESTBROKER_CONFIG,
 }
 
@@ -162,7 +165,16 @@ export function BrokerLogo(props: {
   const config = () => getBrokerConfig(props.broker)
   const isSvg = () => {
     const k = (props.broker ?? '').toLowerCase().trim()
-    return k === 'kite' || k === 'zerodha' || k === 'dhan' || k === 'kotakneo' || k === 'kotak'
+    return (
+      k === 'kite' ||
+      k === 'zerodha' ||
+      k === 'dhan' ||
+      k === 'kotakneo' ||
+      k === 'kotak' ||
+      k === 'kotak neo' ||
+      k === 'kotak-neo' ||
+      k === 'kotak_neo'
+    )
   }
   const height = () => props.size ?? 18
   const width = () => Math.round(height() * 1.5)
