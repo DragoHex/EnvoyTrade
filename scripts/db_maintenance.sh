@@ -94,6 +94,9 @@ if [ -z "${DATABASE_URL:-}" ]; then
     DATABASE_URL="postgres://envoytrade:envoytrade@localhost:5434/envoytrade?sslmode=disable"
 fi
 
+# Sanitize connection string for libpq (psql/pg_dump fail if pgx-specific pool parameters are present)
+LIBPQ_DATABASE_URL=$(echo "${DATABASE_URL}" | sed -E 's/[?&]pool_(min|max)_conns=[0-9]+//g' | sed 's/\?&/?/' | sed 's/[?&]$//')
+
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/envoytrade_${TIMESTAMP}.sql.gz"
 
@@ -182,7 +185,7 @@ if [ "${DO_VACUUM}" = true ]; then
                 podman exec "${USE_CONTAINER}" psql -U envoytrade -d envoytrade -c "${SQL}" 2>/dev/null || \
                 docker exec "${USE_CONTAINER}" psql -U envoytrade -d envoytrade -c "${SQL}" 2>/dev/null || true
             else
-                psql "${DATABASE_URL}" -c "${SQL}" 2>/dev/null || echo "    Note: table ${tbl} vacuum skipped/failed"
+                psql "${LIBPQ_DATABASE_URL}" -c "${SQL}" 2>/dev/null || echo "    Note: table ${tbl} vacuum skipped/failed"
             fi
             echo "    ✓ Cleaned and analyzed: ${tbl}"
         fi
@@ -207,7 +210,7 @@ if [ "${DO_BACKUP}" = true ]; then
             (podman exec "${USE_CONTAINER}" pg_dump -U envoytrade -d envoytrade 2>/dev/null || \
              docker exec "${USE_CONTAINER}" pg_dump -U envoytrade -d envoytrade) | gzip > "${BACKUP_FILE}"
         else
-            pg_dump "${DATABASE_URL}" | gzip > "${BACKUP_FILE}"
+            pg_dump "${LIBPQ_DATABASE_URL}" | gzip > "${BACKUP_FILE}"
         fi
 
         BACKUP_SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
