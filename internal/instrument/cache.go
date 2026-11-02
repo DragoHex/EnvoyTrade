@@ -29,12 +29,13 @@ type Info struct {
 
 // Cache provides a thread-safe, pre-allocated in-memory cache for instrument metadata.
 type Cache struct {
-	mu       sync.RWMutex
-	capacity int
-	entries  map[string]Info   // key: "EXCHANGE:TRADINGSYMBOL"
-	revSec   map[string]string // key: "EXCHANGE_SEGMENT:SECURITY_ID" -> "EXCHANGE:TRADINGSYMBOL"
-	store    Store
-	logger   *slog.Logger
+	mu           sync.RWMutex
+	capacity     int
+	entries      map[string]Info   // key: "EXCHANGE:TRADINGSYMBOL"
+	canonicalMap map[string]Info   // key: "CANONICAL_KEY:TARGET_BROKER"
+	revSec       map[string]string // key: "EXCHANGE_SEGMENT:SECURITY_ID" -> "EXCHANGE:TRADINGSYMBOL"
+	store        Store
+	logger       *slog.Logger
 }
 
 // NewCache constructs a Cache with pre-allocated map capacity.
@@ -43,11 +44,12 @@ func NewCache(capacity int, store Store, logger *slog.Logger) *Cache {
 		capacity = 10000
 	}
 	return &Cache{
-		capacity: capacity,
-		entries:  make(map[string]Info, capacity),
-		revSec:   make(map[string]string, capacity),
-		store:    store,
-		logger:   logger,
+		capacity:     capacity,
+		entries:      make(map[string]Info, capacity),
+		canonicalMap: make(map[string]Info, capacity),
+		revSec:       make(map[string]string, capacity),
+		store:        store,
+		logger:       logger,
 	}
 }
 
@@ -75,6 +77,7 @@ func (c *Cache) AutoLoadActiveFO(ctx context.Context) error {
 
 	clear(c.entries)
 	clear(c.revSec)
+	clear(c.canonicalMap)
 
 	loaded := 0
 	for _, inst := range instruments {
@@ -95,6 +98,17 @@ func (c *Cache) AutoLoadActiveFO(ctx context.Context) error {
 		if inst.ExchangeSegment != "" && inst.SecurityID != "" {
 			revKey := strings.ToUpper(strings.TrimSpace(inst.ExchangeSegment)) + ":" + strings.TrimSpace(inst.SecurityID)
 			c.revSec[revKey] = key
+		}
+
+		// Register canonical cross-broker index
+		if contract, err := ParseCanonicalContract(inst.Exchange, inst.Tradingsymbol); err == nil {
+			brokerTag := strings.ToLower(strings.TrimSpace(inst.Broker))
+			for _, k := range contract.LookupKeys() {
+				bKey := k + ":" + brokerTag
+				if _, exists := c.canonicalMap[bKey]; !exists {
+					c.canonicalMap[bKey] = info
+				}
+			}
 		}
 
 		// Preserve nearest expiry: since ActiveFOInstrumentsForCache orders by expiry ASC,
@@ -170,51 +184,76 @@ func (c *Cache) ResolveLotSize(ctx context.Context, exchange, tradingsymbol stri
 	return lotSize, nil
 }
 
-// ResolveToSecurityID maps (exchange, tradingsymbol) to Dhan's (ExchangeSegment, SecurityID, lotSize).
-func (c *Cache) ResolveToSecurityID(exchange, tradingsymbol string) (string, string, int, error) {
+func isUsableForBroker(tb string, info Info) bool {
+	if tb == "kite" || tb == "zerodha" {
+		return info.Tradingsymbol != ""
+	}
+	if tb == "" {
+		return info.SecurityID != "" || info.Tradingsymbol != ""
+	}
+	return info.SecurityID != ""
+}
+
+// ResolveForBroker maps an incoming (exchange, tradingsymbol) from any master broker
+// into the target broker's native parameters (ExchangeSegment, SecurityID, LotSize, TargetTradingsymbol).
+func (c *Cache) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (string, string, int, string, error) {
 	ex := strings.ToUpper(strings.TrimSpace(exchange))
 	rawSym := strings.TrimSpace(tradingsymbol)
 	sym := strings.ToUpper(rawSym)
+	tb := strings.ToLower(strings.TrimSpace(targetBroker))
+
 	if ex == "" || sym == "" {
-		return "", "", 0, fmt.Errorf("%w: empty exchange or symbol", domain.ErrNotFound)
+		return "", "", 0, "", fmt.Errorf("%w: empty exchange or symbol", domain.ErrNotFound)
 	}
 
 	key := ex + ":" + sym
 
-	// 1. Fast in-memory check
+	// 1. Direct in-memory check
 	c.mu.RLock()
 	info, ok := c.entries[key]
-	if ok && info.SecurityID != "" {
+	if ok && (tb == "" || strings.ToLower(info.Broker) == tb) && isUsableForBroker(tb, info) {
 		c.mu.RUnlock()
-		return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+		return info.ExchangeSegment, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
+	}
+
+	// 2. Canonical cross-broker in-memory lookup
+	if contract, err := ParseCanonicalContract(ex, rawSym); err == nil {
+		for _, k := range contract.LookupKeys() {
+			canonKey := k + ":" + tb
+			if cInfo, exists := c.canonicalMap[canonKey]; exists && isUsableForBroker(tb, cInfo) {
+				c.mu.RUnlock()
+				return cInfo.ExchangeSegment, cInfo.SecurityID, cInfo.LotSize, cInfo.Tradingsymbol, nil
+			}
+		}
 	}
 
 	// Secondary check for derivative aliases (e.g. NFO vs NSE, BFO vs BSE)
 	if ex == "NFO" {
-		if info, ok := c.entries["NSE:"+sym]; ok && info.SecurityID != "" {
+		if info, ok := c.entries["NSE:"+sym]; ok && isUsableForBroker(tb, info) {
 			c.mu.RUnlock()
-			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+			return info.ExchangeSegment, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
 		}
 	} else if ex == "NSE" {
-		if info, ok := c.entries["NFO:"+sym]; ok && info.SecurityID != "" {
+		if info, ok := c.entries["NFO:"+sym]; ok && isUsableForBroker(tb, info) {
 			c.mu.RUnlock()
-			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+			return info.ExchangeSegment, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
 		}
 	} else if ex == "BFO" {
-		if info, ok := c.entries["BSE:"+sym]; ok && info.SecurityID != "" {
+		if info, ok := c.entries["BSE:"+sym]; ok && isUsableForBroker(tb, info) {
 			c.mu.RUnlock()
-			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+			return info.ExchangeSegment, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
 		}
 	} else if ex == "BSE" {
-		if info, ok := c.entries["BFO:"+sym]; ok && info.SecurityID != "" {
+		if info, ok := c.entries["BFO:"+sym]; ok && isUsableForBroker(tb, info) {
 			c.mu.RUnlock()
-			return info.ExchangeSegment, info.SecurityID, info.LotSize, nil
+			return info.ExchangeSegment, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
 		}
 	}
 	c.mu.RUnlock()
 
-	// 2. Fall back to store if available
+	// 3. Fall back to store if available
 	if c.store != nil {
+		// Try direct query
 		secID, exSeg, lot, err := c.store.InstrumentSecurityID(context.Background(), ex, rawSym)
 		if err == nil && secID != "" {
 			c.mu.Lock()
@@ -224,6 +263,7 @@ func (c *Cache) ResolveToSecurityID(exchange, tradingsymbol string) (string, str
 					SecurityID:      secID,
 					ExchangeSegment: exSeg,
 					Tradingsymbol:   rawSym,
+					Broker:          tb,
 				}
 				if exSeg != "" && secID != "" {
 					revKey := strings.ToUpper(strings.TrimSpace(exSeg)) + ":" + strings.TrimSpace(secID)
@@ -231,11 +271,82 @@ func (c *Cache) ResolveToSecurityID(exchange, tradingsymbol string) (string, str
 				}
 			}
 			c.mu.Unlock()
-			return exSeg, secID, lot, nil
+			return exSeg, secID, lot, rawSym, nil
+		}
+
+		// Try canonical translated symbol query
+		if contract, err := ParseCanonicalContract(ex, rawSym); err == nil {
+			var altSym string
+			if tb == "dhan" {
+				altSym = contract.ToDhanSymbol()
+			} else if tb == "kotak" || tb == "kotakneo" {
+				altSym = contract.ToKotakSymbol()
+			} else if tb == "kite" || tb == "zerodha" {
+				altSym = contract.ToKiteSymbol()
+			}
+
+			if altSym != "" {
+				if tb == "kite" || tb == "zerodha" {
+					lot, err := c.store.InstrumentLotSize(context.Background(), ex, altSym)
+					if err == nil && lot > 0 {
+						targetInfo := Info{
+							LotSize:         lot,
+							ExchangeSegment: ex,
+							Tradingsymbol:   altSym,
+							Broker:          tb,
+						}
+						c.mu.Lock()
+						if len(c.entries) < c.capacity {
+							c.entries[key] = targetInfo
+							for _, k := range contract.LookupKeys() {
+								c.canonicalMap[k+":"+tb] = targetInfo
+							}
+						}
+						c.mu.Unlock()
+						return ex, "", lot, altSym, nil
+					}
+					return ex, "", 0, altSym, nil
+				}
+
+				if altSym != rawSym {
+					secID, exSeg, lot, err := c.store.InstrumentSecurityID(context.Background(), ex, altSym)
+					if err == nil && secID != "" {
+						c.mu.Lock()
+						if len(c.entries) < c.capacity {
+							targetInfo := Info{
+								LotSize:         lot,
+								SecurityID:      secID,
+								ExchangeSegment: exSeg,
+								Tradingsymbol:   altSym,
+								Broker:          tb,
+							}
+							c.entries[key] = targetInfo
+							for _, k := range contract.LookupKeys() {
+								c.canonicalMap[k+":"+tb] = targetInfo
+							}
+						}
+						c.mu.Unlock()
+						return exSeg, secID, lot, altSym, nil
+					}
+				}
+			}
+		}
+	} else if tb == "kite" || tb == "zerodha" {
+		if contract, err := ParseCanonicalContract(ex, rawSym); err == nil {
+			altSym := contract.ToKiteSymbol()
+			if altSym != "" {
+				return ex, "", 0, altSym, nil
+			}
 		}
 	}
 
-	return "", "", 0, fmt.Errorf("%w: %s:%s", domain.ErrNotFound, exchange, tradingsymbol)
+	return "", "", 0, "", fmt.Errorf("%w: %s:%s", domain.ErrNotFound, exchange, tradingsymbol)
+}
+
+// ResolveToSecurityID maps (exchange, tradingsymbol) to Dhan's (ExchangeSegment, SecurityID, lotSize).
+func (c *Cache) ResolveToSecurityID(exchange, tradingsymbol string) (string, string, int, error) {
+	exSeg, secID, lot, _, err := c.ResolveForBroker("dhan", exchange, tradingsymbol)
+	return exSeg, secID, lot, err
 }
 
 // ResolveToSymbol maps Dhan's (exchangeSegment, securityID) to canonical (exchange, tradingsymbol).

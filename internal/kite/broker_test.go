@@ -119,6 +119,71 @@ func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
 	}
 }
 
+type fakeResolver struct {
+	targetSymbol string
+	err          error
+}
+
+func (f *fakeResolver) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (string, string, int, string, error) {
+	if f.err != nil {
+		return "", "", 0, "", f.err
+	}
+	return exchange, "", 100, f.targetSymbol, nil
+}
+
+func TestBroker_PlaceOrder_ResolvesSymbolViaLookup(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-123"}
+	resolver := &fakeResolver{targetSymbol: "CRUDEOIL26NOV5000PE"}
+	b := kite.NewBroker(api, true, resolver)
+
+	params := broker.OrderParams{
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL17NOV265000PE",
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Quantity:        100,
+	}
+
+	resp, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if resp.OrderID != "kite-123" {
+		t.Errorf("OrderID = %q, want kite-123", resp.OrderID)
+	}
+	if api.placedVariety.Tradingsymbol != "CRUDEOIL26NOV5000PE" {
+		t.Errorf("Tradingsymbol = %q, want CRUDEOIL26NOV5000PE", api.placedVariety.Tradingsymbol)
+	}
+}
+
+func TestBroker_PlaceOrder_ResolverErrorFallsBackToOriginalSymbol(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-456"}
+	resolver := &fakeResolver{err: errors.New("not found")}
+	b := kite.NewBroker(api, true, resolver)
+
+	params := broker.OrderParams{
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL17NOV265000PE",
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Quantity:        100,
+	}
+
+	resp, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if resp.OrderID != "kite-456" {
+		t.Errorf("OrderID = %q, want kite-456", resp.OrderID)
+	}
+	if api.placedVariety.Tradingsymbol != "CRUDEOIL17NOV265000PE" {
+		t.Errorf("Tradingsymbol = %q, want CRUDEOIL17NOV265000PE", api.placedVariety.Tradingsymbol)
+	}
+}
+
+
 func TestBroker_PlaceOrder_LimitOrder_MapsPriceAndTriggerPrice(t *testing.T) {
 	api := &fakeKiteAPI{orderID: "kite-limit-1"}
 	b := kite.NewBroker(api, true)

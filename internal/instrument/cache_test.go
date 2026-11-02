@@ -366,3 +366,170 @@ func TestCache_DerivativeExchangeAliases(t *testing.T) {
 		t.Fatalf("ResolveLotSize BSE alias failed: lot=%d, err=%v", lot, err)
 	}
 }
+
+func TestCache_CrossBrokerResolution_KotakToDhan(t *testing.T) {
+	dhanInst := domain.Instrument{
+		InstrumentToken: 1583041,
+		Broker:          "dhan",
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL-17Nov2026-5000-PE",
+		SecurityID:      "583041",
+		ExchangeSegment: "MCX_COMM",
+		LotSize:         1,
+	}
+
+	store := &mockStore{
+		activeFO: []domain.Instrument{dhanInst},
+		secIDs: map[string]struct {
+			secID string
+			exSeg string
+			lot   int
+		}{
+			"MCX:CRUDEOIL-17Nov2026-5000-PE": {
+				secID: "583041",
+				exSeg: "MCX_COMM",
+				lot:   1,
+			},
+		},
+	}
+
+	cache := NewCache(10000, store, nil)
+	if err := cache.AutoLoadActiveFO(context.Background()); err != nil {
+		t.Fatalf("AutoLoadActiveFO failed: %v", err)
+	}
+
+	// 1. Query with Kotak format via ResolveForBroker
+	seg, secID, lot, targetSym, err := cache.ResolveForBroker("dhan", "MCX", "CRUDEOIL17NOV265000PE")
+	if err != nil {
+		t.Fatalf("ResolveForBroker failed: %v", err)
+	}
+	if secID != "583041" || seg != "MCX_COMM" || lot != 1 || targetSym != "CRUDEOIL-17Nov2026-5000-PE" {
+		t.Errorf("ResolveForBroker mismatch: seg=%s, secID=%s, lot=%d, targetSym=%s", seg, secID, lot, targetSym)
+	}
+
+	// 2. Query with Kotak format via ResolveToSecurityID
+	seg, secID, lot, err = cache.ResolveToSecurityID("MCX", "CRUDEOIL17NOV265000PE")
+	if err != nil {
+		t.Fatalf("ResolveToSecurityID failed: %v", err)
+	}
+	if secID != "583041" || seg != "MCX_COMM" || lot != 1 {
+		t.Errorf("ResolveToSecurityID mismatch: seg=%s, secID=%s, lot=%d", seg, secID, lot)
+	}
+}
+
+func TestCache_CrossBrokerResolution_KotakToKite(t *testing.T) {
+	kiteInst := domain.Instrument{
+		InstrumentToken: 256265,
+		Broker:          "kite",
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL26NOV5000PE",
+		SecurityID:      "", // Kite has no security ID
+		ExchangeSegment: "MCX",
+		LotSize:         100,
+	}
+
+	store := &mockStore{
+		activeFO: []domain.Instrument{kiteInst},
+	}
+
+	cache := NewCache(10000, store, nil)
+	if err := cache.AutoLoadActiveFO(context.Background()); err != nil {
+		t.Fatalf("AutoLoadActiveFO failed: %v", err)
+	}
+
+	// Query with Kotak format via ResolveForBroker targeting Kite
+	_, _, lot, targetSym, err := cache.ResolveForBroker("kite", "MCX", "CRUDEOIL17NOV265000PE")
+	if err != nil {
+		t.Fatalf("ResolveForBroker failed: %v", err)
+	}
+	if targetSym != "CRUDEOIL26NOV5000PE" {
+		t.Errorf("targetSym = %q, want CRUDEOIL26NOV5000PE", targetSym)
+	}
+	if lot != 100 {
+		t.Errorf("lot = %d, want 100", lot)
+	}
+}
+
+func TestCache_CrossBrokerMatrix_Comprehensive(t *testing.T) {
+	instruments := []domain.Instrument{
+		// Dhan MCX
+		{Broker: "dhan", Exchange: "MCX", Tradingsymbol: "NATGASMINI-20Nov2026-115-CE", SecurityID: "589278", ExchangeSegment: "MCX_COMM", LotSize: 250},
+		{Broker: "dhan", Exchange: "MCX", Tradingsymbol: "GOLDM-05Mar2027-FUT", SecurityID: "584500", ExchangeSegment: "MCX_COMM", LotSize: 100},
+		// Kite MCX
+		{Broker: "kite", Exchange: "MCX", Tradingsymbol: "NATGASMINI26NOV115CE", SecurityID: "", ExchangeSegment: "MCX", LotSize: 250},
+		{Broker: "kite", Exchange: "MCX", Tradingsymbol: "GOLDM27MARFUT", SecurityID: "", ExchangeSegment: "MCX", LotSize: 100},
+		// Dhan NFO Weekly
+		{Broker: "dhan", Exchange: "NFO", Tradingsymbol: "NIFTY-03Nov2026-28350-CE", SecurityID: "54896", ExchangeSegment: "NSE_FNO", LotSize: 65},
+		// Kite NFO Weekly
+		{Broker: "kite", Exchange: "NFO", Tradingsymbol: "NIFTY26N0328350CE", SecurityID: "", ExchangeSegment: "NFO", LotSize: 65},
+		// Dhan BFO Weekly
+		{Broker: "dhan", Exchange: "BFO", Tradingsymbol: "SENSEX-17Dec2026-72000-PE", SecurityID: "1172542", ExchangeSegment: "BSE_FNO", LotSize: 20},
+		// Kite BFO Weekly
+		{Broker: "kite", Exchange: "BFO", Tradingsymbol: "SENSEX26D1772000PE", SecurityID: "", ExchangeSegment: "BFO", LotSize: 20},
+		// Dhan Stock Option
+		{Broker: "dhan", Exchange: "NFO", Tradingsymbol: "INFY-Nov2026-1000-CE", SecurityID: "104780", ExchangeSegment: "NSE_FNO", LotSize: 400},
+		// Kite Stock Option
+		{Broker: "kite", Exchange: "NFO", Tradingsymbol: "INFY26NOV1000CE", SecurityID: "", ExchangeSegment: "NFO", LotSize: 400},
+	}
+
+	store := &mockStore{
+		activeFO: instruments,
+	}
+
+	cache := NewCache(10000, store, nil)
+	if err := cache.AutoLoadActiveFO(context.Background()); err != nil {
+		t.Fatalf("AutoLoadActiveFO failed: %v", err)
+	}
+
+	// 1. From Kotak MCX Option NATGASMINI20NOV26115CE -> Dhan and Kite
+	segDhan, secIDDhan, lotDhan, symDhan, err := cache.ResolveForBroker("dhan", "MCX", "NATGASMINI20NOV26115CE")
+	if err != nil || secIDDhan != "589278" || symDhan != "NATGASMINI-20Nov2026-115-CE" || lotDhan != 250 {
+		t.Errorf("Kotak->Dhan NATGASMINI mismatch: seg=%s, secID=%s, lot=%d, sym=%s, err=%v", segDhan, secIDDhan, lotDhan, symDhan, err)
+	}
+	_, _, lotKite, symKite, err := cache.ResolveForBroker("kite", "MCX", "NATGASMINI20NOV26115CE")
+	if err != nil || symKite != "NATGASMINI26NOV115CE" || lotKite != 250 {
+		t.Errorf("Kotak->Kite NATGASMINI mismatch: lot=%d, sym=%s, err=%v", lotKite, symKite, err)
+	}
+
+	// 2. From Kotak NFO Weekly NIFTY26N0328350CE -> Dhan and Kite
+	segDhan, secIDDhan, lotDhan, symDhan, err = cache.ResolveForBroker("dhan", "NFO", "NIFTY26N0328350CE")
+	if err != nil || secIDDhan != "54896" || symDhan != "NIFTY-03Nov2026-28350-CE" || lotDhan != 65 {
+		t.Errorf("Kotak->Dhan NIFTY Weekly mismatch: seg=%s, secID=%s, lot=%d, sym=%s, err=%v", segDhan, secIDDhan, lotDhan, symDhan, err)
+	}
+	_, _, lotKite, symKite, err = cache.ResolveForBroker("kite", "NFO", "NIFTY26N0328350CE")
+	if err != nil || symKite != "NIFTY26N0328350CE" || lotKite != 65 {
+		t.Errorf("Kotak->Kite NIFTY Weekly mismatch: lot=%d, sym=%s, err=%v", lotKite, symKite, err)
+	}
+
+	// 3. From Kotak BFO Weekly SENSEX26D1772000PE -> Dhan and Kite
+	segDhan, secIDDhan, lotDhan, symDhan, err = cache.ResolveForBroker("dhan", "BFO", "SENSEX26D1772000PE")
+	if err != nil || secIDDhan != "1172542" || symDhan != "SENSEX-17Dec2026-72000-PE" || lotDhan != 20 {
+		t.Errorf("Kotak->Dhan SENSEX Weekly mismatch: seg=%s, secID=%s, lot=%d, sym=%s, err=%v", segDhan, secIDDhan, lotDhan, symDhan, err)
+	}
+	_, _, lotKite, symKite, err = cache.ResolveForBroker("kite", "BFO", "SENSEX26D1772000PE")
+	if err != nil || symKite != "SENSEX26D1772000PE" || lotKite != 20 {
+		t.Errorf("Kotak->Kite SENSEX Weekly mismatch: lot=%d, sym=%s, err=%v", lotKite, symKite, err)
+	}
+
+	// 4. From Kotak Stock Option INFY26NOV1000CE -> Dhan and Kite
+	segDhan, secIDDhan, lotDhan, symDhan, err = cache.ResolveForBroker("dhan", "NFO", "INFY26NOV1000CE")
+	if err != nil || secIDDhan != "104780" || symDhan != "INFY-Nov2026-1000-CE" || lotDhan != 400 {
+		t.Errorf("Kotak->Dhan Stock Option mismatch: seg=%s, secID=%s, lot=%d, sym=%s, err=%v", segDhan, secIDDhan, lotDhan, symDhan, err)
+	}
+	_, _, lotKite, symKite, err = cache.ResolveForBroker("kite", "NFO", "INFY26NOV1000CE")
+	if err != nil || symKite != "INFY26NOV1000CE" || lotKite != 400 {
+		t.Errorf("Kotak->Kite Stock Option mismatch: lot=%d, sym=%s, err=%v", lotKite, symKite, err)
+	}
+
+	// 5. From Kotak MCX Future GOLDM05MAR27FUT -> Dhan and Kite
+	segDhan, secIDDhan, lotDhan, symDhan, err = cache.ResolveForBroker("dhan", "MCX", "GOLDM05MAR27FUT")
+	if err != nil || secIDDhan != "584500" || symDhan != "GOLDM-05Mar2027-FUT" || lotDhan != 100 {
+		t.Errorf("Kotak->Dhan MCX Future mismatch: seg=%s, secID=%s, lot=%d, sym=%s, err=%v", segDhan, secIDDhan, lotDhan, symDhan, err)
+	}
+	_, _, lotKite, symKite, err = cache.ResolveForBroker("kite", "MCX", "GOLDM05MAR27FUT")
+	if err != nil || symKite != "GOLDM27MARFUT" || lotKite != 100 {
+		t.Errorf("Kotak->Kite MCX Future mismatch: lot=%d, sym=%s, err=%v", lotKite, symKite, err)
+	}
+}
+
+

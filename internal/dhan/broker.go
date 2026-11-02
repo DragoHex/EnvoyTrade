@@ -123,9 +123,21 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		return broker.OrderResponse{}, fmt.Errorf("dhan place order: %w: instrument resolver not configured", domain.ErrNotFound)
 	}
 
-	exSegment, secID, _, err := b.resolver.ResolveToSecurityID(params.Exchange, params.Tradingsymbol)
+	var exSegment, secID, targetSymbol string
+	var err error
+	type brokerSpecificLookup interface {
+		ResolveForBroker(targetBroker, exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, targetSymbol string, err error)
+	}
+	if bsl, ok := b.resolver.(brokerSpecificLookup); ok {
+		exSegment, secID, _, targetSymbol, err = bsl.ResolveForBroker("dhan", params.Exchange, params.Tradingsymbol)
+	} else {
+		exSegment, secID, _, err = b.resolver.ResolveToSecurityID(params.Exchange, params.Tradingsymbol)
+	}
 	if err != nil {
 		return broker.OrderResponse{}, fmt.Errorf("dhan place order: %w", err)
+	}
+	if targetSymbol == "" {
+		targetSymbol = params.Tradingsymbol
 	}
 
 	req := models.OrderRequest{
@@ -134,7 +146,7 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		ProductType:     mapProduct(params.Product),
 		OrderType:       mapOrderType(params.OrderType),
 		Validity:        "DAY",
-		TradingSymbol:   params.Tradingsymbol,
+		TradingSymbol:   targetSymbol,
 		SecurityID:      secID,
 		Quantity:        int32(params.Quantity),
 		CorrelationID:   params.Tag,

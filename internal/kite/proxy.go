@@ -105,7 +105,7 @@ func RESTClientFor(cfg ProxyConfig) (*http.Client, error) {
 // NewLiveBroker creates a live kite.Broker client for Kite Connect API calls,
 // routing through the specified proxy if configured. Mutating calls will be blocked
 // if proxyCfg is nil or host is empty.
-func NewLiveBroker(apiKey, accessToken string, proxyCfg *ProxyConfig) (*Broker, error) {
+func NewLiveBroker(apiKey, accessToken string, proxyCfg *ProxyConfig, resolver ...InstrumentLookup) (*Broker, error) {
 	kc := kiteconnect.New(apiKey)
 	kc.SetAccessToken(accessToken)
 	isProxied := false
@@ -117,5 +117,5 @@ func NewLiveBroker(apiKey, accessToken string, proxyCfg *ProxyConfig) (*Broker, 
 		kc.SetHTTPClient(httpClient)
 		isProxied = true
 	}
-	return NewBroker(kc, isProxied), nil
+	return NewBroker(kc, isProxied, resolver...), nil
 }

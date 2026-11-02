@@ -415,6 +415,17 @@ func run(logger *slog.Logger) error {
 		return instrumentCache.AutoLoadActiveFO(c)
 	})
 
+	// Background check on boot to populate any empty broker instrument tables (e.g. Dhan, Kotak, Kite)
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := instrumentSyncer.EnsureBrokerInstrumentsSynced(bgCtx, []string{"kite", "dhan", "kotak"}, func(c context.Context) error {
+			return instrumentCache.AutoLoadActiveFO(c)
+		}); err != nil {
+			logger.Warn("ensure broker instruments synced failed on boot", "error", err)
+		}
+	}()
+
 	brokerRegistry := broker.NewRegistry()
 	kiteBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
 		var proxyCfg *kite.ProxyConfig
@@ -427,7 +438,7 @@ func run(logger *slog.Logger) error {
 				ClientSecret: acc.ProxyPassword,
 			}
 		}
-		return kite.NewLiveBroker(acc.ApiKey, acc.AccessToken, proxyCfg)
+		return kite.NewLiveBroker(acc.ApiKey, acc.AccessToken, proxyCfg, instrumentCache)
 	})
 	dhanBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
 		var proxyCfg *dhan.ProxyConfig
@@ -642,6 +653,7 @@ func run(logger *slog.Logger) error {
 	kiteTickerFactory := kite.NewTickerFactory(masterFillQueue, logger.With("component", "kite_ticker"))
 	dhanTickerFactory := dhanws.NewTickerFactory(masterFillQueue, instrumentCache, logger.With("component", "dhan_ticker"))
 	kotakTickerFactory := kotakws.NewMasterTickerFactory(masterFillQueue, instrumentCache, logger.With("component", "kotak_ticker"))
+	kotakTickerFactory.SetProxyResolver(store)
 	testbrokerTickerFactory := testbroker.NewTickerFactory(masterFillQueue, logger.With("component", "testbroker_ticker"))
 	tickerManager.RegisterFactory("kite", kiteTickerFactory)
 	tickerManager.RegisterFactory("zerodha", kiteTickerFactory)

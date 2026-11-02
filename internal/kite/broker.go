@@ -24,16 +24,26 @@ type API interface {
 	CancelOrder(variety string, orderID string, parentOrderID *string) (kiteconnect.OrderResponse, error)
 }
 
+// InstrumentLookup resolves broker-specific tradingsymbol for Kite (PLAN.md §1).
+type InstrumentLookup interface {
+	ResolveForBroker(targetBroker, exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, targetSymbol string, err error)
+}
+
 // Broker adapts Zerodha's Kite Connect Client to the broker-agnostic
 // broker.Broker interface (PLAN.md §1).
 type Broker struct {
-	api     API
-	proxied bool
+	api      API
+	proxied  bool
+	resolver InstrumentLookup
 }
 
-// NewBroker wraps an API implementation (e.g. *kiteconnect.Client).
-func NewBroker(api API, proxied bool) *Broker {
-	return &Broker{api: api, proxied: proxied}
+// NewBroker wraps an API implementation (e.g. *kiteconnect.Client) and optional InstrumentLookup.
+func NewBroker(api API, proxied bool, resolver ...InstrumentLookup) *Broker {
+	b := &Broker{api: api, proxied: proxied}
+	if len(resolver) > 0 {
+		b.resolver = resolver[0]
+	}
+	return b
 }
 
 // IsProxied reports whether this broker instance is routed through a dedicated proxy.
@@ -50,9 +60,17 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 	if variety == "" {
 		variety = kiteconnect.VarietyRegular
 	}
+
+	tradingsymbol := params.Tradingsymbol
+	if b.resolver != nil && params.Exchange != "" && tradingsymbol != "" {
+		if _, _, _, targetSym, err := b.resolver.ResolveForBroker("kite", params.Exchange, tradingsymbol); err == nil && targetSym != "" {
+			tradingsymbol = targetSym
+		}
+	}
+
 	p := kiteconnect.OrderParams{
 		Exchange:        params.Exchange,
-		Tradingsymbol:   params.Tradingsymbol,
+		Tradingsymbol:   tradingsymbol,
 		TransactionType: params.TransactionType,
 		Product:         params.Product,
 		OrderType:       params.OrderType,
