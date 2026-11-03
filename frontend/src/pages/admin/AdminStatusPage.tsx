@@ -1,7 +1,15 @@
-import { createSignal, onMount, Show } from 'solid-js'
+import { createSignal, onMount, Show, For } from 'solid-js'
 import { AdminLayout } from './AdminLayout'
-import { getAdminServiceStatus, postAdminKillSwitch, type PipelineStatus } from '../../api'
+import {
+  getAdminServiceStatus,
+  postAdminKillSwitch,
+  getAdminInstrumentStatus,
+  postAdminInstrumentSync,
+  type PipelineStatus,
+  type ScripMasterSummary,
+} from '../../api'
 import { SyncIcon } from '../../components/icons'
+import { BrokerLogo } from '../../components/BrokerLogo'
 import { Skeleton } from '../../components/Skeleton'
 import { useEscapeKey } from '../../utils/useEscapeKey'
 
@@ -11,6 +19,14 @@ export function AdminStatusPage() {
   const [refreshing, setRefreshing] = createSignal(false)
   const [lastUpdated, setLastUpdated] = createSignal<string>('')
   const [error, setError] = createSignal<string | null>(null)
+
+  // On-demand Scrip Master state (strictly user-triggered / on-mount, NO periodic interval)
+  const [scripStatus, setScripStatus] = createSignal<ScripMasterSummary | null>(null)
+  const [scripLoading, setScripLoading] = createSignal(true)
+  const [scripRefreshing, setScripRefreshing] = createSignal(false)
+  const [scripSyncing, setScripSyncing] = createSignal<string | null>(null)
+  const [scripNotice, setScripNotice] = createSignal<string | null>(null)
+  const [scripError, setScripError] = createSignal<string | null>(null)
 
   // Kill Switch Modal state
   const [killModalOpen, setKillModalOpen] = createSignal(false)
@@ -42,8 +58,41 @@ export function AdminStatusPage() {
     }
   }
 
+  const loadScripStatus = async (isManual = false) => {
+    if (isManual) {
+      setScripRefreshing(true)
+    }
+    setScripError(null)
+    try {
+      const data = await getAdminInstrumentStatus()
+      setScripStatus(data)
+    } catch (err: any) {
+      setScripError(err?.message || 'Failed to load instrument master status')
+    } finally {
+      setScripLoading(false)
+      setScripRefreshing(false)
+    }
+  }
+
+  const handleSyncScrips = async (broker = 'all') => {
+    setScripSyncing(broker)
+    setScripNotice(null)
+    setScripError(null)
+    try {
+      await postAdminInstrumentSync(broker)
+      setScripNotice(
+        `Sync for ${broker.toUpperCase()} initiated in background. Ingestion takes ~15–30s. Click "Refresh" to inspect updated counts.`
+      )
+    } catch (err: any) {
+      setScripError(err?.message || `Failed to trigger sync for ${broker}`)
+    } finally {
+      setScripSyncing(null)
+    }
+  }
+
   onMount(() => {
     loadStatus(false)
+    loadScripStatus(false)
   })
 
   const openKillModal = (engage: boolean) => {
@@ -291,6 +340,242 @@ export function AdminStatusPage() {
                 {status()!.systemResources ? status()!.systemResources!.gcCycles : '—'}
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Scrip Master & In-Memory Cache Card */}
+        <div style={{ 'margin-top': '1.5rem' }}>
+          <div class="telemetry-card" style={{ padding: '1.25rem' }}>
+            <div class="telemetry-card-header" style={{ 'margin-bottom': '1rem' }}>
+              <div>
+                <h4 class="telemetry-card-title" style={{ 'font-size': '1.05rem', display: 'flex', 'align-items': 'center', gap: '0.6rem' }}>
+                  <span>Scrip Master & Instrument Cache</span>
+                  <Show when={scripStatus()}>
+                    <span
+                      class={
+                        scripStatus()!.status === 'healthy'
+                          ? 'badge badge-success'
+                          : scripStatus()!.status === 'warning'
+                          ? 'badge badge-warning'
+                          : 'badge badge-danger'
+                      }
+                    >
+                      {scripStatus()!.status === 'healthy'
+                        ? 'Healthy'
+                        : scripStatus()!.status === 'warning'
+                        ? 'Warning'
+                        : 'Degraded / Empty'}
+                    </span>
+                  </Show>
+                </h4>
+                <div style={{ 'font-size': '0.8rem', color: 'var(--color-text-secondary)', 'margin-top': '0.2rem' }}>
+                  Unified scrip master feeds & 10,000 capacity pre-allocated F&O cache for cross-broker symbol translation (On-Demand).
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.4rem', 'align-items': 'center' }}>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  onClick={() => loadScripStatus(true)}
+                  disabled={scripRefreshing()}
+                  style={{
+                    display: 'inline-flex',
+                    'align-items': 'center',
+                    gap: '0.35rem',
+                    'font-size': '0.75rem',
+                    padding: '0.25rem 0.55rem',
+                    'line-height': '1.2',
+                  }}
+                >
+                  <span style={{ width: '13px', height: '13px', display: 'inline-flex', 'align-items': 'center' }}>
+                    <SyncIcon spinning={scripRefreshing()} />
+                  </span>
+                  <span>{scripRefreshing() ? 'Refreshing...' : 'Refresh'}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  onClick={() => handleSyncScrips('all')}
+                  disabled={scripSyncing() !== null}
+                  style={{
+                    display: 'inline-flex',
+                    'align-items': 'center',
+                    gap: '0.35rem',
+                    'font-size': '0.75rem',
+                    padding: '0.25rem 0.55rem',
+                    'line-height': '1.2',
+                  }}
+                  title="Trigger on-demand background sync for all broker scrip masters"
+                >
+                  <span style={{ width: '13px', height: '13px', display: 'inline-flex', 'align-items': 'center' }}>
+                    <SyncIcon spinning={scripSyncing() === 'all'} />
+                  </span>
+                  <span>{scripSyncing() === 'all' ? 'Syncing...' : 'Sync All'}</span>
+                </button>
+              </div>
+            </div>
+
+            <Show when={scripNotice()}>
+              <div
+                style={{
+                  padding: '0.65rem 0.9rem',
+                  background: 'rgba(4, 180, 136, 0.1)',
+                  color: 'var(--color-accent)',
+                  'border-radius': '6px',
+                  'margin-bottom': '1rem',
+                  'font-size': '0.825rem',
+                }}
+              >
+                {scripNotice()}
+              </div>
+            </Show>
+
+            <Show when={scripError()}>
+              <div
+                style={{
+                  padding: '0.65rem 0.9rem',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  color: '#ef4444',
+                  'border-radius': '6px',
+                  'margin-bottom': '1rem',
+                  'font-size': '0.825rem',
+                }}
+              >
+                {scripError()}
+              </div>
+            </Show>
+
+            <Show when={scripStatus()?.alerts && scripStatus()!.alerts.length > 0}>
+              <div
+                style={{
+                  padding: '0.65rem 0.9rem',
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  color: '#f59e0b',
+                  'border-radius': '6px',
+                  'margin-bottom': '1rem',
+                  'font-size': '0.825rem',
+                }}
+              >
+                <strong>Scrip Master Alerts:</strong>
+                <ul style={{ margin: '0.3rem 0 0 1.2rem', padding: 0 }}>
+                  <For each={scripStatus()!.alerts}>
+                    {(alert) => <li>{alert}</li>}
+                  </For>
+                </ul>
+              </div>
+            </Show>
+
+            <Show
+              when={!scripLoading() && scripStatus()}
+              fallback={
+                <div style={{ padding: '0.5rem 0' }}>
+                  <Skeleton height={35} radius={6} />
+                  <div style={{ height: '0.75rem' }} />
+                  <Skeleton height={110} radius={6} />
+                </div>
+              }
+            >
+              {/* In-memory Cache Telemetry */}
+              <div
+                style={{
+                  background: 'var(--color-bg, #0f1117)',
+                  border: '1px solid var(--color-border)',
+                  'border-radius': '6px',
+                  padding: '0.75rem 1rem',
+                  'margin-bottom': '1rem',
+                  display: 'flex',
+                  'flex-wrap': 'wrap',
+                  gap: '1.5rem',
+                  'align-items': 'center',
+                }}
+              >
+                <div>
+                  <div style={{ 'font-size': '0.75rem', color: 'var(--color-text-secondary)', 'margin-bottom': '0.2rem' }}>
+                    Active In-Memory F&O Cache
+                  </div>
+                  <div style={{ 'font-weight': 700, 'font-size': '1.05rem', color: 'var(--color-text)' }}>
+                    {scripStatus()!.cache.activeCount.toLocaleString()} / {scripStatus()!.cache.capacity.toLocaleString()}
+                    <span style={{ 'font-size': '0.8rem', 'font-weight': 500, color: 'var(--color-text-secondary)', 'margin-left': '0.4rem' }}>
+                      ({Math.round((scripStatus()!.cache.activeCount / (scripStatus()!.cache.capacity || 10000)) * 100)}% capacity)
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ 'font-size': '0.75rem', color: 'var(--color-text-secondary)', 'margin-bottom': '0.2rem' }}>
+                    Last Boot/Routine Auto-Load
+                  </div>
+                  <div style={{ 'font-weight': 600, 'font-size': '0.9rem', color: 'var(--color-text)' }}>
+                    {scripStatus()!.cache.lastAutoLoad
+                      ? new Date(scripStatus()!.cache.lastAutoLoad!).toLocaleString()
+                      : 'Pending morning routine (05:00 AM IST)'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Broker Scrip Masters Table */}
+              <div class="admin-table-container" style={{ border: '1px solid var(--color-border)', 'border-radius': '6px', overflow: 'hidden' }}>
+                <table class="admin-table" style={{ width: '100%', 'border-collapse': 'collapse', 'table-layout': 'fixed' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-bg, #0f1117)', 'border-bottom': '1px solid var(--color-border)' }}>
+                      <th style={{ 'text-align': 'left', padding: '0.6rem 0.75rem', width: '25%', 'font-size': '0.75rem', color: 'var(--color-text-secondary)' }}>Broker Feed</th>
+                      <th style={{ 'text-align': 'left', padding: '0.6rem 0.75rem', width: '22%', 'font-size': '0.75rem', color: 'var(--color-text-secondary)' }}>Total Scrips</th>
+                      <th style={{ 'text-align': 'left', padding: '0.6rem 0.75rem', width: '28%', 'font-size': '0.75rem', color: 'var(--color-text-secondary)' }}>Last Ingestion</th>
+                      <th style={{ 'text-align': 'left', padding: '0.6rem 0.75rem', width: '13%', 'font-size': '0.75rem', color: 'var(--color-text-secondary)' }}>Health</th>
+                      <th style={{ 'text-align': 'right', padding: '0.6rem 0.75rem', width: '12%', 'font-size': '0.75rem', color: 'var(--color-text-secondary)' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={['kite', 'dhan', 'kotakneo']}>
+                      {(brokerKey) => {
+                        const b = () => scripStatus()!.brokers[brokerKey] || { broker: brokerKey, count: 0, status: 'empty' }
+                        return (
+                          <tr style={{ 'border-bottom': '1px solid var(--color-border)' }}>
+                            <td style={{ padding: '0.65rem 0.75rem', 'vertical-align': 'middle' }}>
+                              <BrokerLogo broker={brokerKey} showName={true} size={16} />
+                            </td>
+                            <td style={{ padding: '0.65rem 0.75rem', 'font-weight': 600, 'vertical-align': 'middle', 'font-size': '0.85rem' }}>
+                              {b().count.toLocaleString()} contracts
+                            </td>
+                            <td style={{ padding: '0.65rem 0.75rem', color: 'var(--color-text-secondary)', 'vertical-align': 'middle', 'font-size': '0.8rem' }}>
+                              {b().lastRefreshed ? new Date(b().lastRefreshed!).toLocaleString() : 'Never'}
+                            </td>
+                            <td style={{ padding: '0.65rem 0.75rem', 'vertical-align': 'middle' }}>
+                              <span
+                                class={
+                                  b().status === 'healthy'
+                                    ? 'badge badge-success'
+                                    : b().status === 'stale'
+                                    ? 'badge badge-warning'
+                                    : 'badge badge-danger'
+                                }
+                              >
+                                {b().status === 'healthy'
+                                  ? 'Healthy'
+                                  : b().status === 'stale'
+                                  ? 'Stale (>24h)'
+                                  : 'Empty'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.65rem 0.75rem', 'text-align': 'right', 'vertical-align': 'middle' }}>
+                              <button
+                                type="button"
+                                class="btn-secondary"
+                                onClick={() => handleSyncScrips(brokerKey)}
+                                disabled={scripSyncing() !== null}
+                                style={{ 'font-size': '0.75rem', padding: '0.2rem 0.55rem' }}
+                                title={`Download and ingest ${brokerKey.toUpperCase()} scrip master`}
+                              >
+                                {scripSyncing() === brokerKey ? 'Syncing...' : 'Sync'}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      }}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </Show>
           </div>
         </div>
       </Show>

@@ -986,5 +986,36 @@ export function testAllAdminProxyIPs(): Promise<BulkProxyTestSummary> {
   }).then((r) => json(r))
 }
 
+export interface BrokerScripStatus {
+  broker: string
+  count: number
+  lastRefreshed?: string
+  status: 'healthy' | 'stale' | 'empty' | string
+}
+
+export interface ScripCacheSummary {
+  activeCount: number
+  capacity: number
+  lastAutoLoad?: string
+}
+
+export interface ScripMasterSummary {
+  status: 'healthy' | 'warning' | 'error' | string
+  cache: ScripCacheSummary
+  brokers: Record<string, BrokerScripStatus>
+  alerts: string[]
+}
+
+export function getAdminInstrumentStatus(): Promise<ScripMasterSummary> {
+  return apiFetch(`${BASE}/admin/instruments/status`).then((r) => json(r))
+}
+
+export function postAdminInstrumentSync(broker?: string): Promise<{ status: string; broker: string; message: string }> {
+  return apiFetch(`${BASE}/admin/instruments/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ broker: broker || 'all' }),
+  }).then((r) => json(r))
+}
+
 
 
