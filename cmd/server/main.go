@@ -415,11 +415,11 @@ func run(logger *slog.Logger) error {
 		return instrumentCache.AutoLoadActiveFO(c)
 	})
 
-	// Background check on boot to populate any empty broker instrument tables (e.g. Dhan, Kotak, Kite)
+	// Background check on boot to populate any empty broker instrument tables (e.g. Dhan, Kite)
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if err := instrumentSyncer.EnsureBrokerInstrumentsSynced(bgCtx, []string{"kite", "dhan", "kotak"}, func(c context.Context) error {
+		if err := instrumentSyncer.EnsureBrokerInstrumentsSynced(bgCtx, []string{"kite", "dhan"}, func(c context.Context) error {
 			return instrumentCache.AutoLoadActiveFO(c)
 		}); err != nil {
 			logger.Warn("ensure broker instruments synced failed on boot", "error", err)
@@ -801,6 +801,8 @@ func run(logger *slog.Logger) error {
 		httpapi.WithBrokerEvicter(evicter),
 		httpapi.WithTelemetry(telemetryCollector),
 		httpapi.WithExecutionFeed(execFeed),
+		httpapi.WithInstrumentSyncer(instrumentSyncer),
+		httpapi.WithInstrumentCache(instrumentCache),
 	)
 
 	if frontend.HasEmbeddedUI() {

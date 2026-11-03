@@ -1036,6 +1036,66 @@ func (s *Store) InstrumentCountByBroker(ctx context.Context) (map[string]int64, 
 	return counts, rows.Err()
 }
 
+// BrokerScripDetails returns the scrip count and max refreshed_at timestamp grouped by broker name.
+func (s *Store) BrokerScripDetails(ctx context.Context) (map[string]domain.BrokerScripStatus, error) {
+	rows, err := s.pool.Query(ctx, "SELECT broker, count(*)::bigint, MAX(refreshed_at) FROM instruments GROUP BY broker;")
+	if err != nil {
+		return nil, fmt.Errorf("query broker scrip details: %w", err)
+	}
+	defer rows.Close()
+
+	details := make(map[string]domain.BrokerScripStatus)
+	now := time.Now().UTC()
+	for rows.Next() {
+		var (
+			b           string
+			count       int64
+			refreshedAt pgtype.Timestamptz
+		)
+		if err := rows.Scan(&b, &count, &refreshedAt); err != nil {
+			return nil, fmt.Errorf("scan broker scrip details: %w", err)
+		}
+		brokerName := strings.ToLower(strings.TrimSpace(b))
+		var lastRefreshed *time.Time
+		status := "healthy"
+		if refreshedAt.Valid {
+			t := refreshedAt.Time.In(domain.IST)
+			lastRefreshed = &t
+			if now.Sub(refreshedAt.Time) > 24*time.Hour {
+				status = "stale"
+			}
+		} else {
+			status = "stale"
+		}
+		if count == 0 {
+			status = "empty"
+		}
+
+		details[brokerName] = domain.BrokerScripStatus{
+			Broker:        brokerName,
+			Count:         count,
+			LastRefreshed: lastRefreshed,
+			Status:        status,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Ensure all standard brokers are represented even if 0 rows exist in DB
+	for _, expectedBroker := range []string{"kite", "dhan", "kotakneo"} {
+		if _, exists := details[expectedBroker]; !exists {
+			details[expectedBroker] = domain.BrokerScripStatus{
+				Broker: expectedBroker,
+				Count:  0,
+				Status: "empty",
+			}
+		}
+	}
+
+	return details, nil
+}
+
 // BatchInsertInstruments inserts a slice of instruments in a single bulk UNNEST statement.
 func (s *Store) BatchInsertInstruments(ctx context.Context, instruments []domain.Instrument) error {
 	if len(instruments) == 0 {

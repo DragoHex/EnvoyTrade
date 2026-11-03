@@ -607,6 +607,34 @@ func (s *Syncer) EnsureBrokerInstrumentsSynced(ctx context.Context, brokers []st
 	return nil
 }
 
+// SyncBroker syncs instruments for a given broker ("dhan", "kite", "kotak", or "all").
+func (s *Syncer) SyncBroker(ctx context.Context, broker string, onComplete func(context.Context) error) error {
+	b := strings.ToLower(strings.TrimSpace(broker))
+	var errs []error
+	if b == "all" || b == "dhan" {
+		if err := s.SyncDhan(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("sync dhan: %w", err))
+		}
+	}
+	if b == "all" || b == "kite" || b == "zerodha" {
+		if err := s.SyncKite(ctx, nil); err != nil {
+			errs = append(errs, fmt.Errorf("sync kite: %w", err))
+		}
+	}
+	if b == "all" || b == "kotak" || b == "kotakneo" {
+		if err := s.SyncKotak(ctx, nil); err != nil {
+			errs = append(errs, fmt.Errorf("sync kotak: %w", err))
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	if onComplete != nil {
+		_ = onComplete(ctx)
+	}
+	return nil
+}
+
 // StartDailyRoutine starts an in-process daily ticker loop targeting targetHour:targetMinute in IST.
 // Calls onComplete() after each successful sync cycle.
 func (s *Syncer) StartDailyRoutine(ctx context.Context, targetHour, targetMinute int, onComplete func(context.Context) error) {

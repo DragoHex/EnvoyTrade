@@ -137,6 +137,9 @@ type stubStore struct {
 	orderIssues        []domain.OrderIssue
 	orderIssuesErr     error
 
+	brokerScripDetails    map[string]domain.BrokerScripStatus
+	brokerScripDetailsErr error
+
 	checkAccountQuotaErr    error
 	lastUpdatedMaxIPs       *int
 	lastUpdatedBrokerLimits map[string]int
@@ -622,6 +625,13 @@ func (s *stubStore) ListRecentOrderIssues(_ context.Context, limit, offset int) 
 		end = total
 	}
 	return s.orderIssues[offset:end], total, nil
+}
+
+func (s *stubStore) BrokerScripDetails(_ context.Context) (map[string]domain.BrokerScripStatus, error) {
+	if s.brokerScripDetailsErr != nil {
+		return nil, s.brokerScripDetailsErr
+	}
+	return s.brokerScripDetails, nil
 }
 
 // stubActionEngine is a hand-written fake satisfying httpapi.Engine.

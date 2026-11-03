@@ -36,7 +36,22 @@ type routerConfig struct {
 	telemetry         TelemetryCollector
 	proxyTester       ProxyTester
 	executionFeed     ExecutionFeed
+	instrumentSyncer  InstrumentSyncer
+	instrumentCache   InstrumentCacheStatus
 	staticFS          fs.FS
+}
+
+// InstrumentSyncer triggers on-demand background sync for instrument master data.
+type InstrumentSyncer interface {
+	SyncBroker(ctx context.Context, broker string, onComplete func(context.Context) error) error
+}
+
+// InstrumentCacheStatus provides cache utilization telemetry and auto-reload capabilities.
+type InstrumentCacheStatus interface {
+	Size() int
+	Capacity() int
+	LastAutoLoad() time.Time
+	AutoLoadActiveFO(ctx context.Context) error
 }
 
 // ExecutionFeed supplies instantaneous master fill execution events.
@@ -136,6 +151,20 @@ func WithExecutionFeed(feed ExecutionFeed) Option {
 	}
 }
 
+// WithInstrumentSyncer configures on-demand broker scrip sync.
+func WithInstrumentSyncer(syncer InstrumentSyncer) Option {
+	return func(c *routerConfig) {
+		c.instrumentSyncer = syncer
+	}
+}
+
+// WithInstrumentCache configures instrument cache metrics reporting.
+func WithInstrumentCache(cache InstrumentCacheStatus) Option {
+	return func(c *routerConfig) {
+		c.instrumentCache = cache
+	}
+}
+
 // WithLogger configures structured request logging middleware.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *routerConfig) {
@@ -177,6 +206,9 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 		telemetry:         cfg.telemetry,
 		proxyTester:       cfg.proxyTester,
 		executionFeed:     cfg.executionFeed,
+		instrumentSyncer:  cfg.instrumentSyncer,
+		instrumentCache:   cfg.instrumentCache,
+		logger:            cfg.logger,
 	}
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -224,6 +256,8 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	adminMux.HandleFunc("GET /api/v1/admin/broker-readiness", h.getAdminBrokerReadiness)
 	adminMux.HandleFunc("GET /api/v1/admin/order-issues", h.getAdminOrderIssues)
 	adminMux.HandleFunc("GET /api/v1/admin/execution-feed", h.getAdminExecutionFeed)
+	adminMux.HandleFunc("GET /api/v1/admin/instruments/status", h.getAdminInstrumentStatus)
+	adminMux.HandleFunc("POST /api/v1/admin/instruments/sync", h.postAdminInstrumentSync)
 
 	adminMux.HandleFunc("GET /api/v1/admin/proxy-ips", h.getAdminProxyIPs)
 	adminMux.HandleFunc("POST /api/v1/admin/proxy-ips/bulk", h.postAdminProxyIPsBulk)
@@ -312,6 +346,7 @@ func loggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 type AdminOperationalStore interface {
 	BrokerReadiness(ctx context.Context) (domain.BrokerReadinessSummary, error)
 	ListRecentOrderIssues(ctx context.Context, limit, offset int) ([]domain.OrderIssue, int, error)
+	BrokerScripDetails(ctx context.Context) (map[string]domain.BrokerScripStatus, error)
 }
 
 // Store is everything the handlers need from persistence — the union of
@@ -341,6 +376,9 @@ type handlers struct {
 	telemetry         TelemetryCollector
 	proxyTester       ProxyTester
 	executionFeed     ExecutionFeed
+	instrumentSyncer  InstrumentSyncer
+	instrumentCache   InstrumentCacheStatus
+	logger            *slog.Logger
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

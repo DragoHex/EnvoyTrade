@@ -238,3 +238,27 @@ type BulkProxyTestSummary struct {
 	Results      []ProxyTestResult `json:"results"`
 }
 
+// BrokerScripStatus represents the scrip count and freshness for a broker in instruments table.
+type BrokerScripStatus struct {
+	Broker        string     `json:"broker"`
+	Count         int64      `json:"count"`
+	LastRefreshed *time.Time `json:"lastRefreshed,omitempty"`
+	Status        string     `json:"status"` // "healthy", "stale", "empty"
+}
+
+// ScripCacheSummary summarizes the unified pre-allocated in-memory instrument cache.
+type ScripCacheSummary struct {
+	ActiveCount  int        `json:"activeCount"`
+	Capacity     int        `json:"capacity"`
+	LastAutoLoad *time.Time `json:"lastAutoLoad,omitempty"`
+}
+
+// ScripMasterSummary summarizes both the database scrip masters and the in-memory cache.
+type ScripMasterSummary struct {
+	Status  string                       `json:"status"` // "healthy", "warning", "error"
+	Cache   ScripCacheSummary            `json:"cache"`
+	Brokers map[string]BrokerScripStatus `json:"brokers"`
+	Alerts  []string                     `json:"alerts"`
+}
+
+

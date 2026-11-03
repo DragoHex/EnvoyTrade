@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"envoytrade/internal/domain"
 )
@@ -36,6 +37,7 @@ type Cache struct {
 	revSec       map[string]string // key: "EXCHANGE_SEGMENT:SECURITY_ID" -> "EXCHANGE:TRADINGSYMBOL"
 	store        Store
 	logger       *slog.Logger
+	lastAutoLoad time.Time
 }
 
 // NewCache constructs a Cache with pre-allocated map capacity.
@@ -121,6 +123,7 @@ func (c *Cache) AutoLoadActiveFO(ctx context.Context) error {
 		loaded++
 	}
 
+	c.lastAutoLoad = time.Now().In(domain.IST)
 	c.log().Info("instrument cache auto-loaded", "loaded", loaded, "capacity", c.capacity)
 	return nil
 }
@@ -521,7 +524,20 @@ func (c *Cache) Count() int {
 	return len(c.entries)
 }
 
+// Size aliases Count for telemetry and status reporting.
+func (c *Cache) Size() int {
+	return c.Count()
+}
+
 // Capacity returns the maximum pre-allocated capacity of the cache.
 func (c *Cache) Capacity() int {
 	return c.capacity
 }
+
+// LastAutoLoad returns the timestamp of the last successful AutoLoadActiveFO.
+func (c *Cache) LastAutoLoad() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastAutoLoad
+}
+

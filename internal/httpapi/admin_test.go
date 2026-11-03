@@ -1208,3 +1208,137 @@ func TestAdminProxyIP_PUT(t *testing.T) {
 	}
 }
 
+type mockInstrumentSyncer struct {
+	lastBroker string
+	callCount  int
+	err        error
+}
+
+func (m *mockInstrumentSyncer) SyncBroker(_ context.Context, broker string, onComplete func(context.Context) error) error {
+	m.lastBroker = broker
+	m.callCount++
+	if onComplete != nil {
+		_ = onComplete(context.Background())
+	}
+	return m.err
+}
+
+type mockInstrumentCacheStatus struct {
+	size         int
+	capacity     int
+	lastAutoLoad time.Time
+	autoLoadRuns int
+}
+
+func (m *mockInstrumentCacheStatus) Size() int {
+	return m.size
+}
+
+func (m *mockInstrumentCacheStatus) Capacity() int {
+	return m.capacity
+}
+
+func (m *mockInstrumentCacheStatus) LastAutoLoad() time.Time {
+	return m.lastAutoLoad
+}
+
+func (m *mockInstrumentCacheStatus) AutoLoadActiveFO(_ context.Context) error {
+	m.autoLoadRuns++
+	return nil
+}
+
+func TestAdmin_InstrumentStatus(t *testing.T) {
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	cache := &mockInstrumentCacheStatus{
+		size:         1250,
+		capacity:     10000,
+		lastAutoLoad: time.Now().Add(-10 * time.Minute),
+	}
+	syncer := &mockInstrumentSyncer{}
+
+	now := time.Now()
+	store.brokerScripDetails = map[string]domain.BrokerScripStatus{
+		"kite": {
+			Broker:        "kite",
+			Count:         85000,
+			LastRefreshed: &now,
+			Status:        "healthy",
+		},
+		"dhan": {
+			Broker:        "dhan",
+			Count:         65000,
+			LastRefreshed: &now,
+			Status:        "healthy",
+		},
+		"kotakneo": {
+			Broker:        "kotakneo",
+			Count:         0,
+			Status:        "empty",
+		},
+	}
+
+	handler := httpapi.NewRouter(store, engine,
+		httpapi.WithInstrumentCache(cache),
+		httpapi.WithInstrumentSyncer(syncer),
+	)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/instruments/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var res domain.ScripMasterSummary
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if res.Status != "error" { // kotakneo is empty -> overall error
+		t.Errorf("expected overall status error, got %s", res.Status)
+	}
+	if res.Cache.ActiveCount != 1250 || res.Cache.Capacity != 10000 {
+		t.Errorf("unexpected cache status: %+v", res.Cache)
+	}
+	if len(res.Brokers) != 3 {
+		t.Errorf("expected 3 brokers, got %d", len(res.Brokers))
+	}
+	if len(res.Alerts) == 0 {
+		t.Errorf("expected alerts due to empty kotakneo, got none")
+	}
+}
+
+func TestAdmin_InstrumentSync(t *testing.T) {
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	syncer := &mockInstrumentSyncer{}
+	cache := &mockInstrumentCacheStatus{capacity: 10000}
+
+	handler := httpapi.NewRouter(store, engine,
+		httpapi.WithInstrumentSyncer(syncer),
+		httpapi.WithInstrumentCache(cache),
+	)
+
+	// 1. Sync specific broker
+	payload := []byte(`{"broker":"dhan"}`)
+	req := httptest.NewRequest("POST", "/api/v1/admin/instruments/sync", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Sync all brokers (empty body)
+	req2 := httptest.NewRequest("POST", "/api/v1/admin/instruments/sync", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
