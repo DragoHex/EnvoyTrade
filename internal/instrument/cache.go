@@ -185,13 +185,85 @@ func (c *Cache) ResolveLotSize(ctx context.Context, exchange, tradingsymbol stri
 }
 
 func isUsableForBroker(tb string, info Info) bool {
-	if tb == "kite" || tb == "zerodha" {
+	switch tb {
+	case "kite", "zerodha":
 		return info.Tradingsymbol != ""
-	}
-	if tb == "" {
+	case "kotak", "kotakneo":
+		return info.Tradingsymbol != ""
+	case "dhan":
+		return info.SecurityID != ""
+	case "testbroker":
+		return info.Tradingsymbol != ""
+	case "":
 		return info.SecurityID != "" || info.Tradingsymbol != ""
+	default:
+		return info.Tradingsymbol != "" || info.SecurityID != ""
 	}
-	return info.SecurityID != ""
+}
+
+func defaultSegmentForBroker(tb, exchange string) string {
+	ex := strings.ToUpper(strings.TrimSpace(exchange))
+	switch tb {
+	case "kotak", "kotakneo":
+		switch ex {
+		case "MCX", "MCX_FO", "MCX_COMM":
+			return "mcx_fo"
+		case "NFO", "NSE_FO", "NSE_FNO":
+			return "nse_fo"
+		case "BFO", "BSE_FO", "BSE_FNO":
+			return "bse_fo"
+		case "BSE", "BSE_CM":
+			return "bse_cm"
+		default:
+			return "nse_cm"
+		}
+	case "kite", "zerodha":
+		switch ex {
+		case "MCX", "MCX_FO", "MCX_COMM":
+			return "MCX"
+		case "NFO", "NSE_FO", "NSE_FNO":
+			return "NFO"
+		case "BFO", "BSE_FO", "BSE_FNO":
+			return "BFO"
+		case "BSE", "BSE_CM":
+			return "BSE"
+		default:
+			return "NSE"
+		}
+	case "dhan":
+		switch ex {
+		case "MCX", "MCX_FO", "MCX_COMM":
+			return "MCX_COMM"
+		case "NFO", "NSE_FO", "NSE_FNO":
+			return "NSE_FNO"
+		case "BFO", "BSE_FO", "BSE_FNO":
+			return "BSE_FNO"
+		case "BSE", "BSE_CM":
+			return "BSE_EQ"
+		default:
+			return "NSE_EQ"
+		}
+	default:
+		return ex
+	}
+}
+
+func (c *Cache) enrichContractDay(contract *CanonicalContract) {
+	if contract.HasDay || contract.IsEquity {
+		return
+	}
+	// Probe canonicalMap across known brokers for month key
+	for _, k := range contract.LookupKeys() {
+		for _, b := range []string{"dhan", "kotak", "kite"} {
+			if info, exists := c.canonicalMap[k+":"+b]; exists && info.Tradingsymbol != "" {
+				if parsed, err := ParseCanonicalContract(contract.Exchange, info.Tradingsymbol); err == nil && parsed.HasDay {
+					contract.ExpiryDate = parsed.ExpiryDate
+					contract.HasDay = true
+					return
+				}
+			}
+		}
+	}
 }
 
 // ResolveForBroker maps an incoming (exchange, tradingsymbol) from any master broker
@@ -213,16 +285,31 @@ func (c *Cache) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (
 	info, ok := c.entries[key]
 	if ok && (tb == "" || strings.ToLower(info.Broker) == tb) && isUsableForBroker(tb, info) {
 		c.mu.RUnlock()
-		return info.ExchangeSegment, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
+		exSeg := info.ExchangeSegment
+		if exSeg == "" {
+			exSeg = defaultSegmentForBroker(tb, ex)
+		}
+		return exSeg, info.SecurityID, info.LotSize, info.Tradingsymbol, nil
 	}
 
 	// 2. Canonical cross-broker in-memory lookup
+	var fallbackLot int
 	if contract, err := ParseCanonicalContract(ex, rawSym); err == nil {
+		c.enrichContractDay(&contract)
 		for _, k := range contract.LookupKeys() {
 			canonKey := k + ":" + tb
 			if cInfo, exists := c.canonicalMap[canonKey]; exists && isUsableForBroker(tb, cInfo) {
 				c.mu.RUnlock()
-				return cInfo.ExchangeSegment, cInfo.SecurityID, cInfo.LotSize, cInfo.Tradingsymbol, nil
+				exSeg := cInfo.ExchangeSegment
+				if exSeg == "" {
+					exSeg = defaultSegmentForBroker(tb, ex)
+				}
+				return exSeg, cInfo.SecurityID, cInfo.LotSize, cInfo.Tradingsymbol, nil
+			}
+			for _, b := range []string{"dhan", "kite", "kotak"} {
+				if anyInfo, exists := c.canonicalMap[k+":"+b]; exists && anyInfo.LotSize > 0 && fallbackLot == 0 {
+					fallbackLot = anyInfo.LotSize
+				}
 			}
 		}
 	}
@@ -255,7 +342,7 @@ func (c *Cache) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (
 	if c.store != nil {
 		// Try direct query
 		secID, exSeg, lot, err := c.store.InstrumentSecurityID(context.Background(), ex, rawSym)
-		if err == nil && secID != "" {
+		if err == nil && secID != "" && isUsableForBroker(tb, Info{SecurityID: secID, Tradingsymbol: rawSym}) {
 			c.mu.Lock()
 			if len(c.entries) < c.capacity {
 				c.entries[key] = Info{
@@ -271,11 +358,15 @@ func (c *Cache) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (
 				}
 			}
 			c.mu.Unlock()
+			if exSeg == "" {
+				exSeg = defaultSegmentForBroker(tb, ex)
+			}
 			return exSeg, secID, lot, rawSym, nil
 		}
 
 		// Try canonical translated symbol query
 		if contract, err := ParseCanonicalContract(ex, rawSym); err == nil {
+			c.enrichContractDay(&contract)
 			var altSym string
 			if tb == "dhan" {
 				altSym = contract.ToDhanSymbol()
@@ -287,30 +378,67 @@ func (c *Cache) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (
 
 			if altSym != "" {
 				if tb == "kite" || tb == "zerodha" {
-					lot, err := c.store.InstrumentLotSize(context.Background(), ex, altSym)
-					if err == nil && lot > 0 {
-						targetInfo := Info{
-							LotSize:         lot,
-							ExchangeSegment: ex,
-							Tradingsymbol:   altSym,
-							Broker:          tb,
-						}
-						c.mu.Lock()
-						if len(c.entries) < c.capacity {
-							c.entries[key] = targetInfo
-							for _, k := range contract.LookupKeys() {
-								c.canonicalMap[k+":"+tb] = targetInfo
-							}
-						}
-						c.mu.Unlock()
-						return ex, "", lot, altSym, nil
+					lot := fallbackLot
+					if lot <= 0 {
+						lot, _ = c.store.InstrumentLotSize(context.Background(), ex, altSym)
 					}
-					return ex, "", 0, altSym, nil
+					if lot <= 0 && altSym != rawSym {
+						lot, _ = c.store.InstrumentLotSize(context.Background(), ex, rawSym)
+					}
+					if lot <= 0 && contract.IsEquity {
+						lot = 1
+					}
+					targetInfo := Info{
+						LotSize:         lot,
+						ExchangeSegment: defaultSegmentForBroker(tb, ex),
+						Tradingsymbol:   altSym,
+						Broker:          tb,
+					}
+					c.mu.Lock()
+					if len(c.entries) < c.capacity {
+						c.entries[key] = targetInfo
+						for _, k := range contract.LookupKeys() {
+							c.canonicalMap[k+":"+tb] = targetInfo
+						}
+					}
+					c.mu.Unlock()
+					return targetInfo.ExchangeSegment, "", lot, altSym, nil
 				}
 
-				if altSym != rawSym {
+				if tb == "kotak" || tb == "kotakneo" {
+					lot := fallbackLot
+					if lot <= 0 {
+						lot, _ = c.store.InstrumentLotSize(context.Background(), ex, altSym)
+					}
+					if lot <= 0 && altSym != rawSym {
+						lot, _ = c.store.InstrumentLotSize(context.Background(), ex, rawSym)
+					}
+					if lot <= 0 && contract.IsEquity {
+						lot = 1
+					}
+					targetInfo := Info{
+						LotSize:         lot,
+						ExchangeSegment: defaultSegmentForBroker(tb, ex),
+						Tradingsymbol:   altSym,
+						Broker:          tb,
+					}
+					c.mu.Lock()
+					if len(c.entries) < c.capacity {
+						c.entries[key] = targetInfo
+						for _, k := range contract.LookupKeys() {
+							c.canonicalMap[k+":"+tb] = targetInfo
+						}
+					}
+					c.mu.Unlock()
+					return targetInfo.ExchangeSegment, "", lot, altSym, nil
+				}
+
+				if tb == "dhan" {
 					secID, exSeg, lot, err := c.store.InstrumentSecurityID(context.Background(), ex, altSym)
 					if err == nil && secID != "" {
+						if exSeg == "" {
+							exSeg = defaultSegmentForBroker(tb, ex)
+						}
 						c.mu.Lock()
 						if len(c.entries) < c.capacity {
 							targetInfo := Info{
@@ -331,11 +459,23 @@ func (c *Cache) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (
 				}
 			}
 		}
-	} else if tb == "kite" || tb == "zerodha" {
+	} else {
+		// Standalone algorithmic fallback (store is nil)
 		if contract, err := ParseCanonicalContract(ex, rawSym); err == nil {
-			altSym := contract.ToKiteSymbol()
-			if altSym != "" {
-				return ex, "", 0, altSym, nil
+			c.enrichContractDay(&contract)
+			if tb == "kotak" || tb == "kotakneo" {
+				lot := fallbackLot
+				if lot <= 0 && contract.IsEquity {
+					lot = 1
+				}
+				return defaultSegmentForBroker(tb, ex), "", lot, contract.ToKotakSymbol(), nil
+			}
+			if tb == "kite" || tb == "zerodha" {
+				lot := fallbackLot
+				if lot <= 0 && contract.IsEquity {
+					lot = 1
+				}
+				return defaultSegmentForBroker(tb, ex), "", lot, contract.ToKiteSymbol(), nil
 			}
 		}
 	}

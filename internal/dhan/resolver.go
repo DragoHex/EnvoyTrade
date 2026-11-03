@@ -215,6 +215,12 @@ func (r *InstrumentResolver) ResolveToSecurityID(exchange, tradingsymbol string)
 	return "", "", 0, fmt.Errorf("%w: %s:%s", domain.ErrNotFound, exchange, tradingsymbol)
 }
 
+// ResolveForBroker satisfies the universal broker lookup interface.
+func (r *InstrumentResolver) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (string, string, int, string, error) {
+	exSeg, secID, lot, err := r.ResolveToSecurityID(exchange, tradingsymbol)
+	return exSeg, secID, lot, tradingsymbol, err
+}
+
 // ResolveToSymbol maps Dhan's (exchangeSegment, securityID) to canonical (exchange, tradingsymbol).
 func (r *InstrumentResolver) ResolveToSymbol(exchangeSegment, securityID string) (string, string, error) {
 	seg := strings.ToUpper(strings.TrimSpace(exchangeSegment))

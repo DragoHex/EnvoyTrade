@@ -25,8 +25,12 @@ type API interface {
 	GetLimits(ctx context.Context, seg, exch, prod string) (*models.Limits, error)
 }
 
-// InstrumentLookup maps canonical (exchange, tradingsymbol) to Kotak's segment and security details.
+// InstrumentLookup resolves broker-specific segment and tradingsymbol for Kotak Neo (PLAN.md §1).
 type InstrumentLookup interface {
+	ResolveForBroker(targetBroker, exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, targetSymbol string, err error)
+}
+
+type legacyLookup interface {
 	ResolveToSecurityID(exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, err error)
 }
 
@@ -110,25 +114,55 @@ func mapTransactionTypeToKotak(tt string) string {
 	}
 }
 
+func mapSegmentToKotak(seg string) string {
+	s := strings.ToLower(strings.TrimSpace(seg))
+	switch s {
+	case "mcx", "mcx_fo", "mcx_comm":
+		return "mcx_fo"
+	case "nfo", "nse_fo", "nse_fno":
+		return "nse_fo"
+	case "bfo", "bse_fo", "bse_fno":
+		return "bse_fo"
+	case "bse", "bse_cm", "bse_eq":
+		return "bse_cm"
+	case "nse", "nse_cm", "nse_eq":
+		return "nse_cm"
+	default:
+		if strings.Contains(s, "mcx") {
+			return "mcx_fo"
+		}
+		if strings.Contains(s, "bse") && strings.Contains(s, "fo") {
+			return "bse_fo"
+		}
+		if strings.Contains(s, "fo") || strings.Contains(s, "nfo") {
+			return "nse_fo"
+		}
+		return "nse_cm"
+	}
+}
+
 // PlaceOrder translates broker.OrderParams to Kotak Neo OrderParams and sends the order.
 func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.OrderParams) (broker.OrderResponse, error) {
 	if !b.proxied {
 		return broker.OrderResponse{}, fmt.Errorf("kotak place order: %w", domain.ErrUnproxiedNotAllowed)
 	}
 
-	segment := "nse_cm"
-	if b.resolver != nil && params.Exchange != "" && params.Tradingsymbol != "" {
-		if seg, _, _, err := b.resolver.ResolveToSecurityID(params.Exchange, params.Tradingsymbol); err == nil && seg != "" {
-			segment = seg
+	segment := mapSegmentToKotak(params.Exchange)
+	ts := strings.ToUpper(strings.TrimSpace(params.Tradingsymbol))
+
+	if b.resolver != nil && params.Exchange != "" && ts != "" {
+		if seg, _, _, targetSym, err := b.resolver.ResolveForBroker("kotak", params.Exchange, ts); err == nil {
+			if seg != "" {
+				segment = mapSegmentToKotak(seg)
+			}
+			if targetSym != "" {
+				ts = targetSym
+			}
+		} else if legacy, ok := b.resolver.(legacyLookup); ok {
+			if seg, _, _, err := legacy.ResolveToSecurityID(params.Exchange, ts); err == nil && seg != "" {
+				segment = mapSegmentToKotak(seg)
+			}
 		}
-	} else if strings.EqualFold(params.Exchange, "NFO") || strings.EqualFold(params.Exchange, "NSE_FO") {
-		segment = "nse_fo"
-	} else if strings.EqualFold(params.Exchange, "BFO") || strings.EqualFold(params.Exchange, "BSE_FO") {
-		segment = "bse_fo"
-	} else if strings.EqualFold(params.Exchange, "MCX") || strings.EqualFold(params.Exchange, "MCX_FO") {
-		segment = "mcx_fo"
-	} else if strings.EqualFold(params.Exchange, "BSE") {
-		segment = "bse_cm"
 	}
 
 	priceStr := "0"
@@ -142,8 +176,7 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		trigPriceStr = strconv.FormatFloat(params.TriggerPrice, 'f', -1, 64)
 	}
 
-	ts := strings.ToUpper(strings.TrimSpace(params.Tradingsymbol))
-	if strings.EqualFold(segment, "nse_cm") && !strings.Contains(ts, "-") {
+	if (strings.EqualFold(segment, "nse_cm") || strings.EqualFold(segment, "bse_cm")) && !strings.Contains(ts, "-") {
 		ts = ts + "-EQ"
 	}
 

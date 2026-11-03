@@ -82,14 +82,26 @@ func (m *mockKotakAPI) GetLimits(ctx context.Context, seg, exch, prod string) (*
 }
 
 type mockInstrumentLookup struct {
-	segment    string
-	securityID string
-	lotSize    int
-	err        error
+	segment      string
+	securityID   string
+	lotSize      int
+	targetSymbol string
+	err          error
 }
 
 func (m *mockInstrumentLookup) ResolveToSecurityID(exchange, tradingsymbol string) (string, string, int, error) {
 	return m.segment, m.securityID, m.lotSize, m.err
+}
+
+func (m *mockInstrumentLookup) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (string, string, int, string, error) {
+	if m.err != nil {
+		return "", "", 0, "", m.err
+	}
+	sym := m.targetSymbol
+	if sym == "" {
+		sym = tradingsymbol
+	}
+	return m.segment, m.securityID, m.lotSize, sym, nil
 }
 
 func TestBroker_Execution(t *testing.T) {
@@ -126,6 +138,84 @@ func TestBroker_Execution(t *testing.T) {
 		}
 		if capturedParams.Pr != "125.5" {
 			t.Errorf("Pr = %s, want 125.5", capturedParams.Pr)
+		}
+	})
+
+	t.Run("Positive: CrossBroker Dhan MCX Option to Kotak Neo", func(t *testing.T) {
+		var capturedParams models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				capturedParams = params
+				return &models.OrderResponse{OrderNumber: "260216000777"}, nil
+			},
+		}
+
+		resolver := &mockInstrumentLookup{
+			segment:      "mcx_fo",
+			lotSize:      100,
+			targetSymbol: "CRUDEOIL17NOV265000PE",
+		}
+		b := kotak.NewBroker(api, true, resolver)
+
+		resp, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "MCX",
+			Tradingsymbol:   "CRUDEOIL-17Nov2026-5000-PE",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Product:         "NRML",
+			Quantity:        100,
+		})
+
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000777" {
+			t.Errorf("OrderID = %s, want 260216000777", resp.OrderID)
+		}
+		if capturedParams.Ts != "CRUDEOIL17NOV265000PE" {
+			t.Errorf("Ts = %q, want CRUDEOIL17NOV265000PE", capturedParams.Ts)
+		}
+		if capturedParams.Es != "mcx_fo" {
+			t.Errorf("Es = %q, want mcx_fo", capturedParams.Es)
+		}
+	})
+
+	t.Run("Positive: CrossBroker Cash Equity RELIANCE to Kotak Neo", func(t *testing.T) {
+		var capturedParams models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				capturedParams = params
+				return &models.OrderResponse{OrderNumber: "260216000666"}, nil
+			},
+		}
+
+		resolver := &mockInstrumentLookup{
+			segment:      "nse_cm",
+			lotSize:      1,
+			targetSymbol: "RELIANCE-EQ",
+		}
+		b := kotak.NewBroker(api, true, resolver)
+
+		resp, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Product:         "CNC",
+			Quantity:        10,
+		})
+
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000666" {
+			t.Errorf("OrderID = %s, want 260216000666", resp.OrderID)
+		}
+		if capturedParams.Ts != "RELIANCE-EQ" {
+			t.Errorf("Ts = %q, want RELIANCE-EQ", capturedParams.Ts)
+		}
+		if capturedParams.Es != "nse_cm" {
+			t.Errorf("Es = %q, want nse_cm", capturedParams.Es)
 		}
 	})
 

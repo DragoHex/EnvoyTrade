@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"envoytrade/internal/broker"
 	"envoytrade/internal/domain"
@@ -51,6 +52,33 @@ func (b *Broker) IsProxied() bool {
 	return b.proxied
 }
 
+func mapExchangeToKite(ex string) string {
+	e := strings.ToUpper(strings.TrimSpace(ex))
+	switch e {
+	case "MCX", "MCX_FO", "MCX_COMM":
+		return kiteconnect.ExchangeMCX
+	case "NFO", "NSE_FO", "NSE_FNO":
+		return kiteconnect.ExchangeNFO
+	case "BFO", "BSE_FO", "BSE_FNO":
+		return kiteconnect.ExchangeBFO
+	case "BSE", "BSE_CM", "BSE_EQ":
+		return kiteconnect.ExchangeBSE
+	case "NSE", "NSE_CM", "NSE_EQ":
+		return kiteconnect.ExchangeNSE
+	default:
+		if strings.Contains(e, "MCX") {
+			return kiteconnect.ExchangeMCX
+		}
+		if strings.Contains(e, "BSE") && strings.Contains(e, "FO") {
+			return kiteconnect.ExchangeBFO
+		}
+		if strings.Contains(e, "FO") || strings.Contains(e, "NFO") {
+			return kiteconnect.ExchangeNFO
+		}
+		return e
+	}
+}
+
 // PlaceOrder translates broker.OrderParams to kiteconnect.OrderParams
 // and delegates to the underlying API. Order placement must go via proxy.
 func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.OrderParams) (broker.OrderResponse, error) {
@@ -61,15 +89,27 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		variety = kiteconnect.VarietyRegular
 	}
 
+	exchange := mapExchangeToKite(params.Exchange)
 	tradingsymbol := params.Tradingsymbol
 	if b.resolver != nil && params.Exchange != "" && tradingsymbol != "" {
-		if _, _, _, targetSym, err := b.resolver.ResolveForBroker("kite", params.Exchange, tradingsymbol); err == nil && targetSym != "" {
-			tradingsymbol = targetSym
+		if exSeg, _, _, targetSym, err := b.resolver.ResolveForBroker("kite", params.Exchange, tradingsymbol); err == nil {
+			if exSeg != "" {
+				exchange = mapExchangeToKite(exSeg)
+			}
+			if targetSym != "" {
+				tradingsymbol = targetSym
+			}
 		}
 	}
 
+	// For cash equities in NSE or BSE, strip suffixes like -EQ or -BE
+	if exchange == kiteconnect.ExchangeNSE || exchange == kiteconnect.ExchangeBSE {
+		tradingsymbol = strings.TrimSuffix(tradingsymbol, "-EQ")
+		tradingsymbol = strings.TrimSuffix(tradingsymbol, "-BE")
+	}
+
 	p := kiteconnect.OrderParams{
-		Exchange:        params.Exchange,
+		Exchange:        exchange,
 		Tradingsymbol:   tradingsymbol,
 		TransactionType: params.TransactionType,
 		Product:         params.Product,

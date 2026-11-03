@@ -532,4 +532,145 @@ func TestCache_CrossBrokerMatrix_Comprehensive(t *testing.T) {
 	}
 }
 
+func TestCache_CrossBrokerMatrix_DhanMaster_To_KotakAndKite(t *testing.T) {
+	instruments := []domain.Instrument{
+		// Dhan MCX
+		{Broker: "dhan", Exchange: "MCX", Tradingsymbol: "CRUDEOIL-17Nov2026-5000-PE", SecurityID: "459190", ExchangeSegment: "MCX_COMM", LotSize: 100},
+		{Broker: "dhan", Exchange: "MCX", Tradingsymbol: "CRUDEOIL-21Sep2026-FUT", SecurityID: "459100", ExchangeSegment: "MCX_COMM", LotSize: 100},
+		// Kotak MCX (Notice: SecurityID is empty because Kotak does not use Security IDs)
+		{Broker: "kotak", Exchange: "MCX", Tradingsymbol: "CRUDEOIL17NOV265000PE", SecurityID: "", ExchangeSegment: "mcx_fo", LotSize: 100},
+		{Broker: "kotak", Exchange: "MCX", Tradingsymbol: "CRUDEOIL21SEP26", SecurityID: "", ExchangeSegment: "mcx_fo", LotSize: 100},
+		// Kite MCX
+		{Broker: "kite", Exchange: "MCX", Tradingsymbol: "CRUDEOIL26NOV5000PE", SecurityID: "", ExchangeSegment: "MCX", LotSize: 100},
+		{Broker: "kite", Exchange: "MCX", Tradingsymbol: "CRUDEOIL26SEPFUT", SecurityID: "", ExchangeSegment: "MCX", LotSize: 100},
+		// Dhan NFO Weekly
+		{Broker: "dhan", Exchange: "NFO", Tradingsymbol: "NIFTY-03Nov2026-28350-CE", SecurityID: "54896", ExchangeSegment: "NSE_FNO", LotSize: 65},
+		// Kotak NFO Weekly
+		{Broker: "kotak", Exchange: "NFO", Tradingsymbol: "NIFTY26N0328350CE", SecurityID: "", ExchangeSegment: "nse_fo", LotSize: 65},
+		// Kite NFO Weekly
+		{Broker: "kite", Exchange: "NFO", Tradingsymbol: "NIFTY26N0328350CE", SecurityID: "", ExchangeSegment: "NFO", LotSize: 65},
+	}
+
+	store := &mockStore{
+		activeFO: instruments,
+	}
+
+	cache := NewCache(10000, store, nil)
+	if err := cache.AutoLoadActiveFO(context.Background()); err != nil {
+		t.Fatalf("AutoLoadActiveFO failed: %v", err)
+	}
+
+	// 1. Dhan Master MCX Option -> Kotak Neo Follower
+	segKotak, _, lotKotak, symKotak, err := cache.ResolveForBroker("kotak", "MCX", "CRUDEOIL-17Nov2026-5000-PE")
+	if err != nil {
+		t.Fatalf("ResolveForBroker('kotak') failed: %v", err)
+	}
+	if symKotak != "CRUDEOIL17NOV265000PE" {
+		t.Errorf("symKotak = %q, want CRUDEOIL17NOV265000PE", symKotak)
+	}
+	if segKotak != "mcx_fo" {
+		t.Errorf("segKotak = %q, want mcx_fo", segKotak)
+	}
+	if lotKotak != 100 {
+		t.Errorf("lotKotak = %d, want 100", lotKotak)
+	}
+
+	// 2. Dhan Master MCX Option -> Kite Follower
+	_, _, lotKite, symKite, err := cache.ResolveForBroker("kite", "MCX", "CRUDEOIL-17Nov2026-5000-PE")
+	if err != nil {
+		t.Fatalf("ResolveForBroker('kite') failed: %v", err)
+	}
+	if symKite != "CRUDEOIL26NOV5000PE" {
+		t.Errorf("symKite = %q, want CRUDEOIL26NOV5000PE", symKite)
+	}
+	if lotKite != 100 {
+		t.Errorf("lotKite = %d, want 100", lotKite)
+	}
+
+	// 3. Dhan Master MCX Future -> Kotak Neo Follower
+	segKotak, _, lotKotak, symKotak, err = cache.ResolveForBroker("kotak", "MCX", "CRUDEOIL-21Sep2026-FUT")
+	if err != nil {
+		t.Fatalf("ResolveForBroker('kotak') future failed: %v", err)
+	}
+	if symKotak != "CRUDEOIL21SEP26" {
+		t.Errorf("symKotak = %q, want CRUDEOIL21SEP26", symKotak)
+	}
+	if segKotak != "mcx_fo" {
+		t.Errorf("segKotak = %q, want mcx_fo", segKotak)
+	}
+
+	// 4. Dhan Master NFO Weekly -> Kotak Neo Follower
+	segKotak, _, lotKotak, symKotak, err = cache.ResolveForBroker("kotak", "NFO", "NIFTY-03Nov2026-28350-CE")
+	if err != nil {
+		t.Fatalf("ResolveForBroker('kotak') NFO failed: %v", err)
+	}
+	if symKotak != "NIFTY26N0328350CE" {
+		t.Errorf("symKotak = %q, want NIFTY26N0328350CE", symKotak)
+	}
+	if segKotak != "nse_fo" {
+		t.Errorf("segKotak = %q, want nse_fo", segKotak)
+	}
+}
+
+func TestCache_KotakAlgorithmicFallback_WhenNotPreloadedInDB(t *testing.T) {
+	// Empty store: Kotak instruments are NOT in DB
+	store := &mockStore{}
+	cache := NewCache(1000, store, nil)
+
+	// 1. Dhan MCX Option -> Kotak algorithmic fallback
+	seg, secID, _, sym, err := cache.ResolveForBroker("kotak", "MCX", "CRUDEOIL-17Nov2026-5000-PE")
+	if err != nil {
+		t.Fatalf("algorithmic fallback to kotak failed: %v", err)
+	}
+	if sym != "CRUDEOIL17NOV265000PE" {
+		t.Errorf("sym = %q, want CRUDEOIL17NOV265000PE", sym)
+	}
+	if seg != "mcx_fo" {
+		t.Errorf("seg = %q, want mcx_fo", seg)
+	}
+	if secID != "" {
+		t.Errorf("secID = %q, want empty for Kotak", secID)
+	}
+
+	// 2. Dhan Cash Equity -> Kotak algorithmic fallback (should format with -EQ)
+	seg, _, _, sym, err = cache.ResolveForBroker("kotak", "NSE", "RELIANCE")
+	if err != nil {
+		t.Fatalf("algorithmic fallback for equity failed: %v", err)
+	}
+	if sym != "RELIANCE-EQ" {
+		t.Errorf("sym = %q, want RELIANCE-EQ", sym)
+	}
+	if seg != "nse_cm" {
+		t.Errorf("seg = %q, want nse_cm", seg)
+	}
+}
+
+func TestCache_KiteMasterToKotak_DayEnrichmentFromCache(t *testing.T) {
+	// Dhan has MCX with day 17 loaded in cache
+	instruments := []domain.Instrument{
+		{Broker: "dhan", Exchange: "MCX", Tradingsymbol: "CRUDEOIL-17Nov2026-5000-PE", SecurityID: "459190", ExchangeSegment: "MCX_COMM", LotSize: 100},
+	}
+	store := &mockStore{activeFO: instruments}
+	cache := NewCache(1000, store, nil)
+	if err := cache.AutoLoadActiveFO(context.Background()); err != nil {
+		t.Fatalf("AutoLoadActiveFO: %v", err)
+	}
+
+	// Kite master sends dayless CRUDEOIL26NOV5000PE -> Kotak Neo follower needs CRUDEOIL17NOV265000PE
+	seg, _, lot, sym, err := cache.ResolveForBroker("kotak", "MCX", "CRUDEOIL26NOV5000PE")
+	if err != nil {
+		t.Fatalf("ResolveForBroker('kotak') with day enrichment failed: %v", err)
+	}
+	if sym != "CRUDEOIL17NOV265000PE" {
+		t.Errorf("sym = %q, want CRUDEOIL17NOV265000PE (enriched with day 17 from canonical cache)", sym)
+	}
+	if seg != "mcx_fo" {
+		t.Errorf("seg = %q, want mcx_fo", seg)
+	}
+	if lot != 100 {
+		t.Errorf("lot = %d, want 100", lot)
+	}
+}
+
+
 
