@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from 'solid-js'
 import {
   fetchAvailableProxyIPs,
+  switchAccountRole,
   type Account,
   type AvailableProxyIPsResponse,
   type CreateAccountRequest,
@@ -9,6 +10,7 @@ import {
 } from '../api'
 import { BrokerLogo, SUPPORTED_BROKERS, getBrokerConfig } from './BrokerLogo'
 import { ThemedSelect } from './ThemedSelect'
+import { ConfirmActionModal } from './ConfirmActionModal'
 import { isValidIP } from '../utils/ip'
 import { formatAuthError } from '../utils/authError'
 
@@ -47,6 +49,7 @@ export function getPrioritizedCompatibleIPs(ips: ProxyIP[], brokerVal: string): 
 export function AccountDetailDrawer(props: {
   open: boolean
   account: Account | null
+  initialRoleOverride?: 'master' | 'follower' | null
   groups: GroupSummary[]
   existingAccounts?: Account[]
   maxAccounts?: number
@@ -54,9 +57,12 @@ export function AccountDetailDrawer(props: {
   onClose: () => void
   onCreate: (body: CreateAccountRequest) => Promise<void>
   onSave: (id: string, patch: Record<string, unknown>) => Promise<void>
+  onRoleSwitched?: () => void
 }) {
   const [name, setName] = createSignal('')
   const [role, setRole] = createSignal<'master' | 'follower'>('follower')
+  const [confirmRoleSwitchOpen, setConfirmRoleSwitchOpen] = createSignal(false)
+  const [pendingSaveAction, setPendingSaveAction] = createSignal<(() => Promise<void>) | null>(null)
   const [broker, setBroker] = createSignal('kite')
   const [brokerAccountId, setBrokerAccountId] = createSignal('')
   const [apiKey, setApiKey] = createSignal('')
@@ -97,15 +103,18 @@ export function AccountDetailDrawer(props: {
 
   createEffect(
     on(
-      () => [props.open, props.account?.id] as const,
-      ([isOpen]) => {
+      () => [props.open, props.account?.id, props.initialRoleOverride] as const,
+      ([isOpen, _id, initialRole]) => {
         setIsDropdownOpen(false)
+        setConfirmRoleSwitchOpen(false)
+        setPendingSaveAction(null)
         if (!isOpen) return
         const a = props.account
         setName(a?.name ?? '')
         const currentRole = a?.role ?? 'follower'
         const currentBroker = a?.broker ?? 'kite'
-        setRole(currentRole)
+        const targetRole = initialRole ?? currentRole
+        setRole(targetRole)
         setBroker(currentBroker)
         setBrokerAccountId(a?.brokerAccountId ?? '')
         let initialApiKey = a?.apiKey ?? ''
@@ -128,15 +137,15 @@ export function AccountDetailDrawer(props: {
           setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
         } else {
           setIp('')
-          setIpType(currentRole === 'master' ? 'na' : 'ipv4')
+          setIpType(targetRole === 'master' ? 'na' : 'ipv4')
         }
 
         // Load available proxy IPs
         fetchAvailableProxyIPs(a?.id)
           .then((ips) => {
             setAvailableIPs(ips)
-            // In create mode for follower, auto-assign first available IP if still empty
-            if (!a && untrack(role) === 'follower' && !untrack(ip)) {
+            // If follower and still empty, auto-assign first available IP
+            if (untrack(role) === 'follower' && !untrack(ip)) {
               const b = untrack(broker)
               const v4 = getPrioritizedCompatibleIPs(ips.ipv4 || [], b)
               const v6 = getPrioritizedCompatibleIPs(ips.ipv6 || [], b)
@@ -328,6 +337,12 @@ export function AccountDetailDrawer(props: {
 
       if (isEdit()) {
         const a = props.account!
+        const roleChanged = role() !== a.role
+        if (roleChanged && isFollower() && !trimmedIP) {
+          setError('IP Address is required for follower accounts.')
+          setSaving(false)
+          return
+        }
         const patch: Record<string, unknown> = {}
         if (name() !== (a.name ?? '')) patch.name = name()
         if (broker() !== 'dhan') {
@@ -349,14 +364,15 @@ export function AccountDetailDrawer(props: {
         }
         const trimmedToken = accessToken().trim()
         if (trimmedToken) patch.accessToken = trimmedToken
-        if (trimmedIP !== (a.ip ?? '')) {
+        if (!roleChanged && trimmedIP !== (a.ip ?? '')) {
           if (isFollower() && !trimmedIP) {
             setError('IP Address is required for follower accounts.')
+            setSaving(false)
             return
           }
           patch.ip = trimmedIP
         }
-        if (isFollower()) {
+        if (isFollower() && !roleChanged) {
           const currentGroupId = a.groupId ?? ''
           if (groupId() !== currentGroupId) {
             patch.groupId = groupId() // empty string "" signals detachment on backend
@@ -367,7 +383,30 @@ export function AccountDetailDrawer(props: {
             if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
           }
         }
-        if (Object.keys(patch).length > 0) await props.onSave(a.id, patch)
+
+        const executeSave = async () => {
+          if (roleChanged) {
+            await switchAccountRole(a.id, {
+              targetRole: role(),
+              releaseIp: role() === 'master' && !trimmedIP,
+              ip: trimmedIP || undefined,
+            })
+            props.onRoleSwitched?.()
+          }
+          if (Object.keys(patch).length > 0) {
+            await props.onSave(a.id, patch)
+          }
+          props.onClose()
+        }
+
+        if (roleChanged) {
+          setPendingSaveAction(() => executeSave)
+          setConfirmRoleSwitchOpen(true)
+          setSaving(false)
+          return
+        }
+
+        await executeSave()
       } else {
         const body: CreateAccountRequest = {
           name: name().trim() || brokerAccountId().trim(),
@@ -421,7 +460,8 @@ export function AccountDetailDrawer(props: {
   }
 
   return (
-    <Show when={props.open}>
+    <>
+      <Show when={props.open}>
       <div class="drawer-overlay" onClick={props.onClose}>
         <div
           role="dialog"
@@ -516,7 +556,7 @@ export function AccountDetailDrawer(props: {
               <ThemedSelect
                 aria-label="Role"
                 value={role()}
-                disabled={isEdit()}
+                disabled={isEdit() && !props.initialRoleOverride}
                 onChange={(val) => handleRoleChange(val as 'master' | 'follower')}
                 options={[
                   { value: 'follower', label: 'Follower' },
@@ -953,5 +993,50 @@ export function AccountDetailDrawer(props: {
       </div>
     </div>
   </Show>
+
+  <ConfirmActionModal
+    open={confirmRoleSwitchOpen()}
+    label={`Switch to ${role() === 'master' ? 'Master' : 'Follower'}`}
+    onConfirm={async () => {
+      const fn = pendingSaveAction()
+      setConfirmRoleSwitchOpen(false)
+      setSaving(true)
+      try {
+        if (fn) await fn()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Save failed.')
+      } finally {
+        setSaving(false)
+      }
+    }}
+    onCancel={() => {
+      setConfirmRoleSwitchOpen(false)
+      setPendingSaveAction(null)
+      setSaving(false)
+    }}
+  >
+    <div class="confirm-modal-option">
+      <Show when={role() === 'follower'}>
+        <p>• Group associated with this master will be <strong>deleted</strong>.</p>
+        <p>• All attached followers will be <strong>released</strong> (not deleted).</p>
+        <p>• Account will stop streaming trade signals.</p>
+        <p>• Proxy IP will be set to: <code>{ip() || 'None'}</code>.</p>
+      </Show>
+      <Show when={role() === 'master'}>
+        <p>• Account will be detached from its current group.</p>
+        <p>• Account will stop copying trades.</p>
+        <p>
+          • Proxy IP will be{' '}
+          {ip() ? (
+            <>kept as <code>{ip()}</code></>
+          ) : (
+            <strong>released back to pool</strong>
+          )}
+          .
+        </p>
+      </Show>
+    </div>
+  </ConfirmActionModal>
+  </>
   )
 }

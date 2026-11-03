@@ -8,8 +8,10 @@ import {
   patchAccount,
   removeAccountFromGroup,
   addAccountToGroup,
+  addAccountsToGroup,
   patchGroup,
   type Account,
+  type GroupFollowerBatchItem,
   type GroupSummary,
 } from '../api'
 import { ConfirmActionModal } from '../components/ConfirmActionModal'
@@ -19,7 +21,7 @@ import { ResultToast, type ToastResult } from '../components/ResultToast'
 import { LoadingTimeout, TableSkeleton } from '../components/Skeleton'
 import { StatusDot } from '../components/StatusDot'
 import { CopyToggle } from '../components/CopyToggle'
-import { UserMinusIcon } from '../components/icons'
+import { TrashIcon, UserMinusIcon } from '../components/icons'
 import { RoleIcon } from '../components/RoleIcon'
 import { BrokerLogo } from '../components/BrokerLogo'
 import { ThemedSelect } from '../components/ThemedSelect'
@@ -28,6 +30,13 @@ import { formatAuthError } from '../utils/authError'
 
 
 const TOAST_DISMISS_MS = 4000
+
+export interface AddFollowerRow {
+  id: string
+  accountId: string
+  cloneFactor: string
+  maxQtyPerOrder: string
+}
 
 // GroupManagePage (/accounts/groups/:masterId) configures one group's
 // accounts: activate/deactivate, remove a follower, add an existing
@@ -92,11 +101,28 @@ export function GroupManagePage() {
     }
   })
 
+  const createInitialRow = (): AddFollowerRow => ({
+    id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Math.random()),
+    accountId: '',
+    cloneFactor: '1',
+    maxQtyPerOrder: '',
+  })
+
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
-  const [selectedAccountId, setSelectedAccountId] = createSignal('')
-  const [cloneFactor, setCloneFactor] = createSignal('1')
-  const [maxQtyPerOrder, setMaxQtyPerOrder] = createSignal('')
+  const [rows, setRows] = createSignal<AddFollowerRow[]>([createInitialRow()])
   const [pendingRemove, setPendingRemove] = createSignal<Account | null>(null)
+
+  const addRow = () => {
+    setRows((prev) => [...prev, createInitialRow()])
+  }
+
+  const removeRow = (index: number) => {
+    setRows((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const updateRow = (index: number, patch: Partial<AddFollowerRow>) => {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+  }
   const [editModalOpen, setEditModalOpen] = createSignal(false)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
   const [submittingAdd, setSubmittingAdd] = createSignal(false)
@@ -245,34 +271,48 @@ export function GroupManagePage() {
   const handleAddToGroup = async (e: Event) => {
     e.preventDefault()
     setSubmittingAdd(true)
-    const accountId = selectedAccountId()
-    const target = allAccounts()?.find((a) => a.id === accountId)
-    const cf = cloneFactor() || '1'
-    const maxQty = maxQtyPerOrder() === '' ? undefined : Number(maxQtyPerOrder())
 
-    const optimisticFollower: Account | undefined = target
-      ? {
-          ...target,
-          groupId: detail()?.id || params.masterId,
-          masterId: detail()?.masterId || params.masterId,
-          cloneFactor: cf,
-          maxQtyPerOrder: maxQty ?? null,
-          enabled: true,
-          active: true,
-        }
-      : undefined
+    const currentRows = rows()
+    const validRows = currentRows.filter((r) => r.accountId.trim() !== '')
+    if (validRows.length === 0) {
+      setSubmittingAdd(false)
+      return
+    }
+
+    const items: GroupFollowerBatchItem[] = validRows.map((r) => ({
+      accountId: r.accountId.trim(),
+      cloneFactor: r.cloneFactor.trim() || '1',
+      maxQtyPerOrder: r.maxQtyPerOrder.trim() ? Number(r.maxQtyPerOrder.trim()) : undefined,
+    }))
 
     const prevMembers = members()
     const prevDetail = detail()
     const prevAll = allAccounts()
 
-    if (optimisticFollower) {
+    const optimisticFollowers: Account[] = []
+    for (const it of items) {
+      const target = allAccounts()?.find((a) => a.id === it.accountId)
+      if (target) {
+        optimisticFollowers.push({
+          ...target,
+          groupId: detail()?.id || params.masterId,
+          masterId: detail()?.masterId || params.masterId,
+          cloneFactor: it.cloneFactor,
+          maxQtyPerOrder: it.maxQtyPerOrder ?? null,
+          enabled: true,
+          active: true,
+        })
+      }
+    }
+
+    if (optimisticFollowers.length > 0) {
+      const optimisticIDs = new Set(optimisticFollowers.map((f) => f.id))
       setMembers((prev) => {
-        if (!prev) return [optimisticFollower]
+        if (!prev) return optimisticFollowers
         const master = prev.find((m) => m.role === 'master')
         const followers = [
-          ...prev.filter((m) => m.role !== 'master' && m.id !== optimisticFollower.id),
-          optimisticFollower,
+          ...prev.filter((m) => m.role !== 'master' && !optimisticIDs.has(m.id)),
+          ...optimisticFollowers,
         ].sort((a, b) =>
           (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
         )
@@ -283,39 +323,44 @@ export function GroupManagePage() {
           ? {
               ...prev,
               followers: [
-                ...prev.followers.filter((f) => f.accountId !== optimisticFollower.id),
-                {
-                  accountId: optimisticFollower.id,
-                  name: optimisticFollower.name,
-                  brokerAccountId: optimisticFollower.brokerAccountId,
+                ...prev.followers.filter((f) => !optimisticIDs.has(f.accountId)),
+                ...optimisticFollowers.map((f) => ({
+                  accountId: f.id,
+                  name: f.name,
+                  brokerAccountId: f.brokerAccountId,
                   enabled: true,
-                  status: optimisticFollower.status as any,
-                },
+                  status: f.status as any,
+                })),
               ],
             }
           : prev,
       )
-      mutateAll((prev) => prev?.map((acc) => (acc.id === optimisticFollower.id ? optimisticFollower : acc)))
-      setSelectedAccountId('')
-      setCloneFactor('1')
-      setMaxQtyPerOrder('')
+      mutateAll((prev) =>
+        prev?.map((acc) => {
+          const match = optimisticFollowers.find((f) => f.id === acc.id)
+          return match ? match : acc
+        }),
+      )
+      setRows([createInitialRow()])
     }
 
     try {
       const groupId = detail()?.id || params.masterId
-      await addAccountToGroup(groupId, {
-        accountId,
-        cloneFactor: cf,
-        maxQtyPerOrder: maxQty,
-      })
+      if (items.length === 1) {
+        await addAccountToGroup(groupId, items[0])
+      } else {
+        await addAccountsToGroup(groupId, items)
+      }
+
       try {
-        const added = await getAccount(accountId)
+        const addedAccounts = await Promise.all(items.map((it) => getAccount(it.accountId)))
+        const addedIDs = new Set(addedAccounts.map((a) => a.id))
         setMembers((prev) => {
-          if (!prev) return [added]
+          if (!prev) return addedAccounts
           const master = prev.find((m) => m.role === 'master')
           const followers = [
-            ...prev.filter((m) => m.role !== 'master' && m.id !== added.id),
-            added,
+            ...prev.filter((m) => m.role !== 'master' && !addedIDs.has(m.id)),
+            ...addedAccounts,
           ].sort((a, b) =>
             (a.name || a.brokerAccountId).localeCompare(b.name || b.brokerAccountId, undefined, { sensitivity: 'base' })
           )
@@ -326,35 +371,49 @@ export function GroupManagePage() {
             ? {
                 ...prev,
                 followers: [
-                  ...prev.followers.filter((f) => f.accountId !== added.id),
-                  {
-                    accountId: added.id,
-                    name: added.name,
-                    brokerAccountId: added.brokerAccountId,
-                    enabled: added.enabled,
-                    status: added.status as any,
-                  },
+                  ...prev.followers.filter((f) => !addedIDs.has(f.accountId)),
+                  ...addedAccounts.map((a) => ({
+                    accountId: a.id,
+                    name: a.name,
+                    brokerAccountId: a.brokerAccountId,
+                    enabled: a.enabled,
+                    status: a.status as any,
+                  })),
                 ],
               }
             : prev,
         )
-        mutateAll((prev) => prev?.map((acc) => (acc.id === added.id ? added : acc)))
+        mutateAll((prev) =>
+          prev?.map((acc) => {
+            const match = addedAccounts.find((a) => a.id === acc.id)
+            return match ? match : acc
+          }),
+        )
       } catch {
         // If secondary getAccount fails, optimistic follower is already applied
       }
-      showToast({ kind: 'success', message: 'Follower added to group successfully.' })
+
+      showToast({
+        kind: 'success',
+        message: items.length > 1 ? `${items.length} followers added to group successfully.` : 'Follower added to group successfully.',
+      })
     } catch (err) {
-      if (optimisticFollower) {
+      if (optimisticFollowers.length > 0) {
         setMembers(prevMembers)
         mutateDetail(prevDetail)
         mutateAll(prevAll)
-        setSelectedAccountId(accountId)
-        setCloneFactor(cf)
-        setMaxQtyPerOrder(maxQty != null ? String(maxQty) : '')
+        setRows(
+          items.map((it) => ({
+            id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Math.random()),
+            accountId: it.accountId,
+            cloneFactor: it.cloneFactor,
+            maxQtyPerOrder: it.maxQtyPerOrder != null ? String(it.maxQtyPerOrder) : '',
+          })),
+        )
       }
       showToast({
         kind: 'error',
-        message: err instanceof Error ? err.message : 'Failed to add follower to group.',
+        message: err instanceof Error ? err.message : 'Failed to add follower(s) to group.',
       })
     } finally {
       setSubmittingAdd(false)
@@ -513,58 +572,114 @@ export function GroupManagePage() {
 
       <section class="accounts-card group-add-card">
         <h3>Add Follower to Group</h3>
-        <form onSubmit={handleAddToGroup} class="group-add-form">
-          <label>
-            Account
-            <ThemedSelect
-              aria-label="Account"
-              value={selectedAccountId()}
-              placeholder="Select an Account"
-              disabled={allAccounts.loading || unattachedFollowers().length === 0}
-              onChange={(val) => setSelectedAccountId(val)}
-              required
-              options={
-                allAccounts.loading
-                  ? [{ value: '', label: 'Loading accounts...', disabled: true }]
-                  : unattachedFollowers().length === 0
-                    ? [{ value: '', label: 'No unassigned follower accounts available', disabled: true }]
-                    : unattachedFollowers().map((a) => ({
-                        value: a.id,
-                        label: a.name ? `${a.name} (${a.brokerAccountId})` : a.brokerAccountId,
-                      }))
+        <form onSubmit={handleAddToGroup} class="group-add-form group-add-form-multi">
+          <div class="group-add-header-row" aria-hidden="true">
+            <span class="group-add-col-header col-account">Account</span>
+            <span class="group-add-col-header col-clone-factor">Clone Factor</span>
+            <span class="group-add-col-header col-max-qty">Max Qty/Order</span>
+            <span class="group-add-col-header col-actions"></span>
+          </div>
+
+          <div class="group-add-rows">
+            <Index each={rows()}>
+              {(row, index) => {
+                const selectedInOtherRows = () =>
+                  rows()
+                    .filter((_, i) => i !== index)
+                    .map((r) => r.accountId)
+                    .filter(Boolean)
+                const availableForThisRow = () =>
+                  unattachedFollowers().filter((a) => !selectedInOtherRows().includes(a.id))
+
+                return (
+                  <div class="group-add-row" data-testid="group-add-row">
+                    <div class="group-add-field col-account">
+                      <ThemedSelect
+                        aria-label="Account"
+                        value={row().accountId}
+                        placeholder="Select an Account"
+                        disabled={allAccounts.loading || (availableForThisRow().length === 0 && !row().accountId)}
+                        onChange={(val) => updateRow(index, { accountId: val })}
+                        required
+                        options={
+                          allAccounts.loading
+                            ? [{ value: '', label: 'Loading accounts...', disabled: true }]
+                            : availableForThisRow().length === 0 && !row().accountId
+                              ? [{ value: '', label: 'No unassigned follower accounts available', disabled: true }]
+                              : availableForThisRow().map((a) => ({
+                                  value: a.id,
+                                  label: a.name ? `${a.name} (${a.brokerAccountId})` : a.brokerAccountId,
+                                }))
+                        }
+                      />
+                    </div>
+                    <div class="group-add-field col-clone-factor">
+                      <ThemedNumberInput
+                        aria-label="Clone Factor"
+                        step="any"
+                        min="0.01"
+                        value={row().cloneFactor}
+                        placeholder="e.g. 1.0"
+                        required
+                        onInput={(e) => updateRow(index, { cloneFactor: e.currentTarget.value })}
+                      />
+                    </div>
+                    <div class="group-add-field col-max-qty">
+                      <ThemedNumberInput
+                        aria-label="Max Qty/Order"
+                        step="1"
+                        min="1"
+                        value={row().maxQtyPerOrder}
+                        placeholder="optional cap"
+                        onInput={(e) => updateRow(index, { maxQtyPerOrder: e.currentTarget.value })}
+                      />
+                    </div>
+                    <div class="group-add-field col-actions">
+                      <Show
+                        when={rows().length > 1}
+                        fallback={<span class="group-add-actions-placeholder" aria-hidden="true" />}
+                      >
+                        <button
+                          type="button"
+                          class="icon-button icon-button-danger group-add-remove-btn"
+                          aria-label="Remove row"
+                          title="Remove row"
+                          onClick={() => removeRow(index)}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </Show>
+                    </div>
+                  </div>
+                )
+              }}
+            </Index>
+          </div>
+
+          <div class="group-add-actions-bar">
+            <button
+              type="button"
+              class="btn-secondary group-add-more-btn"
+              disabled={
+                allAccounts.loading ||
+                unattachedFollowers().length <= rows().filter((r) => r.accountId).length
               }
-            />
-          </label>
-          <label>
-            Clone Factor
-            <ThemedNumberInput
-              aria-label="Clone Factor"
-              step="any"
-              min="0.01"
-              value={cloneFactor()}
-              placeholder="e.g. 1.0"
-              required
-              onInput={(e) => setCloneFactor(e.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Max Qty/Order
-            <ThemedNumberInput
-              aria-label="Max Qty/Order"
-              step="1"
-              min="1"
-              value={maxQtyPerOrder()}
-              placeholder="optional cap"
-              onInput={(e) => setMaxQtyPerOrder(e.currentTarget.value)}
-            />
-          </label>
-          <button
-            type="submit"
-            class="btn-primary"
-            disabled={submittingAdd() || unattachedFollowers().length === 0 || !selectedAccountId()}
-          >
-            Add to group
-          </button>
+              onClick={addRow}
+            >
+              + Add another account
+            </button>
+            <button
+              type="submit"
+              class="btn-primary"
+              disabled={
+                submittingAdd() ||
+                rows().length === 0 ||
+                rows().some((r) => !r.accountId || !r.cloneFactor || Number(r.cloneFactor) <= 0)
+              }
+            >
+              {rows().length > 1 ? `Add ${rows().length} Accounts to Group` : 'Add to group'}
+            </button>
+          </div>
         </form>
       </section>
 

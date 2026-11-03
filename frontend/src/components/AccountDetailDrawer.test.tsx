@@ -836,5 +836,47 @@ describe('AccountDetailDrawer', () => {
     expect(screen.queryByLabelText(/IP Address/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Account Quota Exhausted/i })).toBeDisabled()
   })
+
+  it('when initialRoleOverride is provided, initializes role and shows confirmation modal on save', async () => {
+    const switchSpy = vi.spyOn(api, 'switchAccountRole').mockResolvedValue({ status: 'ok', role: 'master' })
+    const onRoleSwitched = vi.fn()
+    const onClose = vi.fn()
+
+    render(() => (
+      <AccountDetailDrawer
+        open
+        account={follower}
+        initialRoleOverride="master"
+        groups={[mockGroup]}
+        existingAccounts={[follower]}
+        onClose={onClose}
+        onCreate={vi.fn()}
+        onSave={vi.fn()}
+        onRoleSwitched={onRoleSwitched}
+      />
+    ))
+
+    // Role is initialized to master due to initialRoleOverride
+    expect(screen.getByLabelText('Role')).toHaveValue('master')
+
+    // Submit save
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    // Confirmation dialog should be displayed explaining consequences
+    const confirmModal = screen.getByRole('dialog', { name: 'Confirm Switch to Master' })
+    expect(confirmModal).toBeInTheDocument()
+    expect(screen.getByText(/Account will be detached from its current group/i)).toBeInTheDocument()
+
+    // Confirm
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    expect(switchSpy).toHaveBeenCalledWith(follower.id, {
+      targetRole: 'master',
+      releaseIp: false,
+      ip: '192.168.1.20',
+    })
+    expect(onRoleSwitched).toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalled()
+  })
 })
 

@@ -193,7 +193,7 @@ describe('Dashboard', () => {
     expect(await screen.findByText(/No group added\. Please go to/)).toBeInTheDocument()
     const accountsLink = screen.getByRole('link', { name: 'accounts' })
     expect(accountsLink).toBeInTheDocument()
-    expect(accountsLink).toHaveAttribute('href', '/accounts')
+    expect(accountsLink).toHaveAttribute('href', '/accounts?tab=accounts')
     expect(screen.getByTestId('order-empty-state')).toBeInTheDocument()
   })
 

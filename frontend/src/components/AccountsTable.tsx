@@ -6,6 +6,7 @@ import { ChevronDownIcon, EditIcon, TrashIcon, UserMinusIcon } from './icons'
 import { BrokerLogo } from './BrokerLogo'
 import { CopyToggle } from './CopyToggle'
 import { RoleIcon } from './RoleIcon'
+import { RoleSwitchPopover } from './RoleSwitchPopover'
 import { AccountHoldingsRow } from './AccountHoldingsRow'
 import { formatAuthError } from '../utils/authError'
 
@@ -19,9 +20,12 @@ export function AccountsTable(props: {
   onRemoveFromGroup?: (account: Account) => void
   onDelete?: (account: Account) => void
   onToggleActive?: (id: string, nextActive: boolean) => Promise<void>
+  enableRoleSwitch?: boolean
+  onSwitchRole?: (account: Account, targetRole: 'master' | 'follower') => void
 }) {
   const [togglingId, setTogglingId] = createSignal<string | null>(null)
   const [expandedId, setExpandedId] = createSignal<string | null>(null)
+  const [popoverAccount, setPopoverAccount] = createSignal<{ account: Account; triggerEl: HTMLElement } | null>(null)
 
   const resolveGroupName = (a: Account): string | null => {
     if (a.groupName && a.groupName.trim() !== '') {
@@ -86,7 +90,27 @@ export function AccountsTable(props: {
       cellClass: 'col-role',
       cell: (a) => (
         <span class="role-cell-centered">
-          <RoleIcon role={a.role} />
+          <Show
+            when={props.enableRoleSwitch}
+            fallback={<RoleIcon role={a.role} />}
+          >
+            <button
+              type="button"
+              class="role-icon-trigger-btn"
+              aria-label={`Switch role from ${a.role}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                const current = popoverAccount()
+                if (current?.account.id === a.id) {
+                  setPopoverAccount(null)
+                } else {
+                  setPopoverAccount({ account: a, triggerEl: e.currentTarget })
+                }
+              }}
+            >
+              <RoleIcon role={a.role} />
+            </button>
+          </Show>
         </span>
       ),
     },
@@ -232,6 +256,23 @@ export function AccountsTable(props: {
           </Show>
         )}
       />
+      <Show when={popoverAccount()}>
+        {(info) => {
+          const acc = info().account
+          const target = acc.role === 'master' ? 'follower' : 'master'
+          return (
+            <RoleSwitchPopover
+              role={acc.role as 'master' | 'follower'}
+              triggerRef={info().triggerEl}
+              open={true}
+              onClose={() => setPopoverAccount(null)}
+              onSelect={() => {
+                props.onSwitchRole?.(acc, target)
+              }}
+            />
+          )
+        }}
+      </Show>
     </div>
   )
 }

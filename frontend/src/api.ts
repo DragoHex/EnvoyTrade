@@ -264,14 +264,31 @@ export function patchGroup(id: string, body: PatchGroupRequest): Promise<{ statu
   }).then((r) => json(r))
 }
 
-export function deleteGroup(id: string): Promise<void> {
-  return apiFetch(`${BASE}/groups/${id}`, { method: 'DELETE' }).then((r) => {
+export function deleteGroup(id: string, deleteAccounts = false): Promise<void> {
+  const query = deleteAccounts ? '?delete_accounts=true' : ''
+  return apiFetch(`${BASE}/groups/${id}${query}`, { method: 'DELETE' }).then((r) => {
     if (!r.ok) return json(r)
   })
 }
 
 export function getGroupDetail(id: string): Promise<GroupDetail> {
   return apiFetch(`${BASE}/groups/${id}`).then((r) => json(r))
+}
+
+export interface SwitchAccountRoleRequest {
+  targetRole: 'master' | 'follower'
+  releaseIp?: boolean
+  ip?: string
+}
+
+export function switchAccountRole(
+  id: string,
+  body: SwitchAccountRoleRequest
+): Promise<{ status: string; role: string }> {
+  return apiFetch(`${BASE}/accounts/${id}/switch-role`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }).then((r) => json(r))
 }
 
 export function patchAccount(
@@ -330,9 +347,28 @@ export function removeAccountFromGroup(id: string): Promise<void> {
   })
 }
 
+export interface GroupFollowerBatchItem {
+  accountId: string
+  cloneFactor: string
+  maxQtyPerOrder?: number
+}
+
+export function addAccountsToGroup(
+  groupId: string,
+  followers: GroupFollowerBatchItem[],
+): Promise<void> {
+  return apiFetch(`${BASE}/groups/${groupId}/followers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(followers),
+  }).then((r) => {
+    if (!r.ok) return json(r)
+  })
+}
+
 export function addAccountToGroup(
   groupId: string,
-  body: { accountId: string; cloneFactor: string; maxQtyPerOrder?: number },
+  body: GroupFollowerBatchItem,
 ): Promise<void> {
   return apiFetch(`${BASE}/groups/${groupId}/followers`, {
     method: 'POST',
