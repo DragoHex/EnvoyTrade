@@ -174,6 +174,54 @@ func TestPortfolioSyncer_Execution(t *testing.T) {
 		}
 	})
 
+	t.Run("Positive: Kotak Limits Fallback when AvailableCash is Zero but Margin NonZero", func(t *testing.T) {
+		cashAccID := uuid.New()
+		store.authInfo[cashAccID] = domain.AccountAuthInfo{
+			BrokerAccountID: "CASH123",
+			ApiSecret:       "consumer-key",
+			AccessToken:     sessRaw,
+			TokenExpiresAt:  &future,
+			AuthStatus:      "authenticated",
+		}
+		cashMockAPI := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return nil, nil
+			},
+			getHoldingsFunc: func(ctx context.Context) ([]models.Holding, error) {
+				return nil, nil
+			},
+			getLimitsFunc: func(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+				// Models live Kotak Neo API response:
+				// CollateralValue is opening funds (766.6), Net is remaining funds (706.6)
+				return &models.Limits{
+					CollateralValue: decimal.NewFromFloat(766.6),
+					Net:             decimal.NewFromFloat(706.6),
+					MarginUsed:      decimal.NewFromFloat(60.0),
+					NotionalCash:    decimal.Zero,
+				}, nil
+			},
+		}
+
+		cashSyncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return cashMockAPI, nil
+			},
+		}
+
+		err := cashSyncer.SyncAccountPortfolio(context.Background(), cashAccID)
+		if err != nil {
+			t.Fatalf("SyncAccountPortfolio failed: %v", err)
+		}
+
+		if store.margins[cashAccID].AvailableCash == nil || !store.margins[cashAccID].AvailableCash.Equal(decimal.NewFromFloat(706.6)) {
+			t.Errorf("AvailableCash = %v, want 706.6", store.margins[cashAccID].AvailableCash)
+		}
+		if store.margins[cashAccID].AvailableMargin == nil || !store.margins[cashAccID].AvailableMargin.Equal(decimal.NewFromFloat(706.6)) {
+			t.Errorf("AvailableMargin = %v, want 706.6", store.margins[cashAccID].AvailableMargin)
+		}
+	})
+
 	t.Run("Negative: Expired Session Missing Renewer", func(t *testing.T) {
 		badAccID := uuid.New()
 		store.authInfo[badAccID] = domain.AccountAuthInfo{

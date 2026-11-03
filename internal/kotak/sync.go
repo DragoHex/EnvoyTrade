@@ -206,6 +206,12 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 
 	availCash := kLimits.AvailableCash()
 	availMargin := kLimits.AvailableMargin()
+	if availCash.IsZero() && !availMargin.IsZero() {
+		// In Kotak Neo API, CollateralValue represents opening ledger funds, MarginUsed is consumed margin,
+		// and Net is remaining available funds (Net = CollateralValue - MarginUsed).
+		// When no pledged securities are present, Net is 100% liquid cash.
+		availCash = availMargin
+	}
 	accountVal := availMargin.Add(metrics.TotalMTM)
 
 	marginParam := domain.MarginSyncParam{
