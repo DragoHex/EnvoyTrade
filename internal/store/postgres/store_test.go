@@ -1047,6 +1047,150 @@ func TestCreateFollowLink_DuplicateFollowerReturnsErrDuplicate(t *testing.T) {
 	}
 }
 
+func TestCreateFollowLinksBatch_Success(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+	f3 := seedAccount(t, s, "follower")
+
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+
+	links := []domain.FollowLink{
+		{FollowerID: f1, GroupID: detail.GroupID, CloneFactor: decimal.RequireFromString("1.5"), MaxQtyPerOrder: 50, Enabled: true},
+		{FollowerID: f2, GroupID: detail.GroupID, CloneFactor: decimal.RequireFromString("0.5"), MaxQtyPerOrder: 0, Enabled: true},
+		{FollowerID: f3, GroupID: detail.GroupID, CloneFactor: decimal.RequireFromString("2.0"), MaxQtyPerOrder: 100, Enabled: true},
+	}
+
+	if err := s.CreateFollowLinksBatch(ctx, detail.GroupID, links); err != nil {
+		t.Fatalf("CreateFollowLinksBatch: %v", err)
+	}
+
+	enabled, err := s.EnabledFollowLinks(ctx, master)
+	if err != nil {
+		t.Fatalf("EnabledFollowLinks: %v", err)
+	}
+	if len(enabled) != 3 {
+		t.Fatalf("expected 3 links, got %d", len(enabled))
+	}
+
+	byFollower := make(map[uuid.UUID]domain.FollowLink)
+	for _, l := range enabled {
+		byFollower[l.FollowerID] = l
+	}
+
+	if l, ok := byFollower[f1]; !ok || !l.CloneFactor.Equal(decimal.RequireFromString("1.5")) || l.MaxQtyPerOrder != 50 {
+		t.Errorf("f1 mismatch: %+v", l)
+	}
+	if l, ok := byFollower[f2]; !ok || !l.CloneFactor.Equal(decimal.RequireFromString("0.5")) || l.MaxQtyPerOrder != 0 {
+		t.Errorf("f2 mismatch: %+v", l)
+	}
+	if l, ok := byFollower[f3]; !ok || !l.CloneFactor.Equal(decimal.RequireFromString("2.0")) || l.MaxQtyPerOrder != 100 {
+		t.Errorf("f3 mismatch: %+v", l)
+	}
+}
+
+func TestCreateFollowLinksBatch_DuplicateInBatch_RollsBackAll(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+
+	// Passing f1 twice in the same batch
+	links := []domain.FollowLink{
+		{FollowerID: f1, GroupID: detail.GroupID, CloneFactor: decimal.NewFromFloat(1.0)},
+		{FollowerID: f2, GroupID: detail.GroupID, CloneFactor: decimal.NewFromFloat(1.0)},
+		{FollowerID: f1, GroupID: detail.GroupID, CloneFactor: decimal.NewFromFloat(2.0)},
+	}
+
+	err = s.CreateFollowLinksBatch(ctx, detail.GroupID, links)
+	if !errors.Is(err, domain.ErrDuplicate) {
+		t.Fatalf("expected ErrDuplicate, got %v", err)
+	}
+
+	// Ensure atomic rollback: f1 and f2 should not be attached
+	enabled, err := s.EnabledFollowLinks(ctx, master)
+	if err != nil {
+		t.Fatalf("EnabledFollowLinks: %v", err)
+	}
+	if len(enabled) != 0 {
+		t.Fatalf("expected 0 links after rollback, got %d", len(enabled))
+	}
+}
+
+func TestCreateFollowLinksBatch_AlreadyAttached_RollsBackAll(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+
+	detail, err := s.GroupDetail(ctx, master)
+	if err != nil {
+		t.Fatalf("GroupDetail: %v", err)
+	}
+
+	// f1 is already attached
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		FollowerID: f1, GroupID: detail.GroupID, CloneFactor: decimal.NewFromFloat(1.0), Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+
+	// Batch includes unattached f2 and already-attached f1
+	links := []domain.FollowLink{
+		{FollowerID: f2, GroupID: detail.GroupID, CloneFactor: decimal.NewFromFloat(1.0), Enabled: true},
+		{FollowerID: f1, GroupID: detail.GroupID, CloneFactor: decimal.NewFromFloat(1.0), Enabled: true},
+	}
+
+	err = s.CreateFollowLinksBatch(ctx, detail.GroupID, links)
+	if !errors.Is(err, domain.ErrDuplicate) {
+		t.Fatalf("expected ErrDuplicate, got %v", err)
+	}
+
+	// Ensure f2 was NOT attached
+	enabled, err := s.EnabledFollowLinks(ctx, master)
+	if err != nil {
+		t.Fatalf("EnabledFollowLinks: %v", err)
+	}
+	if len(enabled) != 1 || enabled[0].FollowerID != f1 {
+		t.Fatalf("expected only f1 attached, got %+v", enabled)
+	}
+}
+
+func TestCreateFollowLinksBatch_EdgeCases(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Empty links slice
+	if err := s.CreateFollowLinksBatch(ctx, uuid.New(), nil); err != nil {
+		t.Errorf("empty batch: expected nil, got %v", err)
+	}
+
+	// Nil groupID
+	if err := s.CreateFollowLinksBatch(ctx, uuid.Nil, []domain.FollowLink{{FollowerID: uuid.New(), CloneFactor: decimal.NewFromFloat(1.0)}}); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("nil groupID: expected ErrNotFound, got %v", err)
+	}
+
+	// Non-existent group
+	fakeGroup := uuid.New()
+	follower := seedAccount(t, s, "follower")
+	err := s.CreateFollowLinksBatch(ctx, fakeGroup, []domain.FollowLink{{FollowerID: follower, CloneFactor: decimal.NewFromFloat(1.0)}})
+	if !errors.Is(err, domain.ErrConflict) && !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("fake group: expected conflict/not found, got %v", err)
+	}
+}
+
 func TestUpdateFollowLinkTerms_UpdatesFields(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -1853,5 +1997,306 @@ func TestStore_Instruments_AllowsMultipleTokensForSameSymbol(t *testing.T) {
 		t.Errorf("lot size = %d, want 20", lot)
 	}
 }
+
+func TestDeleteGroup_ReleasingAccounts_Default(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     f1,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink f1: %v", err)
+	}
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     f2,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink f2: %v", err)
+	}
+
+	deletedIDs, err := s.DeleteGroup(ctx, master, false)
+	if err != nil {
+		t.Fatalf("DeleteGroup default failed: %v", err)
+	}
+	if len(deletedIDs) != 0 {
+		t.Errorf("deletedIDs = %v, want empty on default release", deletedIDs)
+	}
+
+	// Verify group is gone
+	_, err = s.GroupDetail(ctx, master)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GroupDetail err = %v, want ErrNotFound", err)
+	}
+
+	// Verify master account is still active and exists
+	accs, err := s.Accounts(ctx, []uuid.UUID{master})
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("Accounts master: %v, len = %d", err, len(accs))
+	}
+	if !accs[0].Active {
+		t.Errorf("master account should still be active")
+	}
+
+	// Verify follower accounts are still active and detached (MasterID is nil)
+	fAccs, err := s.Accounts(ctx, []uuid.UUID{f1, f2})
+	if err != nil || len(fAccs) != 2 {
+		t.Fatalf("Accounts followers: %v, len = %d", err, len(fAccs))
+	}
+	for _, f := range fAccs {
+		if !f.Active {
+			t.Errorf("follower %v should still be active", f.ID)
+		}
+		if f.MasterID != nil {
+			t.Errorf("follower %v MasterID = %v, want nil", f.ID, f.MasterID)
+		}
+	}
+}
+
+func TestDeleteGroup_WithContainedAccounts_True(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     f1,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink f1: %v", err)
+	}
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     f2,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink f2: %v", err)
+	}
+
+	deletedIDs, err := s.DeleteGroup(ctx, master, true)
+	if err != nil {
+		t.Fatalf("DeleteGroup with delete_accounts=true failed: %v", err)
+	}
+	if len(deletedIDs) != 3 {
+		t.Fatalf("deletedIDs count = %d, want 3; got %v", len(deletedIDs), deletedIDs)
+	}
+
+	// Verify group is gone
+	_, err = s.GroupDetail(ctx, master)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GroupDetail err = %v, want ErrNotFound", err)
+	}
+
+	// Verify all accounts are soft-deleted (Accounts query filters deleted_at IS NULL)
+	accs, err := s.Accounts(ctx, []uuid.UUID{master, f1, f2})
+	if err != nil {
+		t.Fatalf("Accounts query failed: %v", err)
+	}
+	if len(accs) != 0 {
+		t.Errorf("Accounts returned %d rows, want 0 after soft delete", len(accs))
+	}
+}
+
+func TestDeleteGroup_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.DeleteGroup(ctx, uuid.New(), false)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("DeleteGroup non-existent: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSwitchAccountRole_FollowerToMaster(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	master := seedAccount(t, s, "master")
+	follower := seedAccount(t, s, "follower")
+
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     follower,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink: %v", err)
+	}
+
+	res, err := s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
+		AccountID:  follower,
+		TargetRole: "master",
+		ReleaseIP:  false,
+	})
+	if err != nil {
+		t.Fatalf("SwitchAccountRole failed: %v", err)
+	}
+	if res.PreviousRole != "follower" || res.NewRole != "master" {
+		t.Errorf("res = %+v, want follower -> master", res)
+	}
+
+	// Verify account role in DB
+	role, err := s.AccountRole(ctx, follower)
+	if err != nil || role != "master" {
+		t.Errorf("AccountRole = %q, err = %v, want master", role, err)
+	}
+
+	// Verify follow_link is detached
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if accs[0].MasterID != nil {
+		t.Errorf("follower MasterID = %v, want nil", accs[0].MasterID)
+	}
+	if accs[0].IPAddress == "" {
+		t.Errorf("IPAddress should be preserved when ReleaseIP=false")
+	}
+}
+
+func TestSwitchAccountRole_FollowerToMaster_ReleaseIP(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	follower := seedAccount(t, s, "follower")
+
+	res, err := s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
+		AccountID:  follower,
+		TargetRole: "master",
+		ReleaseIP:  true,
+	})
+	if err != nil {
+		t.Fatalf("SwitchAccountRole failed: %v", err)
+	}
+	if res.NewIP != "" {
+		t.Errorf("res.NewIP = %q, want empty", res.NewIP)
+	}
+
+	accs, err := s.Accounts(ctx, []uuid.UUID{follower})
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if accs[0].IPAddress != "" {
+		t.Errorf("IPAddress = %q, want empty when ReleaseIP=true", accs[0].IPAddress)
+	}
+}
+
+func TestSwitchAccountRole_MasterToFollower_ReleasesGroupAndFollowers(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	master := seedAccount(t, s, "master")
+	f1 := seedAccount(t, s, "follower")
+	f2 := seedAccount(t, s, "follower")
+
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     f1,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink f1: %v", err)
+	}
+	if err := s.CreateFollowLink(ctx, domain.FollowLink{
+		MasterID:       master,
+		FollowerID:     f2,
+		CloneFactor:    decimal.NewFromInt(1),
+		MaxQtyPerOrder: 10,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("CreateFollowLink f2: %v", err)
+	}
+
+	newFollowerIP := "192.168.99.10"
+	res, err := s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
+		AccountID:  master,
+		TargetRole: "follower",
+		IPAddress:  newFollowerIP,
+	})
+	if err != nil {
+		t.Fatalf("SwitchAccountRole master to follower failed: %v", err)
+	}
+	if res.NewRole != "follower" || res.NewIP != newFollowerIP {
+		t.Errorf("res = %+v, want follower with IP %s", res, newFollowerIP)
+	}
+
+	// Verify group is gone
+	_, err = s.GroupDetail(ctx, master)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GroupDetail err = %v, want ErrNotFound", err)
+	}
+
+	// Verify followers f1 and f2 are still active and detached (not deleted)
+	fAccs, err := s.Accounts(ctx, []uuid.UUID{f1, f2})
+	if err != nil || len(fAccs) != 2 {
+		t.Fatalf("Accounts followers count = %d, err = %v", len(fAccs), err)
+	}
+	for _, f := range fAccs {
+		if !f.Active {
+			t.Errorf("follower %v should still be active", f.ID)
+		}
+		if f.MasterID != nil {
+			t.Errorf("follower %v MasterID = %v, want nil", f.ID, f.MasterID)
+		}
+	}
+
+	// Verify former master is now follower with new IP
+	mAcc, err := s.Accounts(ctx, []uuid.UUID{master})
+	if err != nil || len(mAcc) != 1 {
+		t.Fatalf("Accounts former master: %v", err)
+	}
+	if mAcc[0].Role != "follower" {
+		t.Errorf("Role = %q, want follower", mAcc[0].Role)
+	}
+	if mAcc[0].IPAddress != newFollowerIP {
+		t.Errorf("IPAddress = %q, want %q", mAcc[0].IPAddress, newFollowerIP)
+	}
+}
+
+func TestSwitchAccountRole_ConflictAndNotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	master := seedAccount(t, s, "master")
+
+	// Same role returns ErrConflict
+	_, err := s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
+		AccountID:  master,
+		TargetRole: "master",
+	})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Errorf("SwitchAccountRole same role: err = %v, want ErrConflict", err)
+	}
+
+	// Non-existent account returns ErrNotFound
+	_, err = s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
+		AccountID:  uuid.New(),
+		TargetRole: "follower",
+		IPAddress:  "192.168.1.1",
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("SwitchAccountRole unknown id: err = %v, want ErrNotFound", err)
+	}
+}
+
 
 

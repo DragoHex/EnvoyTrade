@@ -8,6 +8,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 -- name: AccountByBrokerUserID :one
 SELECT id, role, api_secret FROM accounts WHERE broker_user_id = $1 AND deleted_at IS NULL;
 
+-- name: SetAccountRoleAndIP :execrows
+UPDATE accounts
+SET role = $2::account_role,
+    ip_address = CASE WHEN sqlc.arg('set_ip')::boolean THEN sqlc.arg('ip_address')::text ELSE ip_address END,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;
+
 -- name: SetAccountActive :execrows
 UPDATE accounts SET active = $2, updated_at = now() WHERE id = $1;
 

@@ -2,6 +2,15 @@
 INSERT INTO follow_links (follower_id, group_id, clone_factor, max_qty_per_order, enabled)
 VALUES ($1, $2, $3, $4, $5);
 
+-- name: InsertFollowLinksBatch :exec
+INSERT INTO follow_links (follower_id, group_id, clone_factor, max_qty_per_order, enabled)
+SELECT
+    unnest(@follower_ids::uuid[]),
+    @group_id,
+    unnest(@clone_factors::numeric[]),
+    NULLIF(unnest(@max_qtys::int[]), 0),
+    true;
+
 -- name: EnabledFollowLinks :many
 SELECT f.follower_id, g.id AS group_id, g.master_id, f.clone_factor, COALESCE(f.max_qty_per_order, 0) AS max_qty_per_order, f.enabled, f.effective_from, a.status, a.auth_status
 FROM follow_links f

@@ -495,6 +495,34 @@ func (q *Queries) SetAccountName(ctx context.Context, arg SetAccountNameParams) 
 	return result.RowsAffected(), nil
 }
 
+const setAccountRoleAndIP = `-- name: SetAccountRoleAndIP :execrows
+UPDATE accounts
+SET role = $2::account_role,
+    ip_address = CASE WHEN $3::boolean THEN $4::text ELSE ip_address END,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type SetAccountRoleAndIPParams struct {
+	ID        uuid.UUID
+	Column2   string
+	SetIp     bool
+	IpAddress string
+}
+
+func (q *Queries) SetAccountRoleAndIP(ctx context.Context, arg SetAccountRoleAndIPParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountRoleAndIP,
+		arg.ID,
+		arg.Column2,
+		arg.SetIp,
+		arg.IpAddress,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAccountStatus = `-- name: SetAccountStatus :execrows
 UPDATE accounts SET status = $2, updated_at = now() WHERE id = $1
 `

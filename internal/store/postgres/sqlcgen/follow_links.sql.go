@@ -110,6 +110,33 @@ func (q *Queries) GroupIDForFollower(ctx context.Context, followerID uuid.UUID) 
 	return group_id, err
 }
 
+const insertFollowLinksBatch = `-- name: InsertFollowLinksBatch :exec
+INSERT INTO follow_links (follower_id, group_id, clone_factor, max_qty_per_order, enabled)
+SELECT
+    unnest($1::uuid[]),
+    $2,
+    unnest($3::numeric[]),
+    NULLIF(unnest($4::int[]), 0),
+    true
+`
+
+type InsertFollowLinksBatchParams struct {
+	FollowerIds  []uuid.UUID
+	GroupID      uuid.UUID
+	CloneFactors []decimal.Decimal
+	MaxQtys      []int32
+}
+
+func (q *Queries) InsertFollowLinksBatch(ctx context.Context, arg InsertFollowLinksBatchParams) error {
+	_, err := q.db.Exec(ctx, insertFollowLinksBatch,
+		arg.FollowerIds,
+		arg.GroupID,
+		arg.CloneFactors,
+		arg.MaxQtys,
+	)
+	return err
+}
+
 const masterIDForFollower = `-- name: MasterIDForFollower :one
 SELECT g.master_id
 FROM follow_links f

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"envoytrade/internal/domain"
 	"envoytrade/internal/store/postgres/sqlcgen"
@@ -355,19 +356,59 @@ func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name *string, mas
 	return nil
 }
 
-// DeleteGroup removes a group. Returns domain.ErrConflict if followers are attached.
-func (s *Store) DeleteGroup(ctx context.Context, id uuid.UUID) error {
-	affected, err := s.queries.DeleteGroup(ctx, id)
-	if isForeignKeyViolation(err) {
-		return domain.ErrConflict
+// DeleteGroup removes a group, releasing followers by default, or optionally soft-deleting
+// all contained accounts (master and followers) in a single atomic database batch.
+// Returns the list of deleted account IDs (if deleteContainedAccounts is true) or nil.
+// Returns domain.ErrNotFound if the group does not exist.
+func (s *Store) DeleteGroup(ctx context.Context, id uuid.UUID, deleteContainedAccounts bool) ([]uuid.UUID, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+
+	row, err := qtx.GroupContainedAccountIDs(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("lookup group contained accounts: %w", err)
 	}
-	if affected == 0 {
-		return domain.ErrNotFound
+
+	if !deleteContainedAccounts {
+		affected, err := qtx.DeleteGroupReleasingAccounts(ctx, row.ID)
+		if err != nil {
+			return nil, fmt.Errorf("delete group releasing accounts: %w", err)
+		}
+		if affected == 0 {
+			return nil, domain.ErrNotFound
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit tx: %w", err)
+		}
+		return nil, nil
 	}
-	return nil
+
+	var allAccountIDs []uuid.UUID
+	if row.MasterID != uuid.Nil {
+		allAccountIDs = append(allAccountIDs, row.MasterID)
+	}
+	allAccountIDs = append(allAccountIDs, row.FollowerIds...)
+
+	_, err = qtx.DeleteGroupAndContainedAccounts(ctx, sqlcgen.DeleteGroupAndContainedAccountsParams{
+		GroupID: row.ID,
+		Column2: allAccountIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("delete group and contained accounts: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return allAccountIDs, nil
 }
 
 // GroupIDForFollower resolves the group a follower is attached to.

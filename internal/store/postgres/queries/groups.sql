@@ -49,6 +49,42 @@ UPDATE groups SET master_id = $2, updated_at = now() WHERE id = $1;
 -- name: DeleteGroup :execrows
 DELETE FROM groups WHERE id = $1;
 
+-- name: GroupContainedAccountIDs :one
+SELECT g.id, g.master_id, ARRAY_REMOVE(ARRAY_AGG(f.follower_id), NULL)::uuid[] AS follower_ids
+FROM groups g
+LEFT JOIN follow_links f ON f.group_id = g.id
+WHERE g.id = $1 OR g.master_id = $1
+GROUP BY g.id, g.master_id;
+
+-- name: DeleteGroupReleasingAccounts :execrows
+WITH del_links AS (
+    DELETE FROM follow_links WHERE group_id = $1
+)
+DELETE FROM groups WHERE id = $1;
+
+-- name: DeleteGroupAndContainedAccounts :execrows
+WITH del_links AS (
+    DELETE FROM follow_links WHERE group_id = $1
+),
+del_positions AS (
+    DELETE FROM account_positions WHERE account_id = ANY($2::uuid[])
+),
+del_holdings AS (
+    DELETE FROM account_holdings WHERE account_id = ANY($2::uuid[])
+),
+del_margins AS (
+    DELETE FROM account_margins WHERE account_id = ANY($2::uuid[])
+),
+del_group AS (
+    DELETE FROM groups WHERE id = $1
+)
+UPDATE accounts
+SET deleted_at = now(),
+    ip_address = '',
+    active = false,
+    updated_at = now()
+WHERE id = ANY($2::uuid[]) AND deleted_at IS NULL;
+
 -- name: DeleteGroupByMasterID :execrows
 DELETE FROM groups WHERE master_id = $1;
 
