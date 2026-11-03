@@ -56,6 +56,9 @@ type stubStore struct {
 	createFollowLinkErr  error
 	createFollowLinkArgs []domain.FollowLink
 
+	createFollowLinksBatchErr  error
+	createFollowLinksBatchArgs [][]domain.FollowLink
+
 	updateFollowLinkTermsErr  error
 	updateFollowLinkTermsArgs []updateFollowLinkTermsCall
 
@@ -82,6 +85,14 @@ type stubStore struct {
 
 	deleteFollowLinkErr  error
 	deleteFollowLinkArgs []uuid.UUID
+
+	deleteGroupErr        error
+	deleteGroupDeletedIDs []uuid.UUID
+	deleteGroupCalls      []deleteGroupCall
+
+	switchRoleErr    error
+	switchRoleCalls  []domain.SwitchAccountRoleParams
+	switchRoleResult *domain.SwitchAccountRoleResult
 
 	ordersDetail      domain.AccountOrdersDetail
 	ordersDetailErr   error
@@ -232,8 +243,35 @@ func (s *stubStore) UpdateGroup(_ context.Context, id uuid.UUID, name *string, m
 	return s.updateGroupErr
 }
 
-func (s *stubStore) DeleteGroup(_ context.Context, id uuid.UUID) error {
-	return nil
+type deleteGroupCall struct {
+	id             uuid.UUID
+	deleteAccounts bool
+}
+
+func (s *stubStore) DeleteGroup(_ context.Context, id uuid.UUID, deleteContainedAccounts bool) ([]uuid.UUID, error) {
+	s.deleteGroupCalls = append(s.deleteGroupCalls, deleteGroupCall{id: id, deleteAccounts: deleteContainedAccounts})
+	if s.deleteGroupErr != nil {
+		return nil, s.deleteGroupErr
+	}
+	return s.deleteGroupDeletedIDs, nil
+}
+
+func (s *stubStore) SwitchAccountRole(_ context.Context, params domain.SwitchAccountRoleParams) (domain.SwitchAccountRoleResult, error) {
+	s.switchRoleCalls = append(s.switchRoleCalls, params)
+	if s.switchRoleErr != nil {
+		return domain.SwitchAccountRoleResult{}, s.switchRoleErr
+	}
+	if s.switchRoleResult != nil {
+		return *s.switchRoleResult, nil
+	}
+	return domain.SwitchAccountRoleResult{
+		PreviousRole: "follower",
+		NewRole:      params.TargetRole,
+		Active:       true,
+		AuthStatus:   "authenticated",
+		HadIP:        "192.168.1.100",
+		NewIP:        params.IPAddress,
+	}, nil
 }
 
 func (s *stubStore) SetFollowLinkEnabled(_ context.Context, followerID uuid.UUID, enabled bool) error {
@@ -334,6 +372,20 @@ func (s *stubStore) SetAccountName(_ context.Context, id uuid.UUID, name string)
 func (s *stubStore) CreateFollowLink(_ context.Context, link domain.FollowLink) error {
 	s.createFollowLinkArgs = append(s.createFollowLinkArgs, link)
 	return s.createFollowLinkErr
+}
+
+func (s *stubStore) CreateFollowLinksBatch(_ context.Context, groupID uuid.UUID, links []domain.FollowLink) error {
+	s.createFollowLinksBatchArgs = append(s.createFollowLinksBatchArgs, links)
+	if s.createFollowLinksBatchErr != nil {
+		return s.createFollowLinksBatchErr
+	}
+	if s.createFollowLinkErr != nil {
+		return s.createFollowLinkErr
+	}
+	for _, l := range links {
+		s.createFollowLinkArgs = append(s.createFollowLinkArgs, l)
+	}
+	return nil
 }
 
 func (s *stubStore) UpdateFollowLinkTerms(_ context.Context, followerID uuid.UUID, cloneFactor decimal.Decimal, maxQtyPerOrder *int) error {
@@ -610,4 +662,19 @@ func (s *stubFollowerRegistrar) RegisterFollower(_ context.Context, followerID u
 
 func (s *stubFollowerRegistrar) UnregisterFollower(followerID uuid.UUID) {
 	s.unregistered = append(s.unregistered, followerID)
+}
+
+type stubTickerManager struct {
+	started []uuid.UUID
+	stopped []uuid.UUID
+}
+
+func (s *stubTickerManager) StartMaster(_ context.Context, masterID uuid.UUID) error {
+	s.started = append(s.started, masterID)
+	return nil
+}
+
+func (s *stubTickerManager) StopMaster(masterID uuid.UUID) error {
+	s.stopped = append(s.stopped, masterID)
+	return nil
 }

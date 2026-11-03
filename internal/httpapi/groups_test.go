@@ -252,6 +252,182 @@ func TestPostGroupFollower_AlreadyAttached_Returns409(t *testing.T) {
 	}
 }
 
+func TestPostGroupFollowers_BatchArraySuccess(t *testing.T) {
+	master := uuid.New()
+	f1 := uuid.New()
+	f2 := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{
+			master: "master",
+			f1:     "follower",
+			f2:     "follower",
+		},
+	}
+	reg := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(reg))
+
+	body, _ := json.Marshal([]map[string]any{
+		{"accountId": f1.String(), "cloneFactor": 1.5, "maxQtyPerOrder": 25},
+		{"accountId": f2.String(), "cloneFactor": "0.75"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createFollowLinksBatchArgs) != 1 {
+		t.Fatalf("CreateFollowLinksBatch calls = %d, want 1", len(store.createFollowLinksBatchArgs))
+	}
+	batch := store.createFollowLinksBatchArgs[0]
+	if len(batch) != 2 {
+		t.Fatalf("batch length = %d, want 2", len(batch))
+	}
+	if batch[0].FollowerID != f1 || !batch[0].CloneFactor.Equal(decimal.RequireFromString("1.5")) || batch[0].MaxQtyPerOrder != 25 {
+		t.Errorf("batch[0] unexpected: %+v", batch[0])
+	}
+	if batch[1].FollowerID != f2 || !batch[1].CloneFactor.Equal(decimal.RequireFromString("0.75")) || batch[1].MaxQtyPerOrder != 0 {
+		t.Errorf("batch[1] unexpected: %+v", batch[1])
+	}
+	// Verify registrar was invoked for both followers
+	if len(reg.registered) != 2 {
+		t.Fatalf("registered followers count = %d, want 2", len(reg.registered))
+	}
+	if reg.registered[0] != f1 || reg.registered[1] != f2 {
+		t.Errorf("registered order mismatch: %+v", reg.registered)
+	}
+}
+
+func TestPostGroupFollowers_BatchObjectSuccess(t *testing.T) {
+	master := uuid.New()
+	f1 := uuid.New()
+	f2 := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{
+			master: "master",
+			f1:     "follower",
+			f2:     "follower",
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal(map[string]any{
+		"followers": []map[string]any{
+			{"accountId": f1.String(), "cloneFactor": "1.0"},
+			{"accountId": f2.String(), "cloneFactor": "2.0"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.createFollowLinksBatchArgs) != 1 || len(store.createFollowLinksBatchArgs[0]) != 2 {
+		t.Fatalf("expected 1 batch call with 2 followers, got %+v", store.createFollowLinksBatchArgs)
+	}
+}
+
+func TestPostGroupFollowers_BatchValidationErrors(t *testing.T) {
+	master := uuid.New()
+	f1 := uuid.New()
+	f2 := uuid.New()
+	nonFollower := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{
+			master:      "master",
+			f1:          "follower",
+			f2:          "follower",
+			nonFollower: "master",
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	tests := []struct {
+		name       string
+		body       any
+		wantStatus int
+	}{
+		{
+			name: "duplicate in batch",
+			body: []map[string]any{
+				{"accountId": f1.String(), "cloneFactor": "1.0"},
+				{"accountId": f1.String(), "cloneFactor": "1.0"},
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid cloneFactor zero",
+			body: []map[string]any{
+				{"accountId": f1.String(), "cloneFactor": "0"},
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid cloneFactor negative",
+			body: []map[string]any{
+				{"accountId": f1.String(), "cloneFactor": "-1.5"},
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "non-follower account",
+			body: []map[string]any{
+				{"accountId": f1.String(), "cloneFactor": "1.0"},
+				{"accountId": nonFollower.String(), "cloneFactor": "1.0"},
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "empty batch",
+			body:       map[string]any{"followers": []any{}},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _ := json.Marshal(tt.body)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", w.Code, tt.wantStatus, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestPostGroupFollowers_BatchConflict_Returns409(t *testing.T) {
+	master := uuid.New()
+	f1 := uuid.New()
+	f2 := uuid.New()
+	store := &stubStore{
+		accountRoles: map[uuid.UUID]string{
+			master: "master",
+			f1:     "follower",
+			f2:     "follower",
+		},
+		createFollowLinksBatchErr: domain.ErrDuplicate,
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	body, _ := json.Marshal([]map[string]any{
+		{"accountId": f1.String(), "cloneFactor": "1.0"},
+		{"accountId": f2.String(), "cloneFactor": "1.0"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+master.String()+"/followers", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestPostGroup_Succeeds(t *testing.T) {
 	master := uuid.New()
 	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
@@ -358,5 +534,102 @@ func TestPatchGroup_SwapMaster_NewMasterAlreadyAssigned_Returns409(t *testing.T)
 	_ = json.Unmarshal(w.Body.Bytes(), &got)
 	if got["error"] != "new master account is already assigned to another group" {
 		t.Errorf("error = %q, want %q", got["error"], "new master account is already assigned to another group")
+	}
+}
+
+func TestDeleteGroup_Default_ReleasesAccounts(t *testing.T) {
+	groupID := uuid.New()
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/"+groupID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.deleteGroupCalls) != 1 {
+		t.Fatalf("deleteGroupCalls = %d, want 1", len(store.deleteGroupCalls))
+	}
+	if store.deleteGroupCalls[0].id != groupID {
+		t.Errorf("deleteGroupCalls[0].id = %v, want %v", store.deleteGroupCalls[0].id, groupID)
+	}
+	if store.deleteGroupCalls[0].deleteAccounts != false {
+		t.Errorf("deleteGroupCalls[0].deleteAccounts = %v, want false", store.deleteGroupCalls[0].deleteAccounts)
+	}
+}
+
+func TestDeleteGroup_WithContainedAccounts_True(t *testing.T) {
+	groupID := uuid.New()
+	acc1 := uuid.New()
+	acc2 := uuid.New()
+	store := &stubStore{
+		deleteGroupDeletedIDs: []uuid.UUID{acc1, acc2},
+	}
+	brokerEvicter := &stubBrokerEvicter{}
+	tickerMgr := &stubTickerManager{}
+	followerReg := &stubFollowerRegistrar{}
+
+	r := httpapi.NewRouter(store, &stubActionEngine{},
+		httpapi.WithBrokerEvicter(brokerEvicter),
+		httpapi.WithTickerManager(tickerMgr),
+		httpapi.WithFollowerRegistrar(followerReg),
+	)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/"+groupID.String()+"?delete_accounts=true", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.deleteGroupCalls) != 1 {
+		t.Fatalf("deleteGroupCalls = %d, want 1", len(store.deleteGroupCalls))
+	}
+	if store.deleteGroupCalls[0].id != groupID {
+		t.Errorf("deleteGroupCalls[0].id = %v, want %v", store.deleteGroupCalls[0].id, groupID)
+	}
+	if store.deleteGroupCalls[0].deleteAccounts != true {
+		t.Errorf("deleteGroupCalls[0].deleteAccounts = %v, want true", store.deleteGroupCalls[0].deleteAccounts)
+	}
+	// Check broker eviction, ticker stopping, and worker unregistration
+	if len(brokerEvicter.evicted) != 2 {
+		t.Errorf("brokerEvicter.evicted = %v, want 2 accounts", brokerEvicter.evicted)
+	}
+	if len(tickerMgr.stopped) != 2 {
+		t.Errorf("tickerMgr.stopped = %v, want 2 accounts", tickerMgr.stopped)
+	}
+	if len(followerReg.unregistered) != 2 {
+		t.Errorf("followerReg.unregistered = %v, want 2 accounts", followerReg.unregistered)
+	}
+}
+
+func TestDeleteGroup_NotFound_Returns404(t *testing.T) {
+	groupID := uuid.New()
+	store := &stubStore{
+		deleteGroupErr: domain.ErrNotFound,
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/"+groupID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteGroup_InvalidUUID_Returns400(t *testing.T) {
+	store := &stubStore{}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/not-a-valid-uuid", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 }

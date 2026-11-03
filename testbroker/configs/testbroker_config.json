@@ -81,6 +81,24 @@
       "api_secret": "secret_newfollow01",
       "access_token": "token_newfollow01",
       "role": "follower"
+    },
+    "BATCHF01": {
+      "api_key": "key_batchf01",
+      "api_secret": "secret_batchf01",
+      "access_token": "token_batchf01",
+      "role": "follower"
+    },
+    "BATCHF02": {
+      "api_key": "key_batchf02",
+      "api_secret": "secret_batchf02",
+      "access_token": "token_batchf02",
+      "role": "follower"
+    },
+    "BATCHF03": {
+      "api_key": "key_batchf03",
+      "api_secret": "secret_batchf03",
+      "access_token": "token_batchf03",
+      "role": "follower"
     }
   },
   "instruments": [

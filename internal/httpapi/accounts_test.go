@@ -1820,5 +1820,202 @@ func TestAccounts_Dhan_JWTValidation(t *testing.T) {
 	}
 }
 
+func TestSwitchAccountRole_FollowerToMaster_Succeeds(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{
+		accounts: []domain.Account{
+			{ID: accID, Role: "follower", Broker: "kite", IPAddress: "192.168.1.100", Active: true, AuthStatus: "authenticated"},
+		},
+	}
+	registrar := &stubFollowerRegistrar{}
+	tickerMgr := &stubTickerManager{}
+	brokerEvicter := &stubBrokerEvicter{}
+
+	r := httpapi.NewRouter(store, &stubActionEngine{},
+		httpapi.WithFollowerRegistrar(registrar),
+		httpapi.WithTickerManager(tickerMgr),
+		httpapi.WithBrokerEvicter(brokerEvicter),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"targetRole": "master",
+		"releaseIp":  false,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(store.switchRoleCalls) != 1 {
+		t.Fatalf("switchRoleCalls = %d, want 1", len(store.switchRoleCalls))
+	}
+	call := store.switchRoleCalls[0]
+	if call.TargetRole != "master" || call.ReleaseIP != false {
+		t.Errorf("call = %+v", call)
+	}
+
+	// Verify unregister follower and start master
+	if len(registrar.unregistered) != 1 || registrar.unregistered[0] != accID {
+		t.Errorf("registrar.unregistered = %v, want [%v]", registrar.unregistered, accID)
+	}
+	if len(tickerMgr.started) != 1 || tickerMgr.started[0] != accID {
+		t.Errorf("tickerMgr.started = %v, want [%v]", tickerMgr.started, accID)
+	}
+	if len(brokerEvicter.evicted) != 0 {
+		t.Errorf("brokerEvicter.evicted = %v, want 0 when releaseIp=false", brokerEvicter.evicted)
+	}
+}
+
+func TestSwitchAccountRole_FollowerToMaster_ReleasesIP_EvictsBroker(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{
+		accounts: []domain.Account{
+			{ID: accID, Role: "follower", Broker: "kite", IPAddress: "192.168.1.100", Active: true, AuthStatus: "authenticated"},
+		},
+	}
+	brokerEvicter := &stubBrokerEvicter{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithBrokerEvicter(brokerEvicter))
+
+	body, _ := json.Marshal(map[string]any{
+		"targetRole": "master",
+		"releaseIp":  true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(brokerEvicter.evicted) != 1 || brokerEvicter.evicted[0] != accID {
+		t.Errorf("brokerEvicter.evicted = %v, want [%v]", brokerEvicter.evicted, accID)
+	}
+}
+
+func TestSwitchAccountRole_MasterToFollower_Succeeds(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{
+		accounts: []domain.Account{
+			{ID: accID, Role: "master", Broker: "kite", IPAddress: "192.168.1.100", Active: true, AuthStatus: "authenticated"},
+		},
+		proxyIPs: []domain.ProxyIP{
+			{IPAddress: "192.168.1.100", WhitelistedBrokers: "kite"},
+		},
+		switchRoleResult: &domain.SwitchAccountRoleResult{
+			PreviousRole: "master",
+			NewRole:      "follower",
+			Active:       true,
+			HadIP:        "192.168.1.100",
+			NewIP:        "192.168.1.100",
+		},
+	}
+	registrar := &stubFollowerRegistrar{}
+	tickerMgr := &stubTickerManager{}
+	brokerEvicter := &stubBrokerEvicter{}
+
+	r := httpapi.NewRouter(store, &stubActionEngine{},
+		httpapi.WithFollowerRegistrar(registrar),
+		httpapi.WithTickerManager(tickerMgr),
+		httpapi.WithBrokerEvicter(brokerEvicter),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"targetRole": "follower",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify ticker stopped and follower registered
+	if len(tickerMgr.stopped) != 1 || tickerMgr.stopped[0] != accID {
+		t.Errorf("tickerMgr.stopped = %v, want [%v]", tickerMgr.stopped, accID)
+	}
+	if len(registrar.registered) != 1 || registrar.registered[0] != accID {
+		t.Errorf("registrar.registered = %v, want [%v]", registrar.registered, accID)
+	}
+}
+
+func TestSwitchAccountRole_ValidationErrors(t *testing.T) {
+	accID := uuid.New()
+	store := &stubStore{
+		accounts: []domain.Account{
+			{ID: accID, Role: "master", Broker: "kite", IPAddress: ""},
+		},
+	}
+	r := httpapi.NewRouter(store, &stubActionEngine{})
+
+	// 1. Invalid UUID
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/bad-uuid/switch-role", bytes.NewReader([]byte("{}")))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("invalid uuid: status = %d, want 400", w.Code)
+	}
+
+	// 2. Malformed JSON
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader([]byte("not-json")))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("malformed JSON: status = %d, want 400", w.Code)
+	}
+
+	// 3. Invalid role
+	body, _ := json.Marshal(map[string]any{"targetRole": "admin"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("invalid role: status = %d, want 400", w.Code)
+	}
+
+	// 4. Missing IP when switching master without IP to follower
+	body, _ = json.Marshal(map[string]any{"targetRole": "follower"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing IP: status = %d, want 400", w.Code)
+	}
+
+	// 5. IP not in proxy pool
+	store.proxyIPByAddrErr = domain.ErrNotFound
+	body, _ = json.Marshal(map[string]any{"targetRole": "follower", "ip": "192.168.10.10"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("unregistered IP: status = %d, want 400", w.Code)
+	}
+	store.proxyIPByAddrErr = nil
+
+	// 6. IP whitelisted for different broker
+	store.proxyIPs = []domain.ProxyIP{
+		{IPAddress: "192.168.10.10", WhitelistedBrokers: "dhan"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("broker mismatch IP: status = %d, want 400", w.Code)
+	}
+
+	// 7. Not found
+	store.accounts = nil
+	body, _ = json.Marshal(map[string]any{"targetRole": "master"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("account not found: status = %d, want 404", w.Code)
+	}
+}
+
 
 

@@ -207,6 +207,7 @@ func NewRouter(store Store, actionEngine Engine, opts ...Option) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/accounts/{id}", h.patchAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}", h.deleteAccount)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}/group", h.deleteAccountGroup)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/switch-role", h.switchAccountRole)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/positions/square-off", h.postAccountSquareOff)
 	mux.HandleFunc("GET /api/v1/accounts/{id}/positions/rebalance/diff", h.getAccountRebalanceDiff)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/positions/rebalance", h.postAccountRebalance)
