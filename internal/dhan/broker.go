@@ -3,6 +3,7 @@ package dhan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -64,7 +65,13 @@ func translateError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, godhan.ErrBrokerUnavailable) || errors.Is(err, domain.ErrBrokerUnreachable) {
+		return fmt.Errorf("%w: %v", domain.ErrBrokerUnreachable, err)
+	}
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "network error") || strings.Contains(msg, "proxy") || strings.Contains(msg, "tunnel") {
+		return fmt.Errorf("%w: %v", domain.ErrBrokerUnreachable, err)
+	}
 	switch {
 	case strings.Contains(msg, "401") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "token expired") || strings.Contains(msg, "invalid token"):
 		return fmt.Errorf("%w: %v", domain.ErrAuthExpired, err)
