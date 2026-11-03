@@ -145,6 +145,55 @@ func TestParseCanonicalContract(t *testing.T) {
 			tradingsymbol: "INFY",
 			wantKey:       "BSE:INFY:EQ",
 		},
+		// Special Characters & Edge Cases (&, -, digits in underlying)
+		{
+			name:          "Kite/Kotak Monthly Option with & (M&M)",
+			exchange:      "NFO",
+			tradingsymbol: "M&M26NOV3000CE",
+			wantKey:       "NFO:M&M:2026-11:3000:CE",
+		},
+		{
+			name:          "Dhan Hyphenated Option with & (M&M)",
+			exchange:      "NFO",
+			tradingsymbol: "M&M-Nov2026-3000-CE",
+			wantKey:       "NFO:M&M:2026-11:3000:CE",
+		},
+		{
+			name:          "Kite Future with & (M&M)",
+			exchange:      "NFO",
+			tradingsymbol: "M&M26OCTFUT",
+			wantKey:       "NFO:M&M:2026-10:FUT",
+		},
+		{
+			name:          "Dhan Future with & (M&M)",
+			exchange:      "NFO",
+			tradingsymbol: "M&M-Nov2026-FUT",
+			wantKey:       "NFO:M&M:2026-11:FUT",
+		},
+		{
+			name:          "Kite/Kotak Option with & (M&MFIN)",
+			exchange:      "NFO",
+			tradingsymbol: "M&MFIN26NOV1000PE",
+			wantKey:       "NFO:M&MFIN:2026-11:1000:PE",
+		},
+		{
+			name:          "Index with Digits in Name (NIFTYNXT50)",
+			exchange:      "NFO",
+			tradingsymbol: "NIFTYNXT5026NOV12000CE",
+			wantKey:       "NFO:NIFTYNXT50:2026-11:12000:CE",
+		},
+		{
+			name:          "Cash Equity with Hyphen (BAJAJ-AUTO)",
+			exchange:      "NSE",
+			tradingsymbol: "BAJAJ-AUTO",
+			wantKey:       "NSE:BAJAJ-AUTO:EQ",
+		},
+		{
+			name:          "Cash Equity with & and -EQ (M&M-EQ)",
+			exchange:      "NSE",
+			tradingsymbol: "M&M-EQ",
+			wantKey:       "NSE:M&M:EQ",
+		},
 		// Invalid / Blank
 		{
 			name:          "Blank Symbol",

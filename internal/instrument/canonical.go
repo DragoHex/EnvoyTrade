@@ -13,26 +13,26 @@ import (
 )
 
 var (
-	// Dhan Hyphenated Option: CRUDEOIL-17Nov2026-5000-PE or NIFTY-Nov2026-24000-CE
-	reDhanOption = regexp.MustCompile(`^([A-Za-z0-9]+)-(\d{1,2})?([A-Za-z]{3})(\d{4})-(\d+(?:\.\d+)?)-(CE|PE)$`)
+	// Dhan Hyphenated Option: CRUDEOIL-17Nov2026-5000-PE, NIFTY-Nov2026-24000-CE, M&M-Nov2026-3000-CE
+	reDhanOption = regexp.MustCompile(`^([A-Za-z0-9&_-]+)-(\d{1,2})?([A-Za-z]{3})(\d{4})-(\d+(?:\.\d+)?)-(CE|PE)$`)
 
-	// Dhan Hyphenated Future: CRUDEOIL-21Sep2026-FUT or NIFTY-Nov2026-FUT
-	reDhanFuture = regexp.MustCompile(`^([A-Za-z0-9]+)-(\d{1,2})?([A-Za-z]{3})(\d{4})-FUT$`)
+	// Dhan Hyphenated Future: CRUDEOIL-21Sep2026-FUT, NIFTY-Nov2026-FUT, M&M-Nov2026-FUT
+	reDhanFuture = regexp.MustCompile(`^([A-Za-z0-9&_-]+)-(\d{1,2})?([A-Za-z]{3})(\d{4})-FUT$`)
 
 	// Kotak MCX Option with day: CRUDEOIL17NOV265000PE (DD: 01-31, YY: 20-39)
-	reKotakMCXOption = regexp.MustCompile(`^([A-Z]+)(0[1-9]|[12][0-9]|3[01])([A-Z]{3})(2[0-9]|3[0-9])(\d+(?:\.\d+)?)(CE|PE)$`)
+	reKotakMCXOption = regexp.MustCompile(`^([A-Z0-9&_-]+?)(0[1-9]|[12][0-9]|3[01])([A-Z]{3})(2[0-9]|3[0-9])(\d+(?:\.\d+)?)(CE|PE)$`)
 
-	// Kite / Kotak Monthly Option without day: NIFTY26NOV24000CE or CRUDEOIL26NOV5000PE (YY: 20-39)
-	reKiteMonthlyOption = regexp.MustCompile(`^([A-Z]+)(2[0-9]|3[0-9])([A-Z]{3})(\d+(?:\.\d+)?)(CE|PE)$`)
+	// Kite / Kotak Monthly Option without day: NIFTY26NOV24000CE, CRUDEOIL26NOV5000PE, M&M26NOV3000CE, NIFTYNXT5026NOV12000CE (YY: 20-39)
+	reKiteMonthlyOption = regexp.MustCompile(`^([A-Z0-9&_-]+?)(2[0-9]|3[0-9])([A-Z]{3})(\d+(?:\.\d+)?)(CE|PE)$`)
 
 	// Kotak MCX Future with day: CRUDEOIL21SEP26 or GOLDM05MAR27FUT (DD: 01-31, YY: 20-39)
-	reKotakMCXFuture = regexp.MustCompile(`^([A-Z]+)(0[1-9]|[12][0-9]|3[01])([A-Z]{3})(2[0-9]|3[0-9])(?:FUT)?$`)
+	reKotakMCXFuture = regexp.MustCompile(`^([A-Z0-9&_-]+?)(0[1-9]|[12][0-9]|3[01])([A-Z]{3})(2[0-9]|3[0-9])(?:FUT)?$`)
 
-	// NSE / BSE Weekly Option (Kite & Kotak): NIFTY26N0328350CE, SENSEX26D1772000PE (YY: 20-39, Month: 1-9/O/N/D, DD: 01-31)
-	reNSEWeeklyOption = regexp.MustCompile(`^([A-Z]+)(2[0-9]|3[0-9])([1-9OND])(0[1-9]|[12][0-9]|3[01])(\d+(?:\.\d+)?)(CE|PE)$`)
+	// NSE / BSE Weekly Option (Kite & Kotak): NIFTY26N0328350CE, SENSEX26D1772000PE, M&M26N033000CE (YY: 20-39, Month: 1-9/O/N/D, DD: 01-31)
+	reNSEWeeklyOption = regexp.MustCompile(`^([A-Z0-9&_-]+?)(2[0-9]|3[0-9])([1-9OND])(0[1-9]|[12][0-9]|3[01])(\d+(?:\.\d+)?)(CE|PE)$`)
 
-	// Kite Future: NIFTY26OCTFUT (YY: 20-39)
-	reKiteFuture = regexp.MustCompile(`^([A-Z]+)(2[0-9]|3[0-9])([A-Z]{3})FUT$`)
+	// Kite Future: NIFTY26OCTFUT, M&M26OCTFUT (YY: 20-39)
+	reKiteFuture = regexp.MustCompile(`^([A-Z0-9&_-]+?)(2[0-9]|3[0-9])([A-Z]{3})FUT$`)
 )
 
 var monthMap = map[string]time.Month{
