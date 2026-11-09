@@ -273,7 +273,8 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 	out := make([]broker.Position, 0, len(kPositions))
 	for _, p := range kPositions {
 		avgPrice := 0.0
-		if p.Quantity < 0 {
+		netQty := p.NetQuantity()
+		if netQty < 0 {
 			avgPrice, _ = p.AverageSellPrice().Float64()
 		} else {
 			avgPrice, _ = p.AverageBuyPrice().Float64()
@@ -283,7 +284,7 @@ func (b *Broker) GetPositions(ctx context.Context) ([]broker.Position, error) {
 			Product:       p.Product,
 			Tradingsymbol: p.TradingSymbol,
 			Exchange:      normalizeExchange(p.ExchangeSegment),
-			Quantity:      p.Quantity,
+			Quantity:      netQty,
 			AveragePrice:  avgPrice,
 		})
 	}

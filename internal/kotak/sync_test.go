@@ -514,4 +514,118 @@ func TestPortfolioSyncer_Execution(t *testing.T) {
 			t.Errorf("OPTFUTCRUDEOIL SellableQuantity = %d, want 0", synced[3].SellableQuantity)
 		}
 	})
+
+	t.Run("Positive: Open Positions properly synced with non-zero Quantity, totals, and exit Action", func(t *testing.T) {
+		accID := uuid.New()
+		store := newMockPortfolioStore()
+		sess := &kotak.TradeSessionJSON{
+			Token:   "valid-token",
+			Sid:     "valid-sid",
+			BaseURL: "https://mock.kotak.com",
+		}
+		sessRaw, _ := kotak.SerializeTradeSession(sess)
+		store.authInfo[accID] = domain.AccountAuthInfo{
+			BrokerAccountID: "POS01",
+			ApiKey:          "9876543210",
+			ApiSecret:       "consumer-key",
+			AccessToken:     sessRaw,
+		}
+
+		mockAPI := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{
+					{
+						Product:         "NRML",
+						TradingSymbol:   "CRUDEOIL17NOV267300PE",
+						ExchangeSegment: "mcx_fo",
+						CFSellQty:       100,
+						CFSellAmount:    decimal.NewFromFloat(2640.00),
+					},
+					{
+						Product:         "NRML",
+						TradingSymbol:   "NIFTY26N0924600PE",
+						ExchangeSegment: "nse_fo",
+						FilledSellQty:   325,
+						SellAmount:      decimal.NewFromFloat(4143.75),
+					},
+					{
+						Product:         "NRML",
+						TradingSymbol:   "NIFTY26N0925300CE",
+						ExchangeSegment: "nse_fo",
+						FilledBuyQty:    325,
+						BuyAmount:       decimal.NewFromFloat(1251.25),
+						FilledSellQty:   325,
+						SellAmount:      decimal.NewFromFloat(5053.75),
+					},
+				}, nil
+			},
+			getHoldingsFunc: func(ctx context.Context) ([]models.Holding, error) {
+				return []models.Holding{}, nil
+			},
+			getLimitsFunc: func(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+				return &models.Limits{
+					Net: decimal.NewFromInt(100000),
+				}, nil
+			},
+		}
+
+		syncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return mockAPI, nil
+			},
+		}
+
+		err := syncer.SyncAccountPortfolio(context.Background(), accID)
+		if err != nil {
+			t.Fatalf("SyncAccountPortfolio failed: %v", err)
+		}
+
+		synced := store.positions[accID]
+		if len(synced) != 3 {
+			t.Fatalf("expected 3 positions, got %d", len(synced))
+		}
+
+		// 1. Overnight short CRUDEOIL
+		if synced[0].Quantity != -100 {
+			t.Errorf("synced[0].Quantity = %d, want -100", synced[0].Quantity)
+		}
+		if !synced[0].SellPrice.Equal(decimal.NewFromFloat(26.40)) {
+			t.Errorf("synced[0].SellPrice = %s, want 26.40", synced[0].SellPrice)
+		}
+		if synced[0].SellQuantity != 100 {
+			t.Errorf("synced[0].SellQuantity = %d, want 100", synced[0].SellQuantity)
+		}
+		if synced[0].Action != "exit" {
+			t.Errorf("synced[0].Action = %s, want 'exit'", synced[0].Action)
+		}
+
+		// 2. Day trade open short NIFTY PE
+		if synced[1].Quantity != -325 {
+			t.Errorf("synced[1].Quantity = %d, want -325", synced[1].Quantity)
+		}
+		if !synced[1].SellPrice.Equal(decimal.NewFromFloat(12.75)) {
+			t.Errorf("synced[1].SellPrice = %s, want 12.75", synced[1].SellPrice)
+		}
+		if synced[1].SellQuantity != 325 {
+			t.Errorf("synced[1].SellQuantity = %d, want 325", synced[1].SellQuantity)
+		}
+		if synced[1].Action != "exit" {
+			t.Errorf("synced[1].Action = %s, want 'exit'", synced[1].Action)
+		}
+
+		// 3. Closed day trade NIFTY CE
+		if synced[2].Quantity != 0 {
+			t.Errorf("synced[2].Quantity = %d, want 0", synced[2].Quantity)
+		}
+		if !synced[2].BuyPrice.Equal(decimal.NewFromFloat(3.85)) {
+			t.Errorf("synced[2].BuyPrice = %s, want 3.85", synced[2].BuyPrice)
+		}
+		if !synced[2].SellPrice.Equal(decimal.NewFromFloat(15.55)) {
+			t.Errorf("synced[2].SellPrice = %s, want 15.55", synced[2].SellPrice)
+		}
+		if synced[2].BuyQuantity != 325 || synced[2].SellQuantity != 325 {
+			t.Errorf("synced[2] BuyQuantity=%d SellQuantity=%d, want 325, 325", synced[2].BuyQuantity, synced[2].SellQuantity)
+		}
+	})
 }

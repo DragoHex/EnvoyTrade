@@ -156,14 +156,17 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		pnl := p.RealizedPnL()
 
 		posParams = append(posParams, domain.PositionSyncParam{
-			Product:    p.Product,
-			Instrument: p.TradingSymbol,
-			Quantity:   p.Quantity,
-			BuyPrice:   buyPrice,
-			SellPrice:  sellPrice,
-			Ltp:        decimal.Zero,
-			Mtm:        decimal.Zero,
-			Pnl:        pnl,
+			Product:      p.Product,
+			Instrument:   p.TradingSymbol,
+			Quantity:     p.NetQuantity(),
+			BuyPrice:     buyPrice,
+			SellPrice:    sellPrice,
+			BuyQuantity:  p.TotalBuyQty(),
+			SellQuantity: p.TotalSellQty(),
+			Ltp:          decimal.Zero,
+			Mtm:          decimal.Zero,
+			Pnl:          pnl,
+			Action:       "exit",
 		})
 	}
 

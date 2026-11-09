@@ -16,6 +16,8 @@ github.com/DragoHex/gokotakneo v0.2.6 h1:p+Yvv5qPJmVQ4lCtQHFNY1ICOfIEwMkQBgHdhsQ
 github.com/DragoHex/gokotakneo v0.2.6/go.mod h1:fbxfJU8vIU8qqbeKz2Oz5QmXupgU2ANp08fK198v4Yc=
 github.com/DragoHex/gokotakneo v0.2.7 h1:ieAriiWvOa1/wKoadI7zUqR9IgHOqC2zELK+T2Bp+Wk=
 github.com/DragoHex/gokotakneo v0.2.7/go.mod h1:fbxfJU8vIU8qqbeKz2Oz5QmXupgU2ANp08fK198v4Yc=
+github.com/DragoHex/gokotakneo v0.2.8 h1:IXLBJAzzdylKzOhWUppkUfFsMEl3Wc0dRMwcObNSvic=
+github.com/DragoHex/gokotakneo v0.2.8/go.mod h1:fbxfJU8vIU8qqbeKz2Oz5QmXupgU2ANp08fK198v4Yc=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/alecthomas/assert/v2 v2.10.0 h1:jjRCHsj6hBJhkmhznrCzoNpbA3zqy0fYiUcYZP/GkPY=

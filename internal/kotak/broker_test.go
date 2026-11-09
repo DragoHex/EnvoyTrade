@@ -287,6 +287,20 @@ func TestBroker_Execution(t *testing.T) {
 						FilledBuyQty:    15,
 						BuyAmount:       decimal.NewFromFloat(37500.00),
 					},
+					{
+						Product:         "NRML",
+						TradingSymbol:   "CRUDEOIL17NOV267300PE",
+						ExchangeSegment: "mcx_fo",
+						CFSellQty:       100,
+						CFSellAmount:    decimal.NewFromFloat(2640.00),
+					},
+					{
+						Product:         "NRML",
+						TradingSymbol:   "NIFTY26N0924600PE",
+						ExchangeSegment: "nse_fo",
+						FilledSellQty:   325,
+						SellAmount:      decimal.NewFromFloat(4143.75),
+					},
 				}, nil
 			},
 		}
@@ -296,8 +310,8 @@ func TestBroker_Execution(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetPositions failed: %v", err)
 		}
-		if len(positions) != 1 {
-			t.Fatalf("expected 1 position, got %d", len(positions))
+		if len(positions) != 3 {
+			t.Fatalf("expected 3 positions, got %d", len(positions))
 		}
 		pos := positions[0]
 		if pos.Tradingsymbol != "RELIANCE" || pos.Exchange != "NSE" || pos.Quantity != 15 {
@@ -305,6 +319,24 @@ func TestBroker_Execution(t *testing.T) {
 		}
 		if pos.AveragePrice != 2500.00 {
 			t.Errorf("AveragePrice = %v, want 2500.00", pos.AveragePrice)
+		}
+
+		// Overnight short MCX option
+		crude := positions[1]
+		if crude.Tradingsymbol != "CRUDEOIL17NOV267300PE" || crude.Exchange != "MCX" || crude.Quantity != -100 {
+			t.Errorf("unexpected crude position: %+v", crude)
+		}
+		if crude.AveragePrice != 26.40 {
+			t.Errorf("crude AveragePrice = %v, want 26.40", crude.AveragePrice)
+		}
+
+		// Day short NFO option
+		nifty := positions[2]
+		if nifty.Tradingsymbol != "NIFTY26N0924600PE" || nifty.Exchange != "NFO" || nifty.Quantity != -325 {
+			t.Errorf("unexpected nifty position: %+v", nifty)
+		}
+		if nifty.AveragePrice != 12.75 {
+			t.Errorf("nifty AveragePrice = %v, want 12.75", nifty.AveragePrice)
 		}
 	})
 
