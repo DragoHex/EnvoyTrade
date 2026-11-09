@@ -111,11 +111,8 @@ func (t *MasterTicker) Start(ctx context.Context) {
 		OnConnect: func() {
 			t.log().Info("kotak ws: master ticker connected", "master_id", t.masterID)
 		},
-		OnOrderUpdate: func(update orderstream.OrderUpdate) {
-			t.handleOrderUpdate(update)
-		},
-		OnReconnect: func(attempt int, delay time.Duration) {
-			t.log().Info("kotak ws: master ticker reconnected", "master_id", t.masterID, "attempt", attempt)
+		OnReconnected: func() {
+			t.log().Info("kotak ws: master ticker reconnected", "master_id", t.masterID)
 			t.mu.Lock()
 			hook := t.catchUp
 			t.mu.Unlock()
@@ -126,6 +123,12 @@ func (t *MasterTicker) Start(ctx context.Context) {
 					}
 				}()
 			}
+		},
+		OnOrderUpdate: func(update orderstream.OrderUpdate) {
+			t.handleOrderUpdate(update)
+		},
+		OnReconnect: func(attempt int, delay time.Duration) {
+			t.log().Debug("kotak ws: order stream retrying connection", "master_id", t.masterID, "attempt", attempt, "delay", delay)
 		},
 		OnError: func(err error) {
 			t.log().Warn("kotak ws: order stream error", "error", err)
