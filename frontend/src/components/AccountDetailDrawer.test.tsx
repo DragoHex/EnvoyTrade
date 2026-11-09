@@ -304,6 +304,22 @@ describe('AccountDetailDrawer', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Authentication required: Invalid 2FA TOTP code')
   })
 
+  it('shows Kotak Neo specific MPIN and TOTP reconnection message when broker=kotakneo and authStatus=error', () => {
+    const kotakErrorAccount: Account = {
+      ...master,
+      broker: 'kotakneo',
+      authStatus: 'error',
+      authError: 'Invalid MPIN or TOTP',
+    }
+    render(() => (
+      <AccountDetailDrawer open account={kotakErrorAccount} groups={[]} onClose={vi.fn()} onCreate={vi.fn()} onSave={vi.fn()} />
+    ))
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Authentication required: Invalid MPIN or TOTP')
+    expect(alert).toHaveTextContent('Please re-enter your Kotak Neo MPIN and TOTP secret below to reconnect.')
+  })
+
   it('create mode, role=follower with available proxy IPs: auto-assigns IPv4, and switches to IPv6 on dropdown select', async () => {
     vi.spyOn(api, 'fetchAvailableProxyIPs').mockResolvedValue({
       ipv4: [

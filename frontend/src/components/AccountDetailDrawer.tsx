@@ -511,6 +511,8 @@ export function AccountDetailDrawer(props: {
                 <br />
                 {broker() === 'dhan'
                   ? 'Please enter your Dhan Access Token below to reconnect.'
+                  : broker() === 'kotakneo'
+                  ? 'Please re-enter your Kotak Neo MPIN and TOTP secret below to reconnect.'
                   : 'Please re-enter your Kite password and TOTP secret below to reconnect.'}
               </div>
             </Show>
