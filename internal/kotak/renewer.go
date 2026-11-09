@@ -180,6 +180,12 @@ func (r *Renewer) renewAccountInternal(ctx context.Context, accountID uuid.UUID)
 		return fmt.Errorf("save account session: %w", err)
 	}
 
+	if setter, ok := r.Store.(accountStatusSetter); ok {
+		if err := setter.SetAccountStatus(ctx, accountID, domain.AccountStatusActive); err != nil {
+			r.Logger.Warn("failed to restore account status to active upon renewal", "account_id", accountID, "error", err)
+		}
+	}
+
 	if r.OnTokenRefreshed != nil {
 		if err := r.OnTokenRefreshed(ctx, accountID); err != nil {
 			r.Logger.Warn("OnTokenRefreshed callback error", "account_id", accountID, "error", err)

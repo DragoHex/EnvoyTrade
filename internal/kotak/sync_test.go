@@ -10,6 +10,7 @@ import (
 	"envoytrade/internal/domain"
 	"envoytrade/internal/kotak"
 
+	"github.com/DragoHex/gokotakneo"
 	"github.com/DragoHex/gokotakneo/models"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -626,6 +627,101 @@ func TestPortfolioSyncer_Execution(t *testing.T) {
 		}
 		if synced[2].BuyQuantity != 325 || synced[2].SellQuantity != 325 {
 			t.Errorf("synced[2] BuyQuantity=%d SellQuantity=%d, want 325, 325", synced[2].BuyQuantity, synced[2].SellQuantity)
+		}
+	})
+
+	t.Run("Positive: Transient Bridge Error Preserves Token And Status", func(t *testing.T) {
+		accID := uuid.New()
+		store := newMockPortfolioStore()
+		store.authInfo[accID] = domain.AccountAuthInfo{
+			BrokerAccountID: "UCC123",
+			ApiSecret:       "consumer-key",
+			AccessToken:     sessRaw,
+			TokenExpiresAt:  &future,
+			AuthStatus:      "authenticated",
+		}
+		store.accountStatus[accID] = domain.AccountStatusActive
+
+		bridgeErrAPI := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{}, nil
+			},
+			getHoldingsFunc: func(ctx context.Context) ([]models.Holding, error) {
+				return []models.Holding{}, nil
+			},
+			getLimitsFunc: func(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+				return nil, &gokotakneo.APIError{
+					StatusCode: 300015,
+					Message:    "bridge API error out",
+					Err:        gokotakneo.ErrBrokerUnavailable,
+				}
+			},
+		}
+
+		syncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return bridgeErrAPI, nil
+			},
+		}
+
+		err := syncer.SyncAccountPortfolio(context.Background(), accID)
+		if err == nil {
+			t.Fatalf("expected error from bridge failure, got nil")
+		}
+		if !errors.Is(err, domain.ErrBrokerUnreachable) {
+			t.Errorf("expected ErrBrokerUnreachable, got %v", err)
+		}
+
+		if store.tokensUpdated[accID] == "" && store.authStatus[accID] == "unauthenticated" {
+			t.Errorf("transient bridge error should NOT wipe token or set unauthenticated")
+		}
+		if store.accountStatus[accID] == domain.AccountStatusError {
+			t.Errorf("transient bridge error should NOT set AccountStatusError, got %s", store.accountStatus[accID])
+		}
+	})
+
+	t.Run("Negative: Unrecoverable Auth Error Wipes Token And Sets Account Status Error", func(t *testing.T) {
+		accID := uuid.New()
+		store := newMockPortfolioStore()
+		store.authInfo[accID] = domain.AccountAuthInfo{
+			BrokerAccountID: "UCC123",
+			ApiSecret:       "consumer-key",
+			AccessToken:     sessRaw,
+			TokenExpiresAt:  &future,
+			AuthStatus:      "authenticated",
+		}
+		store.accountStatus[accID] = domain.AccountStatusActive
+
+		authErrAPI := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{}, nil
+			},
+			getHoldingsFunc: func(ctx context.Context) ([]models.Holding, error) {
+				return []models.Holding{}, nil
+			},
+			getLimitsFunc: func(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+				return nil, errors.New("401 Unauthorized: token expired")
+			},
+		}
+
+		syncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return authErrAPI, nil
+			},
+		}
+
+		err := syncer.SyncAccountPortfolio(context.Background(), accID)
+		if err == nil {
+			t.Fatalf("expected error from auth failure, got nil")
+		}
+
+		if store.tokensUpdated[accID] != "" {
+			t.Errorf("auth failure should clear token, got %q", store.tokensUpdated[accID])
+		}
+		if store.accountStatus[accID] != domain.AccountStatusError {
+			t.Errorf("auth failure should set AccountStatusError, got %s", store.accountStatus[accID])
 		}
 	})
 }

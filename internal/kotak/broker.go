@@ -2,6 +2,7 @@ package kotak
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -330,6 +331,12 @@ func translateBrokerError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, gokotak.ErrBrokerUnavailable) {
+		return fmt.Errorf("%w: %v", domain.ErrBrokerUnreachable, err)
+	}
+	if errors.Is(err, gokotak.ErrAuthExpired) {
+		return fmt.Errorf("%w: %v", domain.ErrAuthExpired, err)
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "100008") || strings.Contains(msg, "ip not whitelisted"):
@@ -340,7 +347,7 @@ func translateBrokerError(err error) error {
 		return fmt.Errorf("%w: %v", domain.ErrNotFound, err)
 	case strings.Contains(msg, "1004") || strings.Contains(msg, "insufficient funds") || strings.Contains(msg, "rms"):
 		return fmt.Errorf("kotak rms rejection: %w", err)
-	case strings.Contains(msg, "unreachable") || strings.Contains(msg, "connection refused") || strings.Contains(msg, "timeout") || strings.Contains(msg, "502") || strings.Contains(msg, "503"):
+	case strings.Contains(msg, "unreachable") || strings.Contains(msg, "connection refused") || strings.Contains(msg, "timeout") || strings.Contains(msg, "502") || strings.Contains(msg, "503") || strings.Contains(msg, "504") || strings.Contains(msg, "300015") || strings.Contains(msg, "bridge") || strings.Contains(msg, "gateway"):
 		return fmt.Errorf("%w: %v", domain.ErrBrokerUnreachable, err)
 	default:
 		return err

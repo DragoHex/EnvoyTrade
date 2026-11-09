@@ -2,6 +2,7 @@ package kotak
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -132,15 +133,13 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// 1. Sync Positions
 	kPositions, err := api.GetPositions(ctx)
 	if err != nil {
-		// Attempt transparent re-login on 401
-		if strings.Contains(strings.ToLower(err.Error()), "401") || strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
-			if s.Renewer != nil {
-				if rErr := s.Renewer.RenewAccount(ctx, accountID); rErr == nil {
-					if s.OnTokenRefreshed != nil {
-						_ = s.OnTokenRefreshed(ctx, accountID)
-					}
-					return s.SyncAccountPortfolio(ctx, accountID) // retry once with renewed credentials
+		// Attempt transparent re-login on auth failure
+		if isAuthError(err) && s.Renewer != nil {
+			if rErr := s.Renewer.RenewAccount(ctx, accountID); rErr == nil {
+				if s.OnTokenRefreshed != nil {
+					_ = s.OnTokenRefreshed(ctx, accountID)
 				}
+				return s.SyncAccountPortfolio(ctx, accountID) // retry once with renewed credentials
 			}
 		}
 		s.handleSyncFailure(ctx, accountID, err)
@@ -177,6 +176,14 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// 2. Sync Holdings
 	kHoldings, err := api.GetHoldings(ctx)
 	if err != nil {
+		if isAuthError(err) && s.Renewer != nil {
+			if rErr := s.Renewer.RenewAccount(ctx, accountID); rErr == nil {
+				if s.OnTokenRefreshed != nil {
+					_ = s.OnTokenRefreshed(ctx, accountID)
+				}
+				return s.SyncAccountPortfolio(ctx, accountID)
+			}
+		}
 		s.handleSyncFailure(ctx, accountID, err)
 		return fmt.Errorf("get holdings: %w", translateBrokerError(err))
 	}
@@ -210,6 +217,14 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	// 3. Sync Limits & Margins
 	kLimits, err := api.GetLimits(ctx, "ALL", "ALL", "ALL")
 	if err != nil {
+		if isAuthError(err) && s.Renewer != nil {
+			if rErr := s.Renewer.RenewAccount(ctx, accountID); rErr == nil {
+				if s.OnTokenRefreshed != nil {
+					_ = s.OnTokenRefreshed(ctx, accountID)
+				}
+				return s.SyncAccountPortfolio(ctx, accountID)
+			}
+		}
 		s.handleSyncFailure(ctx, accountID, err)
 		return fmt.Errorf("get limits: %w", translateBrokerError(err))
 	}
@@ -247,11 +262,26 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 	return nil
 }
 
-func (s *PortfolioSyncer) handleSyncFailure(ctx context.Context, accountID uuid.UUID, err error) {
-	authStatus := "error"
-	if strings.Contains(strings.ToLower(err.Error()), "401") || strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
-		authStatus = "unauthenticated"
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
 	}
+	if errors.Is(err, domain.ErrAuthExpired) || errors.Is(err, gokotak.ErrAuthExpired) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "401") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "token expired") ||
+		strings.Contains(msg, "invalid token")
+}
+
+func (s *PortfolioSyncer) handleSyncFailure(ctx context.Context, accountID uuid.UUID, err error) {
+	if !isAuthError(err) {
+		// Do not wipe access token or set account status to 'error' on transient 5xx/network/bridge errors
+		return
+	}
+	authStatus := "unauthenticated"
 	cleanMsg := domain.SanitizeAuthError(err.Error())
 	_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, authStatus, cleanMsg)
 	if setter, ok := s.Store.(accountStatusSetter); ok {

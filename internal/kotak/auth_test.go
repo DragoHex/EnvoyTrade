@@ -115,6 +115,7 @@ type mockRenewerStore struct {
 	tokensUpdated    map[uuid.UUID]string
 	authStatusRecord map[uuid.UUID]string
 	authErrorRecord  map[uuid.UUID]string
+	accountStatus    map[uuid.UUID]domain.AccountStatus
 }
 
 func newMockRenewerStore() *mockRenewerStore {
@@ -125,6 +126,7 @@ func newMockRenewerStore() *mockRenewerStore {
 		tokensUpdated:    make(map[uuid.UUID]string),
 		authStatusRecord: make(map[uuid.UUID]string),
 		authErrorRecord:  make(map[uuid.UUID]string),
+		accountStatus:    make(map[uuid.UUID]domain.AccountStatus),
 	}
 }
 
@@ -156,6 +158,11 @@ func (m *mockRenewerStore) SetAccountAccessToken(ctx context.Context, id uuid.UU
 	m.tokensUpdated[id] = token
 	m.authStatusRecord[id] = authStatus
 	m.authErrorRecord[id] = authError
+	return nil
+}
+
+func (m *mockRenewerStore) SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error {
+	m.accountStatus[id] = status
 	return nil
 }
 
@@ -226,6 +233,27 @@ func TestRenewer_Execution(t *testing.T) {
 		sess, err := kotak.DeserializeTradeSession(store.tokensUpdated[accountID])
 		if err != nil || sess.Token != "new-trade-token" {
 			t.Errorf("saved token mismatch: %v", err)
+		}
+	})
+
+	t.Run("Positive: RenewAccount Success Restores AccountStatusActive", func(t *testing.T) {
+		store.accountStatus[accountID] = domain.AccountStatusError
+		renewer := kotak.NewRenewer(store, nil)
+		renewer.LoginFunc = func(ctx context.Context, creds kotak.HeadlessLoginCredentials) (*kotak.TradeSessionJSON, error) {
+			return &kotak.TradeSessionJSON{
+				Token:   "new-trade-token",
+				Sid:     "new-trade-sid",
+				BaseURL: "https://mock.kotak.com",
+			}, nil
+		}
+
+		err := renewer.RenewAccount(context.Background(), accountID)
+		if err != nil {
+			t.Fatalf("RenewAccount failed: %v", err)
+		}
+
+		if store.accountStatus[accountID] != domain.AccountStatusActive {
+			t.Errorf("account status = %s, want %s", store.accountStatus[accountID], domain.AccountStatusActive)
 		}
 	})
 
