@@ -184,9 +184,16 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 		if symbol == "" {
 			symbol = h.InstrumentName
 		}
+		sellable := int(h.SellableQuantity.IntPart())
+		if sellable <= 0 && h.Quantity.GreaterThan(decimal.Zero) {
+			sellable = int(h.Quantity.IntPart())
+		}
+		if sellable < 0 {
+			sellable = 0
+		}
 		holdParams = append(holdParams, domain.HoldingSyncParam{
 			Instrument:       symbol,
-			SellableQuantity: h.Quantity,
+			SellableQuantity: sellable,
 			BuyAveragePrice:  h.AveragePrice,
 			Ltp:              h.ClosingPrice,
 			Pnl:              h.UnrealisedGainLoss,

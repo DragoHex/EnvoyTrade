@@ -131,7 +131,7 @@ func TestPortfolioSyncer_Execution(t *testing.T) {
 			return []models.Holding{
 				{
 					CommonScripCode:    "INFY",
-					Quantity:           25,
+					Quantity:           decimal.NewFromInt(25),
 					AveragePrice:       decimal.NewFromFloat(1400),
 					ClosingPrice:       decimal.NewFromFloat(1450),
 					UnrealisedGainLoss: decimal.NewFromFloat(1250),
@@ -419,6 +419,99 @@ func TestPortfolioSyncer_Execution(t *testing.T) {
 		}
 		if refreshedAccountID != renewAccID {
 			t.Errorf("refreshedAccountID = %s, want %s", refreshedAccountID, renewAccID)
+		}
+	})
+
+	t.Run("Positive: Fractional and Decimal Holdings correctly floored to int", func(t *testing.T) {
+		accID := uuid.New()
+		store := newMockPortfolioStore()
+		sess := &kotak.TradeSessionJSON{
+			Token:   "valid-token",
+			Sid:     "valid-sid",
+			BaseURL: "https://mock.kotak.com",
+		}
+		sessRaw, _ := kotak.SerializeTradeSession(sess)
+		store.authInfo[accID] = domain.AccountAuthInfo{
+			BrokerAccountID: "FRAC01",
+			ApiKey:          "9876543210",
+			ApiSecret:       "consumer-key",
+			AccessToken:     sessRaw,
+		}
+
+		mockAPI := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{}, nil
+			},
+			getHoldingsFunc: func(ctx context.Context) ([]models.Holding, error) {
+				return []models.Holding{
+					{
+						CommonScripCode:  "LIQUIDBEES",
+						Quantity:         decimal.RequireFromString("0.002"),
+						SellableQuantity: decimal.Zero,
+						ClosingPrice:     decimal.NewFromInt(1000),
+					},
+					{
+						CommonScripCode:  "PP001ZG-GR",
+						Quantity:         decimal.RequireFromString("15456.843"),
+						SellableQuantity: decimal.Zero,
+						ClosingPrice:     decimal.RequireFromString("93.9483"),
+					},
+					{
+						CommonScripCode:  "LIQUIDPLUS",
+						Quantity:         decimal.RequireFromString("559"),
+						SellableQuantity: decimal.RequireFromString("559"),
+						ClosingPrice:     decimal.RequireFromString("1111.68"),
+					},
+					{
+						CommonScripCode:  "OPTFUTCRUDEOIL",
+						Quantity:         decimal.RequireFromString("-100"),
+						SellableQuantity: decimal.Zero,
+						ClosingPrice:     decimal.RequireFromString("39.4"),
+					},
+				}, nil
+			},
+			getLimitsFunc: func(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+				return &models.Limits{
+					Net: decimal.NewFromInt(100000),
+				}, nil
+			},
+		}
+
+		syncer := &kotak.PortfolioSyncer{
+			Store: store,
+			APIFactory: func(consumerKey string, sess *kotak.TradeSessionJSON, proxyURL string) (kotak.SyncAPI, error) {
+				return mockAPI, nil
+			},
+		}
+
+		err := syncer.SyncAccountPortfolio(context.Background(), accID)
+		if err != nil {
+			t.Fatalf("SyncAccountPortfolio failed: %v", err)
+		}
+
+		synced := store.holdings[accID]
+		if len(synced) != 4 {
+			t.Fatalf("expected 4 holdings, got %d", len(synced))
+		}
+
+		// LIQUIDBEES: 0.002 units -> 0
+		if synced[0].Instrument != "LIQUIDBEES" || synced[0].SellableQuantity != 0 {
+			t.Errorf("LIQUIDBEES SellableQuantity = %d, want 0", synced[0].SellableQuantity)
+		}
+
+		// PP001ZG-GR: 15456.843 units -> 15456
+		if synced[1].Instrument != "PP001ZG-GR" || synced[1].SellableQuantity != 15456 {
+			t.Errorf("PP001ZG-GR SellableQuantity = %d, want 15456", synced[1].SellableQuantity)
+		}
+
+		// LIQUIDPLUS: 559 units -> 559
+		if synced[2].Instrument != "LIQUIDPLUS" || synced[2].SellableQuantity != 559 {
+			t.Errorf("LIQUIDPLUS SellableQuantity = %d, want 559", synced[2].SellableQuantity)
+		}
+
+		// OPTFUTCRUDEOIL: -100 units -> 0 (negative quantity floored to 0)
+		if synced[3].Instrument != "OPTFUTCRUDEOIL" || synced[3].SellableQuantity != 0 {
+			t.Errorf("OPTFUTCRUDEOIL SellableQuantity = %d, want 0", synced[3].SellableQuantity)
 		}
 	})
 }
