@@ -1,7 +1,7 @@
+import hobbitUrl from '../assets/hobbit.png'
 // Material Design icon glyphs (Apache-2.0, Google) reused as inline SVG so
 // buttons render consistently across platforms instead of relying on emoji
 // font coverage.
-import hobbitUrl from '../assets/hobbit.png'
 
 export function BlockIcon() {
   return (
@@ -206,24 +206,31 @@ export function GandalfIcon(props: { size?: number; class?: string }) {
 export function HobbitIcon(props: { size?: number; class?: string }) {
   const size = () => props.size ?? 24
   return (
-    <svg
-      viewBox="0 0 920 940"
-      width={size()}
-      height={size()}
-      class={`role-icon-svg role-icon-hobbit ${props.class ?? ''}`.trim()}
-      aria-hidden="true"
-    >
-      <defs>
-        <filter id="hobbit-green-hover" color-interpolation-filters="sRGB">
-          <feComponentTransfer>
-            <feFuncR type="linear" slope="0.984" intercept="0.016" />
-            <feFuncG type="linear" slope="0.294" intercept="0.706" />
-            <feFuncB type="linear" slope="0.467" intercept="0.533" />
-          </feComponentTransfer>
-        </filter>
-      </defs>
-      <image href={hobbitUrl} width="920" height="940" />
-    </svg>
+    <>
+      <svg
+        aria-hidden="true"
+        style={{ position: 'absolute', width: '0', height: '0', overflow: 'hidden', 'pointer-events': 'none' }}
+      >
+        <defs>
+          <filter id="hobbit-green-hover" color-interpolation-filters="sRGB">
+            <feComponentTransfer>
+              <feFuncR type="linear" slope="0.984" intercept="0.016" />
+              <feFuncG type="linear" slope="0.294" intercept="0.706" />
+              <feFuncB type="linear" slope="0.467" intercept="0.533" />
+            </feComponentTransfer>
+          </filter>
+        </defs>
+      </svg>
+      <img
+        src={hobbitUrl}
+        alt=""
+        aria-hidden="true"
+        width={size()}
+        height={size()}
+        class={`role-icon-img role-icon-hobbit ${props.class ?? ''}`.trim()}
+        loading="eager"
+      />
+    </>
   )
 }
 

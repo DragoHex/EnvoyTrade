@@ -1540,7 +1540,8 @@ tr[data-testid='master-row'] td {
   transform: scale(1.12);
 }
 
-.role-icon-svg {
+.role-icon-svg,
+.role-icon-img {
   display: block;
   overflow: visible;
 }
@@ -1563,13 +1564,14 @@ tr[data-testid='master-row'] td {
   color: var(--color-accent);
 }
 
-/* Hobbit (Follower): maintains light-mode theme; green tint on hover */
+/* Hobbit (Follower): HTML <img> preserving full illustration colors; hue tint + halo glow matching master on hover */
 .role-icon-hobbit {
+  object-fit: contain;
   transition: filter 0.15s ease;
 }
 
 .role-icon-wrap:hover .role-icon-hobbit {
-  filter: url(#hobbit-green-hover);
+  filter: url(#hobbit-green-hover) drop-shadow(0 0 4px var(--color-accent)) drop-shadow(0 0 8px var(--color-accent));
 }
 
 /* Role switch popover & trigger button */
@@ -1674,7 +1676,8 @@ tr[data-testid='master-row'] td {
   line-height: 1 !important;
 }
 
-.role-switch-icon .role-icon-svg {
+.role-switch-icon .role-icon-svg,
+.role-switch-icon .role-icon-img {
   display: block;
 }
 
