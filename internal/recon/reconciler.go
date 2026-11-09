@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"envoytrade/internal/broker"
@@ -295,6 +296,15 @@ func (p *Poller) ReconcileMaster(ctx context.Context, masterID uuid.UUID) error 
 		return err
 	}
 
+	// Sort orders chronologically (oldest first) so BUY executions precede SELL executions
+	// when brokers return order book in reverse chronological order (newest first).
+	sort.SliceStable(orders, func(i, j int) bool {
+		if orders[i].OrderTimestamp.IsZero() || orders[j].OrderTimestamp.IsZero() {
+			return false
+		}
+		return orders[i].OrderTimestamp.Before(orders[j].OrderTimestamp)
+	})
+
 	for _, o := range orders {
 		if !domain.IsTerminal(o.Status) {
 			continue
@@ -334,6 +344,14 @@ func (p *Poller) ReconcileFollower(ctx context.Context, followerID uuid.UUID) er
 		})
 		return err
 	}
+
+	// Sort orders chronologically (oldest first).
+	sort.SliceStable(orders, func(i, j int) bool {
+		if orders[i].OrderTimestamp.IsZero() || orders[j].OrderTimestamp.IsZero() {
+			return false
+		}
+		return orders[i].OrderTimestamp.Before(orders[j].OrderTimestamp)
+	})
 
 	for _, o := range orders {
 		if !domain.IsTerminal(o.Status) {

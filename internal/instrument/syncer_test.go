@@ -20,6 +20,14 @@ type mockSyncerStore struct {
 	vacuumCalls         int
 	pruneError          error
 	insertError         error
+	counts              map[string]int64
+}
+
+func (m *mockSyncerStore) InstrumentCountByBroker(ctx context.Context) (map[string]int64, error) {
+	if m.counts == nil {
+		return make(map[string]int64), nil
+	}
+	return m.counts, nil
 }
 
 func (m *mockSyncerStore) PruneInstrumentsByBroker(ctx context.Context, broker string) (int64, error) {
@@ -378,5 +386,149 @@ MCX,M,582024,OPTFUT,0,GOLDM-29Oct2026-130000-PE,1.0,GOLDM 29 OCT 130000 PUT,2026
 	mcxInst := store.insertedInstruments[2]
 	if mcxInst.Exchange != "MCX" {
 		t.Errorf("mcxInst.Exchange = %q, want 'MCX'", mcxInst.Exchange)
+	}
+}
+
+func TestSyncKotak_Success(t *testing.T) {
+	mockCSV := `pSymbol,pTrdSymbol,lLotSize,pInstType,pExpiryDate,dStrikePrice
+11536,NIFTY26FEB24000CE,50,OPTIDX,26-Feb-2026,24000
+11537,BANKNIFTY26FEB50000PE,15,OPTIDX,26-Feb-2026,50000
+`
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"https://lapi.kotaksecurities.com/script-details/1.0/masterscrip/nse_fo.csv": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(mockCSV)),
+			},
+		},
+	}
+
+	store := &mockSyncerStore{}
+	syncer := NewSyncer(store, nil)
+	syncer.SetHTTPClient(client)
+
+	err := syncer.SyncKotak(context.Background(), []string{"nse_fo"})
+	if err != nil {
+		t.Fatalf("SyncKotak failed: %v", err)
+	}
+
+	if store.prunedBroker != "kotakneo" {
+		t.Errorf("expected prunedBroker 'kotakneo', got %q", store.prunedBroker)
+	}
+	if len(store.insertedTokens) != 2 {
+		t.Errorf("expected 2 inserted instruments, got %d", len(store.insertedTokens))
+	}
+	if store.vacuumCalls != 1 {
+		t.Errorf("expected 1 vacuum call, got %d", store.vacuumCalls)
+	}
+}
+
+func TestSyncKotak_FailurePreservesDatabase(t *testing.T) {
+	client := &mockHTTPClient{
+		err: errors.New("kotak connection timeout"),
+	}
+
+	store := &mockSyncerStore{}
+	syncer := NewSyncer(store, nil)
+	syncer.SetHTTPClient(client)
+
+	err := syncer.SyncKotak(context.Background(), []string{"nse_fo"})
+	if err == nil {
+		t.Fatal("expected error on connection failure")
+	}
+
+	if store.prunedBroker != "" {
+		t.Fatalf("database prune must NOT execute on failed download, got %q", store.prunedBroker)
+	}
+}
+
+func TestSyncKotak_DefaultIncludesNSECM(t *testing.T) {
+	mockCMCSV := `pSymbol,pExchSeg,pSymbolName,pTrdSymbol,lLotSize
+2885,nse_cm,RELIANCE,RELIANCE-EQ,1
+1594,nse_cm,INFY,INFY-EQ,1
+`
+	mockFOCSV := `pSymbol,pTrdSymbol,lLotSize,pInstType,pExpiryDate,dStrikePrice
+11536,NIFTY26FEB24000CE,50,OPTIDX,26-Feb-2026,24000
+`
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"https://lapi.kotaksecurities.com/script-details/1.0/masterscrip/nse_cm.csv": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(mockCMCSV)),
+			},
+			"https://lapi.kotaksecurities.com/script-details/1.0/masterscrip/nse_fo.csv": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(mockFOCSV)),
+			},
+			"https://lapi.kotaksecurities.com/script-details/1.0/masterscrip/bse_fo.csv": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(mockFOCSV)),
+			},
+			"https://lapi.kotaksecurities.com/script-details/1.0/masterscrip/mcx_fo.csv": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(mockFOCSV)),
+			},
+		},
+	}
+
+	store := &mockSyncerStore{}
+	syncer := NewSyncer(store, nil)
+	syncer.SetHTTPClient(client)
+
+	err := syncer.SyncKotak(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("SyncKotak failed: %v", err)
+	}
+
+	if store.prunedBroker != "kotakneo" {
+		t.Errorf("expected prunedBroker 'kotakneo', got %q", store.prunedBroker)
+	}
+	// 2 from CM, 1 from FO, 1 from BSE_FO, 1 from MCX_FO = 5 total
+	if len(store.insertedTokens) != 5 {
+		t.Errorf("expected 5 inserted instruments, got %d", len(store.insertedTokens))
+	}
+}
+
+func TestEnsureBrokerInstrumentsSynced(t *testing.T) {
+	mockDhanCSV := `SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXPIRY_CODE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_TICK_SIZE,SEM_EXPIRY_FLAG,SEM_EXCH_INSTRUMENT_TYPE,SEM_SERIES,SM_SYMBOL_NAME
+MCX,M,583041,OPTFUT,0,CRUDEOIL-17Nov2026-5000-PE,1.0,CRUDEOIL 17 NOV 5000 PUT,2026-11-17 23:30:00,5000.00000,PE,10.0000,M,OPTFUT,2,CRUDEOIL
+`
+	client := &mockHTTPClient{
+		responses: map[string]*http.Response{
+			"dhan": {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(mockDhanCSV)),
+			},
+		},
+	}
+
+	store := &mockSyncerStore{
+		counts: map[string]int64{
+			"kite": 50000,
+			"dhan": 0, // Dhan has 0 -> needs sync
+		},
+	}
+
+	syncer := NewSyncer(store, nil)
+	syncer.SetHTTPClient(client)
+	syncer.SetDhanURL("https://images.dhan.co/api-data/api-scrip-master.csv")
+
+	var onCompleteCalled bool
+	err := syncer.EnsureBrokerInstrumentsSynced(context.Background(), []string{"kite", "dhan"}, func(ctx context.Context) error {
+		onCompleteCalled = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("EnsureBrokerInstrumentsSynced failed: %v", err)
+	}
+
+	if store.prunedBroker != "dhan" {
+		t.Errorf("expected prunedBroker 'dhan', got %q", store.prunedBroker)
+	}
+	if len(store.insertedTokens) != 1 {
+		t.Errorf("expected 1 inserted instrument for dhan, got %d", len(store.insertedTokens))
+	}
+	if !onCompleteCalled {
+		t.Error("expected onComplete callback to be called")
 	}
 }

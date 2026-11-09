@@ -1,9 +1,12 @@
 package domain
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,11 +74,85 @@ type ProxyIPInput struct {
 	WhitelistedBrokers      string `json:"whitelisted_brokers,omitempty"`
 	WhitelistedBrokersCamel string `json:"whitelistedBrokers,omitempty"`
 	WhitelistedIP           string `json:"whitelisted_ip,omitempty"`
-	ValidFrom          string `json:"valid_from"`
-	ValidUntil         string `json:"valid_until"`
-	Plan               string `json:"plan"`
-	Status             string `json:"status,omitempty"`
-	Type               string `json:"type"`
+	ValidFrom               string `json:"valid_from"`
+	ValidUntil              string `json:"valid_until"`
+	Plan                    string `json:"plan"`
+	Status                  string `json:"status,omitempty"`
+	Type                    string `json:"type"`
+	RawConfig               string `json:"raw_config,omitempty"`
+	RawConfigCamel          string `json:"rawConfig,omitempty"`
+}
+
+// ParseProxyConfigText parses raw key-value proxy configuration text
+// (such as copied from AlgoIP or other static proxy providers) or JSON text into a ProxyIPInput.
+func ParseProxyConfigText(text string) (ProxyIPInput, error) {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "{") {
+		var input ProxyIPInput
+		if err := json.Unmarshal([]byte(trimmed), &input); err == nil && input.IP != "" {
+			return input, nil
+		}
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(trimmed))
+	var input ProxyIPInput
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+
+		idx := strings.Index(line, ":")
+		if idx == -1 {
+			continue
+		}
+
+		rawKey := strings.ToLower(strings.TrimSpace(line[:idx]))
+		val := strings.TrimSpace(line[idx+1:])
+
+		switch rawKey {
+		case "ip (to be whitelisted in broker)", "ip", "ip address", "ip_address", "whitelisted ip", "whitelisted_ip":
+			input.IP = val
+		case "host":
+			input.Host = val
+		case "port":
+			if p, err := strconv.Atoi(val); err == nil {
+				input.Port = p
+			}
+		case "user_id", "user id", "username", "userid":
+			input.UserID = val
+			input.Username = val
+		case "password", "pass":
+			input.Password = val
+		case "whitelisted brokers", "whitelisted broker", "whitelisted_brokers", "brokers", "broker":
+			input.WhitelistedBrokers = val
+		case "valid from", "valid_from", "from":
+			input.ValidFrom = val
+		case "valid until", "valid_until", "until", "expires", "expiry":
+			input.ValidUntil = val
+		case "plan":
+			input.Plan = val
+		case "type", "ip type", "ip_type":
+			input.Type = val
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return ProxyIPInput{}, fmt.Errorf("read config text: %w", err)
+	}
+
+	if strings.TrimSpace(input.IP) == "" {
+		return ProxyIPInput{}, errors.New("missing IP address in config text")
+	}
+	if strings.TrimSpace(input.Host) == "" {
+		return ProxyIPInput{}, errors.New("missing host in config text")
+	}
+	if input.Port <= 0 {
+		input.Port = 443
+	}
+
+	return input, nil
 }
 
 // ProxyIPStats provides aggregated inventory and expiration metrics for the admin portal.
@@ -306,6 +383,8 @@ func NormalizeWhitelistedBrokers(raw string) string {
 			normalized = append(normalized, "Dhan")
 		case "testbroker", "test_broker":
 			normalized = append(normalized, "TestBroker")
+		case "kotak", "kotakneo", "kotak_neo", "kotak-neo", "kotak neo":
+			normalized = append(normalized, "Kotak")
 		default:
 			normalized = append(normalized, item)
 		}
@@ -324,6 +403,8 @@ func (p ProxyIP) MatchesBroker(broker string) bool {
 		target = "zerodha"
 	} else if target == "test_broker" {
 		target = "testbroker"
+	} else if target == "kotakneo" || target == "kotak_neo" || target == "kotak-neo" || target == "kotak neo" {
+		target = "kotak"
 	}
 
 	parts := strings.Split(p.WhitelistedBrokers, ",")
@@ -333,6 +414,8 @@ func (p ProxyIP) MatchesBroker(broker string) bool {
 			cand = "zerodha"
 		} else if cand == "test_broker" {
 			cand = "testbroker"
+		} else if cand == "kotakneo" || cand == "kotak_neo" || cand == "kotak-neo" || cand == "kotak neo" {
+			cand = "kotak"
 		}
 		if cand == target {
 			return true

@@ -88,7 +88,8 @@ func SanitizeAuthError(raw string) string {
 		strings.Contains(lower, "dhan sync failed") ||
 		strings.Contains(lower, "connect login") ||
 		strings.Contains(lower, "kite login error") ||
-		strings.Contains(lower, "kite 2fa error")
+		strings.Contains(lower, "kite 2fa error") ||
+		strings.Contains(lower, "kotak-neo api error")
 
 	// If no backend API traces and already a clean user-facing message, preserve it
 	if !hasBackendAPITraces {
@@ -97,6 +98,15 @@ func SanitizeAuthError(raw string) string {
 
 	// Translate technical / backend API errors into clear, safe user-facing explanations
 	switch {
+	case strings.Contains(lower, "user not found") || strings.Contains(lower, "ucc") || strings.Contains(lower, "10564"):
+		return "Invalid Kotak Neo Client ID (UCC) or Trade API not enabled for this user"
+
+	case strings.Contains(lower, "mobilenumber") || strings.Contains(lower, "mobile number"):
+		return "Invalid Kotak Neo registered mobile number"
+
+	case strings.Contains(lower, "mpin"):
+		return "Invalid Kotak Neo MPIN"
+
 	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") ||
 		strings.Contains(lower, "token expired") || strings.Contains(lower, "invalid token") ||
 		strings.Contains(lower, "token revoked"):
@@ -227,4 +237,28 @@ type BulkProxyTestSummary struct {
 	AvgLatencyMs int               `json:"avgLatencyMs"`
 	Results      []ProxyTestResult `json:"results"`
 }
+
+// BrokerScripStatus represents the scrip count and freshness for a broker in instruments table.
+type BrokerScripStatus struct {
+	Broker        string     `json:"broker"`
+	Count         int64      `json:"count"`
+	LastRefreshed *time.Time `json:"lastRefreshed,omitempty"`
+	Status        string     `json:"status"` // "healthy", "stale", "empty"
+}
+
+// ScripCacheSummary summarizes the unified pre-allocated in-memory instrument cache.
+type ScripCacheSummary struct {
+	ActiveCount  int        `json:"activeCount"`
+	Capacity     int        `json:"capacity"`
+	LastAutoLoad *time.Time `json:"lastAutoLoad,omitempty"`
+}
+
+// ScripMasterSummary summarizes both the database scrip masters and the in-memory cache.
+type ScripMasterSummary struct {
+	Status  string                       `json:"status"` // "healthy", "warning", "error"
+	Cache   ScripCacheSummary            `json:"cache"`
+	Brokers map[string]BrokerScripStatus `json:"brokers"`
+	Alerts  []string                     `json:"alerts"`
+}
+
 

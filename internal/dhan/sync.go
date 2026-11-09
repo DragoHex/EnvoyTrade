@@ -52,10 +52,16 @@ func isAuthError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, godhan.ErrBrokerUnavailable) || errors.Is(err, domain.ErrBrokerUnreachable) {
+		return false
+	}
 	if errors.Is(err, domain.ErrAuthExpired) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "network error") || strings.Contains(msg, "proxy") || strings.Contains(msg, "tunnel") {
+		return false
+	}
 	return strings.Contains(msg, "dh-901") || strings.Contains(msg, "dh-906") ||
 		strings.Contains(msg, "invalid token") || strings.Contains(msg, "token expired") ||
 		strings.Contains(msg, "unauthorized") || strings.Contains(msg, "forbidden") ||

@@ -45,10 +45,11 @@ export function getWhitelistedBrokerSelectOptions(currentVal?: string) {
   const options = [
     { value: 'Zerodha', label: 'Zerodha', badge: { text: 'Specialized', variant: 'emerald' as const } },
     { value: 'Dhan', label: 'Dhan', badge: { text: 'Specialized', variant: 'emerald' as const } },
+    { value: 'Kotak', label: 'Kotak Neo', badge: { text: 'Specialized', variant: 'emerald' as const } },
     { value: 'TestBroker', label: 'TestBroker', badge: { text: 'Specialized', variant: 'emerald' as const } },
     { value: '', label: 'All Brokers (Unrestricted)', badge: { text: 'Unrestricted', variant: 'slate' as const } },
   ]
-  if (currentVal && !options.some((o) => o.value === currentVal)) {
+  if (currentVal && !options.some((o) => o.value === currentVal || (currentVal.toLowerCase() === 'kotakneo' && o.value === 'Kotak'))) {
     options.unshift({
       value: currentVal,
       label: currentVal,
@@ -120,9 +121,11 @@ export function AdminIPsPage() {
 
   // Single Add Modal state
   const [addModalOpen, setAddModalOpen] = createSignal(false)
-  const [addMode, setAddMode] = createSignal<'form' | 'json'>('form')
+  const [addMode, setAddMode] = createSignal<'form' | 'config' | 'json'>('form')
   const [addJsonText, setAddJsonText] = createSignal('')
   const [addJsonError, setAddJsonError] = createSignal<string | null>(null)
+  const [addConfigText, setAddConfigText] = createSignal('')
+  const [addConfigError, setAddConfigError] = createSignal<string | null>(null)
   const [addForm, setAddForm] = createSignal({
     ip: '',
     host: 'dc6-mum-01.algoip.in',
@@ -502,8 +505,61 @@ export function AdminIPsPage() {
     return { valid: true, error: null, parsed }
   }
 
+  const addConfigValidation = () => {
+    const raw = addConfigText().trim()
+    if (!raw) {
+      return { valid: false, error: 'Config text is empty', parsed: null }
+    }
+    const lines = raw.split('\n')
+    const map: Record<string, string> = {}
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue
+      const idx = trimmed.indexOf(':')
+      if (idx === -1) continue
+      const k = trimmed.slice(0, idx).trim().toLowerCase()
+      const v = trimmed.slice(idx + 1).trim()
+      map[k] = v
+    }
+
+    const ip = map['ip (to be whitelisted in broker)'] || map['ip'] || map['ip address'] || map['whitelisted ip'] || ''
+    if (!ip) {
+      return { valid: false, error: 'Missing IP address in config text', parsed: null }
+    }
+    const host = map['host'] || ''
+    if (!host) {
+      return { valid: false, error: 'Missing host in config text', parsed: null }
+    }
+
+    const port = parseInt(map['port'] || '443') || 443
+    const userId = map['user_id'] || map['username'] || map['user id'] || ''
+    const password = map['password'] || map['pass'] || ''
+    const whitelistedBrokers = map['whitelisted brokers'] || map['whitelisted broker'] || map['brokers'] || map['broker'] || ''
+    const validFrom = map['valid from'] || map['from'] || ''
+    const validUntil = map['valid until'] || map['until'] || ''
+    const plan = map['plan'] || 'QUARTERLY'
+
+    return {
+      valid: true,
+      error: null,
+      parsed: {
+        ip,
+        host,
+        port,
+        userId,
+        password,
+        whitelistedBrokers,
+        validFrom,
+        validUntil,
+        plan,
+      },
+    }
+  }
+
   const openAddModal = () => {
     setAddJsonError(null)
+    setAddConfigError(null)
+    setAddConfigText('')
     setAddForm({
       ip: '',
       host: 'dc6-mum-01.algoip.in',
@@ -521,6 +577,26 @@ export function AdminIPsPage() {
 
   const handleAddSubmit = async (e: Event) => {
     e.preventDefault()
+    if (addMode() === 'config') {
+      const v = addConfigValidation()
+      if (!v.valid) {
+        setAddConfigError(v.error)
+        return
+      }
+      setAddSubmitting(true)
+      setAddConfigError(null)
+      try {
+        await postAdminProxyIP(addConfigText().trim())
+        setAddModalOpen(false)
+        await loadData(false)
+      } catch (err: any) {
+        setAddConfigError(err?.message || 'Failed to add proxy IP from config text')
+      } finally {
+        setAddSubmitting(false)
+      }
+      return
+    }
+
     if (addMode() === 'json') {
       const v = addJsonValidation()
       if (!v.valid || !v.parsed) {
@@ -1377,10 +1453,25 @@ export function AdminIPsPage() {
                     syncJsonToAddForm()
                     setAddMode('form')
                     setAddJsonError(null)
+                    setAddConfigError(null)
                   }}
                   style={{ flex: 1 }}
                 >
                   Form Fields
+                </button>
+                <button
+                  type="button"
+                  class="tab-btn"
+                  classList={{ active: addMode() === 'config' }}
+                  aria-pressed={addMode() === 'config'}
+                  onClick={() => {
+                    setAddMode('config')
+                    setAddConfigError(null)
+                  }}
+                  aria-label="Paste Config / Config Text"
+                  style={{ flex: 1 }}
+                >
+                  Paste Config
                 </button>
                 <button
                   type="button"
@@ -1390,6 +1481,8 @@ export function AdminIPsPage() {
                   onClick={() => {
                     syncAddFormToJson()
                     setAddMode('json')
+                    setAddJsonError(null)
+                    setAddConfigError(null)
                   }}
                   aria-label="Paste JSON / JSON Text"
                   style={{ flex: 1 }}
@@ -1582,6 +1675,102 @@ export function AdminIPsPage() {
                   </div>
                 </Show>
 
+                <Show when={addMode() === 'config'}>
+                  <div style={{ 'margin-bottom': '0.85rem' }}>
+                    <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.35rem' }}>
+                      <label
+                        for="add-config-textarea"
+                        style={{ display: 'block', 'font-size': '0.825rem', 'font-weight': 600, color: 'var(--color-text)' }}
+                      >
+                        Paste Raw Config Text
+                      </label>
+                      <span style={{ 'font-size': '0.75rem', color: 'var(--color-text-secondary)' }}>
+                        Key-value lines (AlgoIP / provider format)
+                      </span>
+                    </div>
+                    <textarea
+                      id="add-config-textarea"
+                      aria-label="Paste Config / Raw Config Text"
+                      rows={11}
+                      placeholder={`IP (to be whitelisted in broker): 2401:c080:2400:16b8:7c15:2ea3:64b6:5a00\nHost: dc6-mum-01.algoip.in\nPort: 443\nuser_id: aip_live_...\npassword: aip_sec_...\nWhitelisted Brokers: Kotak\nValid From: 2026-11-02 11:17:55 (IST)\nValid Until: 2027-02-02 11:17:55 (IST)\nPlan: QUARTERLY`}
+                      value={addConfigText()}
+                      onInput={(e) => {
+                        setAddConfigText(e.currentTarget.value)
+                        setAddConfigError(null)
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem 0.85rem',
+                        border: '1px solid var(--color-border)',
+                        'border-radius': '8px',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        'font-family': 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        'font-size': '0.825rem',
+                        'line-height': 1.5,
+                        'box-sizing': 'border-box',
+                        resize: 'vertical',
+                      }}
+                    />
+                  </div>
+
+                  <Show when={addConfigText().trim().length > 0}>
+                    <div style={{ 'margin-bottom': '0.75rem' }}>
+                      <Show when={addConfigValidation().valid}>
+                        <div style={{
+                          display: 'inline-flex',
+                          'align-items': 'center',
+                          gap: '0.4rem',
+                          padding: '0.35rem 0.65rem',
+                          'border-radius': '6px',
+                          background: 'rgba(4, 180, 136, 0.12)',
+                          border: '1px solid rgba(4, 180, 136, 0.25)',
+                          color: 'var(--color-accent)',
+                          'font-size': '0.78rem',
+                          'font-weight': 500,
+                        }}>
+                          <span>✓</span> Valid Config ({addConfigValidation().parsed?.ip})
+                          <Show when={addConfigValidation().parsed?.whitelistedBrokers}>
+                            <span style={{ 'margin-left': '0.35rem', opacity: 0.9 }}>
+                              • {addConfigValidation().parsed?.whitelistedBrokers} Specialized
+                            </span>
+                          </Show>
+                        </div>
+                      </Show>
+                      <Show when={!addConfigValidation().valid}>
+                        <div style={{
+                          display: 'inline-flex',
+                          'align-items': 'center',
+                          gap: '0.4rem',
+                          padding: '0.35rem 0.65rem',
+                          'border-radius': '6px',
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          color: '#ef4444',
+                          'font-size': '0.78rem',
+                          'font-weight': 500,
+                        }}>
+                          <span>⚠</span> {addConfigValidation().error}
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
+
+                  <Show when={addConfigError()}>
+                    <div style={{
+                      padding: '0.6rem 0.8rem',
+                      'border-radius': '6px',
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      color: '#ef4444',
+                      'font-size': '0.8rem',
+                      'margin-bottom': '0.75rem',
+                    }}>
+                      {addConfigError()}
+                    </div>
+                  </Show>
+                </Show>
+
                 <Show when={addMode() === 'json'}>
                   <div style={{ 'margin-bottom': '0.85rem' }}>
                     <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.35rem' }}>
@@ -1684,7 +1873,11 @@ export function AdminIPsPage() {
                 <button
                   type="submit"
                   class="btn-primary"
-                  disabled={addSubmitting() || (addMode() === 'json' && (!addJsonText().trim() || !addJsonValidation().valid))}
+                  disabled={
+                    addSubmitting() ||
+                    (addMode() === 'json' && (!addJsonText().trim() || !addJsonValidation().valid)) ||
+                    (addMode() === 'config' && (!addConfigText().trim() || !addConfigValidation().valid))
+                  }
                 >
                   {addSubmitting() ? 'Adding...' : 'Add Proxy IP'}
                 </button>

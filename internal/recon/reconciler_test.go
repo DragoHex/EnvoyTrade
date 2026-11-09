@@ -501,4 +501,61 @@ func TestPoller_FailsUnresolvableFollowerOrderPast5Minutes(t *testing.T) {
 	}
 }
 
+func TestPoller_ReconcileMaster_ChronologicalOrder(t *testing.T) {
+	masterID := uuid.New()
+	store := &fakeStore{
+		accounts: []domain.Account{
+			{ID: masterID, Role: "master", Active: true},
+		},
+	}
+
+	t0 := time.Now().Add(-5 * time.Minute)
+	t1 := t0.Add(4 * time.Second)
+
+	// Broker returns newest orders first: SELL at t1, then BUY at t0
+	masterReader := &fakeMasterReader{
+		orders: map[uuid.UUID][]broker.Order{
+			masterID: {
+				{
+					OrderID:        "ORD-SELL",
+					Status:         "COMPLETE",
+					FilledQuantity: 1,
+					Tradingsymbol:  "CRUDEOIL17NOV265000PE",
+					TransactionType: "SELL",
+					OrderTimestamp: t1,
+				},
+				{
+					OrderID:        "ORD-BUY",
+					Status:         "COMPLETE",
+					FilledQuantity: 1,
+					Tradingsymbol:  "CRUDEOIL17NOV265000PE",
+					TransactionType: "BUY",
+					OrderTimestamp: t0,
+				},
+			},
+		},
+	}
+
+	consumer := &fakeConsumer{}
+	alerter := &fakeAlerter{}
+	poller := recon.NewPoller(store, masterReader, &fakeFollowerReader{}, consumer, alerter, recon.DefaultConfig(), nil)
+
+	if err := poller.ReconcileMaster(context.Background(), masterID); err != nil {
+		t.Fatalf("ReconcileMaster failed: %v", err)
+	}
+
+	if len(consumer.handled) != 2 {
+		t.Fatalf("expected 2 handled master fills, got %d", len(consumer.handled))
+	}
+
+	// Must be chronological: BUY first (t0), SELL second (t1)
+	if consumer.handled[0].BrokerOrderID != "ORD-BUY" {
+		t.Errorf("handled[0] = %q, want ORD-BUY (chronological order)", consumer.handled[0].BrokerOrderID)
+	}
+	if consumer.handled[1].BrokerOrderID != "ORD-SELL" {
+		t.Errorf("handled[1] = %q, want ORD-SELL (chronological order)", consumer.handled[1].BrokerOrderID)
+	}
+}
+
+
 

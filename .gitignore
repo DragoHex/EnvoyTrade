@@ -14,6 +14,12 @@ gokiteconnect/
 *.p12
 credentials.json
 secrets.json
+ips.json
+scripts/restore_*.sql
+Todo.md
+skills/
+gosymphony/
+KiteSDK/
 
 # Logs and scratch
 *.log

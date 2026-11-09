@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -348,6 +349,65 @@ func TestAdminProxyIPsCRUD(t *testing.T) {
 	}
 	if last := store.proxyIPs[len(store.proxyIPs)-1]; last.Plan != "YEARLY" || last.WhitelistedBrokers != "Zerodha" {
 		t.Errorf("expected plan YEARLY and WhitelistedBrokers Zerodha, got %+v", last)
+	}
+
+	// 4-raw. POST /api/v1/admin/proxy-ips with raw config text (text/plain)
+	rawConfigText := `IP (to be whitelisted in broker): 2401:c080:2400:16b8:7c15:2ea3:64b6:5a00
+Host: dc6-mum-01.algoip.in
+Port: 443
+user_id: aip_live_lq0z72n0s2uagmm6
+password: aip_sec_pctja3asoghh021117cl1gtw5i1h4566
+Whitelisted Brokers: Kotak
+Valid From: 2026-11-02 11:17:55 (IST)
+Valid Until: 2027-02-02 11:17:55 (IST)
+Plan: QUARTERLY`
+
+	req = httptest.NewRequest("POST", "/api/v1/admin/proxy-ips", strings.NewReader(rawConfigText))
+	req.Header.Set("Content-Type", "text/plain")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for raw config text POST, got %d: %s", rec.Code, rec.Body.String())
+	}
+	lastRaw := store.proxyIPs[len(store.proxyIPs)-1]
+	if lastRaw.IPAddress != "2401:c080:2400:16b8:7c15:2ea3:64b6:5a00" {
+		t.Errorf("expected IPAddress 2401:c080:2400:16b8:7c15:2ea3:64b6:5a00, got %q", lastRaw.IPAddress)
+	}
+	if lastRaw.WhitelistedBrokers != "Kotak" {
+		t.Errorf("expected WhitelistedBrokers Kotak, got %q", lastRaw.WhitelistedBrokers)
+	}
+	if lastRaw.IPType != "ipv6" {
+		t.Errorf("expected IPType ipv6, got %q", lastRaw.IPType)
+	}
+	if lastRaw.Plan != "QUARTERLY" {
+		t.Errorf("expected Plan QUARTERLY, got %q", lastRaw.Plan)
+	}
+
+	// 4-json-text. POST /api/v1/admin/proxy-ips with JSON body even when Content-Type is text/plain or missing
+	jsonTextPayload := `{
+  "ip": "2401:c080:2400:16b8:c19:6ec5:4ebd:4e5f",
+  "host": "dc6-mum-01.algoip.in",
+  "port": 443,
+  "user_id": "aip_live_inx8bbazx5to5w6e",
+  "password": "",
+  "valid_until": "2027-01-27 23:59:59 (IST)",
+  "plan": "QUARTERLY",
+  "type": "IPV6",
+  "whitelisted_brokers": "Dhan"
+}`
+	req = httptest.NewRequest("POST", "/api/v1/admin/proxy-ips", strings.NewReader(jsonTextPayload))
+	req.Header.Set("Content-Type", "text/plain")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for json text with text/plain Content-Type, got %d: %s", rec.Code, rec.Body.String())
+	}
+	lastJSONText := store.proxyIPs[len(store.proxyIPs)-1]
+	if lastJSONText.IPAddress != "2401:c080:2400:16b8:c19:6ec5:4ebd:4e5f" {
+		t.Errorf("expected IPAddress 2401:c080:2400:16b8:c19:6ec5:4ebd:4e5f, got %q", lastJSONText.IPAddress)
+	}
+	if lastJSONText.WhitelistedBrokers != "Dhan" {
+		t.Errorf("expected WhitelistedBrokers Dhan, got %q", lastJSONText.WhitelistedBrokers)
 	}
 
 	// 4b. PUT /api/v1/admin/proxy-ips/{ip}
@@ -1145,6 +1205,140 @@ func TestAdminProxyIP_PUT(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 Not Found, got %d", rec.Code)
+	}
+}
+
+type mockInstrumentSyncer struct {
+	lastBroker string
+	callCount  int
+	err        error
+}
+
+func (m *mockInstrumentSyncer) SyncBroker(_ context.Context, broker string, onComplete func(context.Context) error) error {
+	m.lastBroker = broker
+	m.callCount++
+	if onComplete != nil {
+		_ = onComplete(context.Background())
+	}
+	return m.err
+}
+
+type mockInstrumentCacheStatus struct {
+	size         int
+	capacity     int
+	lastAutoLoad time.Time
+	autoLoadRuns int
+}
+
+func (m *mockInstrumentCacheStatus) Size() int {
+	return m.size
+}
+
+func (m *mockInstrumentCacheStatus) Capacity() int {
+	return m.capacity
+}
+
+func (m *mockInstrumentCacheStatus) LastAutoLoad() time.Time {
+	return m.lastAutoLoad
+}
+
+func (m *mockInstrumentCacheStatus) AutoLoadActiveFO(_ context.Context) error {
+	m.autoLoadRuns++
+	return nil
+}
+
+func TestAdmin_InstrumentStatus(t *testing.T) {
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	cache := &mockInstrumentCacheStatus{
+		size:         1250,
+		capacity:     10000,
+		lastAutoLoad: time.Now().Add(-10 * time.Minute),
+	}
+	syncer := &mockInstrumentSyncer{}
+
+	now := time.Now()
+	store.brokerScripDetails = map[string]domain.BrokerScripStatus{
+		"kite": {
+			Broker:        "kite",
+			Count:         85000,
+			LastRefreshed: &now,
+			Status:        "healthy",
+		},
+		"dhan": {
+			Broker:        "dhan",
+			Count:         65000,
+			LastRefreshed: &now,
+			Status:        "healthy",
+		},
+		"kotakneo": {
+			Broker:        "kotakneo",
+			Count:         0,
+			Status:        "empty",
+		},
+	}
+
+	handler := httpapi.NewRouter(store, engine,
+		httpapi.WithInstrumentCache(cache),
+		httpapi.WithInstrumentSyncer(syncer),
+	)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/instruments/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var res domain.ScripMasterSummary
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if res.Status != "error" { // kotakneo is empty -> overall error
+		t.Errorf("expected overall status error, got %s", res.Status)
+	}
+	if res.Cache.ActiveCount != 1250 || res.Cache.Capacity != 10000 {
+		t.Errorf("unexpected cache status: %+v", res.Cache)
+	}
+	if len(res.Brokers) != 3 {
+		t.Errorf("expected 3 brokers, got %d", len(res.Brokers))
+	}
+	if len(res.Alerts) == 0 {
+		t.Errorf("expected alerts due to empty kotakneo, got none")
+	}
+}
+
+func TestAdmin_InstrumentSync(t *testing.T) {
+	store := &stubStore{}
+	engine := &stubActionEngine{}
+	syncer := &mockInstrumentSyncer{}
+	cache := &mockInstrumentCacheStatus{capacity: 10000}
+
+	handler := httpapi.NewRouter(store, engine,
+		httpapi.WithInstrumentSyncer(syncer),
+		httpapi.WithInstrumentCache(cache),
+	)
+
+	// 1. Sync specific broker
+	payload := []byte(`{"broker":"dhan"}`)
+	req := httptest.NewRequest("POST", "/api/v1/admin/instruments/sync", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Sync all brokers (empty body)
+	req2 := httptest.NewRequest("POST", "/api/v1/admin/instruments/sync", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec2.Code, rec2.Body.String())
 	}
 }
 

@@ -306,6 +306,59 @@ func (s *Store) CreateFollowLink(ctx context.Context, link domain.FollowLink) er
 	return err
 }
 
+// CreateFollowLinksBatch attaches multiple follower accounts to a group in a single
+// atomic statement. Returns domain.ErrDuplicate if any follower is already attached
+// or duplicated in the batch, or domain.ErrConflict/domain.ErrNotFound if foreign
+// key constraints fail.
+func (s *Store) CreateFollowLinksBatch(ctx context.Context, groupID uuid.UUID, links []domain.FollowLink) error {
+	if len(links) == 0 {
+		return nil
+	}
+	if groupID == uuid.Nil {
+		return domain.ErrNotFound
+	}
+
+	seen := make(map[uuid.UUID]struct{}, len(links))
+	followerIDs := make([]uuid.UUID, len(links))
+	cloneFactors := make([]decimal.Decimal, len(links))
+	maxQtys := make([]int32, len(links))
+
+	for i, l := range links {
+		if l.FollowerID == uuid.Nil {
+			return fmt.Errorf("invalid follower id at index %d: %w", i, domain.ErrNotFound)
+		}
+		if _, ok := seen[l.FollowerID]; ok {
+			return fmt.Errorf("duplicate follower id %s in batch: %w", l.FollowerID, domain.ErrDuplicate)
+		}
+		seen[l.FollowerID] = struct{}{}
+
+		if l.CloneFactor.Sign() <= 0 {
+			return fmt.Errorf("clone factor must be positive for follower %s: %w", l.FollowerID, domain.ErrConflict)
+		}
+
+		followerIDs[i] = l.FollowerID
+		cloneFactors[i] = l.CloneFactor
+		maxQtys[i] = int32(l.MaxQtyPerOrder)
+	}
+
+	err := s.queries.InsertFollowLinksBatch(ctx, sqlcgen.InsertFollowLinksBatchParams{
+		FollowerIds:  followerIDs,
+		GroupID:      groupID,
+		CloneFactors: cloneFactors,
+		MaxQtys:      maxQtys,
+	})
+	if isUniqueViolation(err) {
+		return domain.ErrDuplicate
+	}
+	if isForeignKeyViolation(err) {
+		return domain.ErrConflict
+	}
+	if err != nil {
+		return fmt.Errorf("insert follow links batch: %w", err)
+	}
+	return nil
+}
+
 func nullableMaxQty(v int) *int32 {
 	if v <= 0 {
 		return nil
@@ -963,6 +1016,86 @@ func (s *Store) VacuumInstruments(ctx context.Context) error {
 	return err
 }
 
+// InstrumentCountByBroker returns the count of instruments grouped by broker name.
+func (s *Store) InstrumentCountByBroker(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.pool.Query(ctx, "SELECT broker, count(*)::bigint FROM instruments GROUP BY broker;")
+	if err != nil {
+		return nil, fmt.Errorf("query instrument counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var broker string
+		var count int64
+		if err := rows.Scan(&broker, &count); err != nil {
+			return nil, fmt.Errorf("scan instrument count: %w", err)
+		}
+		counts[strings.ToLower(strings.TrimSpace(broker))] = count
+	}
+	return counts, rows.Err()
+}
+
+// BrokerScripDetails returns the scrip count and max refreshed_at timestamp grouped by broker name.
+func (s *Store) BrokerScripDetails(ctx context.Context) (map[string]domain.BrokerScripStatus, error) {
+	rows, err := s.pool.Query(ctx, "SELECT broker, count(*)::bigint, MAX(refreshed_at) FROM instruments GROUP BY broker;")
+	if err != nil {
+		return nil, fmt.Errorf("query broker scrip details: %w", err)
+	}
+	defer rows.Close()
+
+	details := make(map[string]domain.BrokerScripStatus)
+	now := time.Now().UTC()
+	for rows.Next() {
+		var (
+			b           string
+			count       int64
+			refreshedAt pgtype.Timestamptz
+		)
+		if err := rows.Scan(&b, &count, &refreshedAt); err != nil {
+			return nil, fmt.Errorf("scan broker scrip details: %w", err)
+		}
+		brokerName := strings.ToLower(strings.TrimSpace(b))
+		var lastRefreshed *time.Time
+		status := "healthy"
+		if refreshedAt.Valid {
+			t := refreshedAt.Time.In(domain.IST)
+			lastRefreshed = &t
+			if now.Sub(refreshedAt.Time) > 24*time.Hour {
+				status = "stale"
+			}
+		} else {
+			status = "stale"
+		}
+		if count == 0 {
+			status = "empty"
+		}
+
+		details[brokerName] = domain.BrokerScripStatus{
+			Broker:        brokerName,
+			Count:         count,
+			LastRefreshed: lastRefreshed,
+			Status:        status,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Ensure all standard brokers are represented even if 0 rows exist in DB
+	for _, expectedBroker := range []string{"kite", "dhan", "kotakneo"} {
+		if _, exists := details[expectedBroker]; !exists {
+			details[expectedBroker] = domain.BrokerScripStatus{
+				Broker: expectedBroker,
+				Count:  0,
+				Status: "empty",
+			}
+		}
+	}
+
+	return details, nil
+}
+
 // BatchInsertInstruments inserts a slice of instruments in a single bulk UNNEST statement.
 func (s *Store) BatchInsertInstruments(ctx context.Context, instruments []domain.Instrument) error {
 	if len(instruments) == 0 {
@@ -1319,6 +1452,112 @@ func (s *Store) DeleteFollowLink(ctx context.Context, followerID uuid.UUID) erro
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+// SwitchAccountRoleParams contains options for switching an account's role.
+type SwitchAccountRoleParams = domain.SwitchAccountRoleParams
+
+// SwitchAccountRoleResult contains metadata after a role switch for lifecycle management.
+type SwitchAccountRoleResult = domain.SwitchAccountRoleResult
+
+// SwitchAccountRole atomically switches an account's role between 'master' and 'follower'.
+func (s *Store) SwitchAccountRole(ctx context.Context, params domain.SwitchAccountRoleParams) (domain.SwitchAccountRoleResult, error) {
+	if params.TargetRole != "master" && params.TargetRole != "follower" {
+		return SwitchAccountRoleResult{}, fmt.Errorf("invalid target role: %s", params.TargetRole)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return SwitchAccountRoleResult{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+
+	acc, err := qtx.AccountAuthInfo(ctx, params.AccountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SwitchAccountRoleResult{}, domain.ErrNotFound
+	} else if err != nil {
+		return SwitchAccountRoleResult{}, fmt.Errorf("check account: %w", err)
+	}
+
+	if acc.Role == params.TargetRole {
+		return SwitchAccountRoleResult{}, fmt.Errorf("%w: account already has role %s", domain.ErrConflict, params.TargetRole)
+	}
+
+	res := SwitchAccountRoleResult{
+		PreviousRole: acc.Role,
+		NewRole:      params.TargetRole,
+		Broker:       acc.Broker,
+		AuthStatus:   acc.AuthStatus,
+		HadIP:        acc.IpAddress,
+		NewIP:        acc.IpAddress,
+	}
+
+	var aActive bool
+	err = tx.QueryRow(ctx, "SELECT active FROM accounts WHERE id = $1 AND deleted_at IS NULL", params.AccountID).Scan(&aActive)
+	if err == nil {
+		res.Active = aActive
+	}
+
+	if params.TargetRole == "master" {
+		// Follower -> Master: detach from current group if any
+		_, _ = qtx.DeleteFollowLink(ctx, params.AccountID)
+
+		setIP := params.ReleaseIP
+		targetIP := ""
+		if !params.ReleaseIP {
+			targetIP = acc.IpAddress
+		} else {
+			res.NewIP = ""
+		}
+
+		rows, err := qtx.SetAccountRoleAndIP(ctx, sqlcgen.SetAccountRoleAndIPParams{
+			ID:        params.AccountID,
+			Column2:   "master",
+			SetIp:     setIP,
+			IpAddress: targetIP,
+		})
+		if err != nil {
+			return SwitchAccountRoleResult{}, fmt.Errorf("update account role to master: %w", err)
+		}
+		if rows == 0 {
+			return SwitchAccountRoleResult{}, domain.ErrNotFound
+		}
+	} else {
+		// Master -> Follower:
+		// Check if master group has followers attached.
+		followerCount, err := qtx.CountFollowersByMasterID(ctx, params.AccountID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return SwitchAccountRoleResult{}, fmt.Errorf("check master followers: %w", err)
+		}
+		if followerCount > 0 {
+			return SwitchAccountRoleResult{}, fmt.Errorf("%w: cannot switch master to follower: group has %d followers attached; reassign group master or detach followers first", domain.ErrConflict, followerCount)
+		}
+
+		// Delete empty group belonging to this master (if any)
+		_, _ = qtx.DeleteGroupByMasterID(ctx, params.AccountID)
+
+		res.NewIP = params.IPAddress
+		rows, err := qtx.SetAccountRoleAndIP(ctx, sqlcgen.SetAccountRoleAndIPParams{
+			ID:        params.AccountID,
+			Column2:   "follower",
+			SetIp:     true,
+			IpAddress: params.IPAddress,
+		})
+		if err != nil {
+			return SwitchAccountRoleResult{}, fmt.Errorf("update account role to follower: %w", err)
+		}
+		if rows == 0 {
+			return SwitchAccountRoleResult{}, domain.ErrNotFound
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return SwitchAccountRoleResult{}, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return res, nil
 }
 
 // SetAccountName updates an account's name.

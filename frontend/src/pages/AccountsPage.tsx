@@ -75,6 +75,8 @@ export function AccountsPage() {
   const [editing, setEditing] = createSignal<Account | null>(null)
   const [toast, setToast] = createSignal<ToastResult | null>(null)
   const [pendingAction, setPendingAction] = createSignal<PendingAction>(null)
+  const [deleteContainedAccounts, setDeleteContainedAccounts] = createSignal(false)
+  const [roleOverride, setRoleOverride] = createSignal<'master' | 'follower' | null>(null)
 
   onMount(() => {
     try {
@@ -96,10 +98,12 @@ export function AccountsPage() {
 
   const openCreate = () => {
     setEditing(null)
+    setRoleOverride(null)
     setDrawerOpen(true)
   }
-  const openEdit = (a: Account) => {
+  const openEdit = (a: Account, roleOverrideVal?: 'master' | 'follower') => {
     setEditing(a)
+    setRoleOverride(roleOverrideVal ?? null)
     setDrawerOpen(true)
   }
 
@@ -202,13 +206,16 @@ export function AccountsPage() {
         showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to remove from group.' })
       }
     } else if (pending.type === 'delete_group') {
+      const deleteAccounts = deleteContainedAccounts()
       try {
-        await deleteGroup(pending.group.id || pending.group.masterId)
+        await deleteGroup(pending.group.id || pending.group.masterId, deleteAccounts)
         mutateGroups((prev) => prev?.filter((g) => (g.id || g.masterId) !== (pending.group.id || pending.group.masterId)))
         refetchAccounts()
         showToast({ kind: 'success', message: 'Group deleted successfully.' })
       } catch (e) {
         showToast({ kind: 'error', message: e instanceof Error ? e.message : 'Failed to delete group.' })
+      } finally {
+        setDeleteContainedAccounts(false)
       }
     }
   }
@@ -356,6 +363,7 @@ export function AccountsPage() {
                                 title="Delete Group"
                                 onClick={(e) => {
                                   e.stopPropagation()
+                                  setDeleteContainedAccounts(false)
                                   setPendingAction({ type: 'delete_group', group: g() })
                                 }}
                               >
@@ -382,6 +390,8 @@ export function AccountsPage() {
               accounts={masterAccounts()}
               groups={groups() ?? []}
               emptyMessage="No master accounts."
+              enableRoleSwitch={true}
+              onSwitchRole={(a, targetRole) => openEdit(a, targetRole)}
               onToggleActive={handleToggleActive}
               onEdit={openEdit}
               onRemoveFromGroup={(a) => setPendingAction({ type: 'remove_from_group', account: a })}
@@ -394,6 +404,8 @@ export function AccountsPage() {
               accounts={followerAccounts()}
               groups={groups() ?? []}
               emptyMessage="No follower accounts."
+              enableRoleSwitch={true}
+              onSwitchRole={(a, targetRole) => openEdit(a, targetRole)}
               onToggleActive={handleToggleActive}
               onEdit={openEdit}
               onRemoveFromGroup={(a) => setPendingAction({ type: 'remove_from_group', account: a })}
@@ -407,8 +419,24 @@ export function AccountsPage() {
         open={pendingAction() !== null}
         label={pendingAction()?.type === 'delete' ? 'Delete' : pendingAction()?.type === 'delete_group' ? 'Delete group' : 'Remove from group'}
         onConfirm={confirmPendingAction}
-        onCancel={() => setPendingAction(null)}
-      />
+        onCancel={() => {
+          setPendingAction(null)
+          setDeleteContainedAccounts(false)
+        }}
+      >
+        <Show when={pendingAction()?.type === 'delete_group'}>
+          <div class="confirm-modal-option">
+            <label class="confirm-modal-checkbox-label">
+              <input
+                type="checkbox"
+                checked={deleteContainedAccounts()}
+                onChange={(e) => setDeleteContainedAccounts(e.currentTarget.checked)}
+              />
+              <span>Delete contained Accounts</span>
+            </label>
+          </div>
+        </Show>
+      </ConfirmActionModal>
 
       <CreateGroupModal
         open={createGroupOpen()}
@@ -429,13 +457,22 @@ export function AccountsPage() {
       <AccountDetailDrawer
         open={drawerOpen()}
         account={editing()}
+        initialRoleOverride={roleOverride()}
         groups={groups() ?? []}
         existingAccounts={accounts() ?? []}
         maxAccounts={maxAccounts()}
         brokerLimits={brokerLimits()}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false)
+          setRoleOverride(null)
+        }}
         onCreate={handleCreate}
         onSave={handleSave}
+        onRoleSwitched={() => {
+          refetchAccounts()
+          refetchGroups()
+          showToast({ kind: 'success', message: 'Account role switched successfully.' })
+        }}
       />
 
       <ResultToast result={toast()} onDismiss={() => setToast(null)} />

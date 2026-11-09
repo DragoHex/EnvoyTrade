@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"envoytrade/internal/domain"
 )
@@ -134,4 +136,110 @@ func (h *handlers) getAdminExecutionFeed(w http.ResponseWriter, r *http.Request)
 		events = []domain.ExecutionEvent{}
 	}
 	writeJSON(w, http.StatusOK, events)
+}
+
+// getAdminInstrumentStatus handles GET /api/v1/admin/instruments/status.
+func (h *handlers) getAdminInstrumentStatus(w http.ResponseWriter, r *http.Request) {
+	brokers, err := h.store.BrokerScripDetails(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load broker scrip details: "+err.Error())
+		return
+	}
+	if brokers == nil {
+		brokers = make(map[string]domain.BrokerScripStatus)
+	}
+
+	var cacheSummary domain.ScripCacheSummary
+	if h.instrumentCache != nil {
+		lastAutoLoad := h.instrumentCache.LastAutoLoad()
+		var lastAutoLoadPtr *time.Time
+		if !lastAutoLoad.IsZero() {
+			lastAutoLoadPtr = &lastAutoLoad
+		}
+		cacheSummary = domain.ScripCacheSummary{
+			ActiveCount:  h.instrumentCache.Size(),
+			Capacity:     h.instrumentCache.Capacity(),
+			LastAutoLoad: lastAutoLoadPtr,
+		}
+	}
+
+	overallStatus := "healthy"
+	var alerts []string
+
+	for name, b := range brokers {
+		if b.Status == "empty" {
+			overallStatus = "error"
+			alerts = append(alerts, name+": 0 instruments in master database")
+		} else if b.Status == "stale" && overallStatus != "error" {
+			overallStatus = "warning"
+			alerts = append(alerts, name+": instrument master is older than 24h")
+		}
+	}
+
+	if h.instrumentCache != nil && h.instrumentCache.Size() == 0 {
+		if overallStatus != "error" {
+			overallStatus = "warning"
+		}
+		alerts = append(alerts, "in-memory instrument cache is empty (0 active F&O loaded)")
+	}
+
+	if alerts == nil {
+		alerts = []string{}
+	}
+
+	resp := domain.ScripMasterSummary{
+		Status:  overallStatus,
+		Cache:   cacheSummary,
+		Brokers: brokers,
+		Alerts:  alerts,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type adminInstrumentSyncRequest struct {
+	Broker string `json:"broker"`
+}
+
+// postAdminInstrumentSync handles POST /api/v1/admin/instruments/sync.
+func (h *handlers) postAdminInstrumentSync(w http.ResponseWriter, r *http.Request) {
+	if h.instrumentSyncer == nil {
+		writeError(w, http.StatusServiceUnavailable, "instrument syncer not configured")
+		return
+	}
+
+	var req adminInstrumentSyncRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	broker := strings.ToLower(strings.TrimSpace(req.Broker))
+	if broker == "" {
+		broker = "all"
+	}
+
+	var onComplete func(context.Context) error
+	if h.instrumentCache != nil {
+		onComplete = func(c context.Context) error {
+			return h.instrumentCache.AutoLoadActiveFO(c)
+		}
+	}
+
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		if err := h.instrumentSyncer.SyncBroker(bgCtx, broker, onComplete); err != nil {
+			if h.logger != nil {
+				h.logger.Error("on-demand instrument sync failed", "broker", broker, "error", err)
+			}
+		} else {
+			if h.logger != nil {
+				h.logger.Info("on-demand instrument sync completed successfully", "broker", broker)
+			}
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status":  "sync_started",
+		"broker":  broker,
+		"message": "Instrument sync triggered in background",
+	})
 }

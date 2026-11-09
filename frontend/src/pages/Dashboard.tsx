@@ -269,7 +269,7 @@ export function Dashboard() {
           fallback={
             <div class="dashboard-empty-card">
               <EmptyState>
-                No group added. Please go to <a href="/accounts" class="empty-state-link">accounts</a> to add groups
+                No group added. Please go to <a href="/accounts?tab=accounts" class="empty-state-link">accounts</a> to add groups
               </EmptyState>
             </div>
           }

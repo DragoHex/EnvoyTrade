@@ -41,6 +41,8 @@ import (
 	"envoytrade/internal/kite"
 	"envoytrade/internal/kite/callback"
 	"envoytrade/internal/kite/fake"
+	"envoytrade/internal/kotak"
+	kotakws "envoytrade/internal/kotak/ws"
 	"envoytrade/internal/listener"
 	"envoytrade/internal/queue/memchan"
 	"envoytrade/internal/rebalance"
@@ -216,6 +218,7 @@ func runRestore(logger *slog.Logger, args []string) error {
 type instrumentSyncRunner interface {
 	SyncDhan(ctx context.Context) error
 	SyncKite(ctx context.Context, exchanges []string) error
+	SyncKotak(ctx context.Context, segments []string) error
 }
 
 var newInstrumentSyncer = func(store instrument.SyncerStore, logger *slog.Logger) instrumentSyncRunner {
@@ -233,7 +236,7 @@ var connectPostgres = func(ctx context.Context, dbURL string) (*postgres.Store, 
 func runSyncInstruments(logger *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("sync-instruments", flag.ContinueOnError)
 	var (
-		brokerChoice = fs.String("broker", "all", "Broker to sync: 'all', 'dhan', or 'kite'")
+		brokerChoice = fs.String("broker", "all", "Broker to sync: 'all', 'dhan', 'kite', or 'kotak'")
 		exchangesStr = fs.String("exchanges", "MCX,NFO,BFO", "Comma-separated exchanges for Kite")
 		timeoutDur   = fs.Duration("timeout", 10*time.Minute, "Overall sync timeout")
 	)
@@ -249,9 +252,10 @@ func runSyncInstruments(logger *slog.Logger, args []string) error {
 	choice := strings.ToLower(strings.TrimSpace(*brokerChoice))
 	syncDhan := choice == "all" || choice == "dhan"
 	syncKite := choice == "all" || choice == "kite"
+	syncKotak := choice == "all" || choice == "kotak" || choice == "kotakneo"
 
-	if !syncDhan && !syncKite {
-		return fmt.Errorf("invalid broker choice %q: must be 'all', 'dhan', or 'kite'", *brokerChoice)
+	if !syncDhan && !syncKite && !syncKotak {
+		return fmt.Errorf("invalid broker choice %q: must be 'all', 'dhan', 'kite', or 'kotak'", *brokerChoice)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeoutDur)
@@ -298,6 +302,15 @@ func runSyncInstruments(logger *slog.Logger, args []string) error {
 			return fmt.Errorf("sync kite instruments: %w", err)
 		}
 		logger.Info("sync-instruments: Kite sync completed", "duration", time.Since(start))
+	}
+
+	if syncKotak {
+		logger.Info("sync-instruments: syncing Kotak Neo scrip master...")
+		start := time.Now()
+		if err := syncer.SyncKotak(ctx, nil); err != nil {
+			return fmt.Errorf("sync kotak instruments: %w", err)
+		}
+		logger.Info("sync-instruments: Kotak sync completed", "duration", time.Since(start))
 	}
 
 	logger.Info("sync-instruments: successfully synced all requested instruments")
@@ -402,6 +415,17 @@ func run(logger *slog.Logger) error {
 		return instrumentCache.AutoLoadActiveFO(c)
 	})
 
+	// Background check on boot to populate any empty broker instrument tables (e.g. Dhan, Kite)
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := instrumentSyncer.EnsureBrokerInstrumentsSynced(bgCtx, []string{"kite", "dhan"}, func(c context.Context) error {
+			return instrumentCache.AutoLoadActiveFO(c)
+		}); err != nil {
+			logger.Warn("ensure broker instruments synced failed on boot", "error", err)
+		}
+	}()
+
 	brokerRegistry := broker.NewRegistry()
 	kiteBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
 		var proxyCfg *kite.ProxyConfig
@@ -414,7 +438,7 @@ func run(logger *slog.Logger) error {
 				ClientSecret: acc.ProxyPassword,
 			}
 		}
-		return kite.NewLiveBroker(acc.ApiKey, acc.AccessToken, proxyCfg)
+		return kite.NewLiveBroker(acc.ApiKey, acc.AccessToken, proxyCfg, instrumentCache)
 	})
 	dhanBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
 		var proxyCfg *dhan.ProxyConfig
@@ -433,9 +457,30 @@ func run(logger *slog.Logger) error {
 		}
 		return dhan.NewLiveBroker(clientID, acc.AccessToken, proxyCfg, instrumentCache)
 	})
+	kotakBrokerFactory := broker.FactoryFunc(func(ctx context.Context, acc broker.BrokerAccount) (broker.Broker, error) {
+		var proxyURL string
+		if acc.ProxyHost != "" {
+			u := url.URL{
+				Scheme: "https",
+				Host:   fmt.Sprintf("%s:%d", acc.ProxyHost, acc.ProxyPort),
+			}
+			if acc.ProxyUsername != "" {
+				u.User = url.UserPassword(acc.ProxyUsername, acc.ProxyPassword)
+			}
+			proxyURL = u.String()
+		}
+		consumerKey := strings.TrimSpace(acc.ApiSecret)
+		var session *kotak.TradeSessionJSON
+		if acc.AccessToken != "" {
+			session, _ = kotak.DeserializeTradeSession(acc.AccessToken)
+		}
+		return kotak.NewLiveBroker(consumerKey, session, proxyURL, instrumentCache)
+	})
 	brokerRegistry.Register("kite", kiteBrokerFactory)
 	brokerRegistry.Register("zerodha", kiteBrokerFactory)
 	brokerRegistry.Register("dhan", dhanBrokerFactory)
+	brokerRegistry.Register("kotak", kotakBrokerFactory)
+	brokerRegistry.Register("kotakneo", kotakBrokerFactory)
 	brokerRegistry.Register("testbroker", testbroker.NewBrokerFactory())
 
 	rawKiteSyncer := &kite.PortfolioSyncer{
@@ -444,10 +489,16 @@ func run(logger *slog.Logger) error {
 	rawDhanSyncer := &dhan.PortfolioSyncer{
 		Store: store,
 	}
+	kotakRenewer := kotak.NewRenewer(store, logger.With("component", "kotak_renewer"))
+	rawKotakSyncer := &kotak.PortfolioSyncer{
+		Store:   store,
+		Renewer: kotakRenewer,
+	}
 	multiSyncer := &multiBrokerSyncer{
-		store:      store,
-		kiteSyncer: rawKiteSyncer,
-		dhanSyncer: rawDhanSyncer,
+		store:       store,
+		kiteSyncer:  rawKiteSyncer,
+		dhanSyncer:  rawDhanSyncer,
+		kotakSyncer: rawKotakSyncer,
 	}
 	syncer := kite.NewDebouncedSyncer(multiSyncer, 500*time.Millisecond)
 
@@ -601,10 +652,14 @@ func run(logger *slog.Logger) error {
 	tickerManager := ticker.NewManager(store, poller, logger.With("component", "ticker_manager"))
 	kiteTickerFactory := kite.NewTickerFactory(masterFillQueue, logger.With("component", "kite_ticker"))
 	dhanTickerFactory := dhanws.NewTickerFactory(masterFillQueue, instrumentCache, logger.With("component", "dhan_ticker"))
+	kotakTickerFactory := kotakws.NewMasterTickerFactory(masterFillQueue, instrumentCache, logger.With("component", "kotak_ticker"))
+	kotakTickerFactory.SetProxyResolver(store)
 	testbrokerTickerFactory := testbroker.NewTickerFactory(masterFillQueue, logger.With("component", "testbroker_ticker"))
 	tickerManager.RegisterFactory("kite", kiteTickerFactory)
 	tickerManager.RegisterFactory("zerodha", kiteTickerFactory)
 	tickerManager.RegisterFactory("dhan", dhanTickerFactory)
+	tickerManager.RegisterFactory("kotak", kotakTickerFactory)
+	tickerManager.RegisterFactory("kotakneo", kotakTickerFactory)
 	tickerManager.RegisterFactory("testbroker", testbrokerTickerFactory)
 	defer tickerManager.Shutdown()
 
@@ -635,6 +690,17 @@ func run(logger *slog.Logger) error {
 			logger.Error("dhan token renewer stopped unexpectedly", "error", err)
 		}
 	}()
+
+	// Scheduled Kotak Neo token renewal (06:30 AM IST)
+	kotakRenewer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+		evicter.Evict(accountID)
+		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
+	}
+	rawKotakSyncer.OnTokenRefreshed = func(refreshCtx context.Context, accountID uuid.UUID) error {
+		evicter.Evict(accountID)
+		return handleTokenRefreshed(refreshCtx, accountID, store, tickerManager, followerRegistrar, logger)
+	}
+	kotakRenewer.Start(ctx)
 
 	// Periodic session expiration cleaner
 	go func() {
@@ -735,6 +801,8 @@ func run(logger *slog.Logger) error {
 		httpapi.WithBrokerEvicter(evicter),
 		httpapi.WithTelemetry(telemetryCollector),
 		httpapi.WithExecutionFeed(execFeed),
+		httpapi.WithInstrumentSyncer(instrumentSyncer),
+		httpapi.WithInstrumentCache(instrumentCache),
 	)
 
 	if frontend.HasEmbeddedUI() {
@@ -792,6 +860,7 @@ type multiBrokerSyncer struct {
 	store       accountBrokerStore
 	kiteSyncer  portfolioSyncer
 	dhanSyncer  portfolioSyncer
+	kotakSyncer portfolioSyncer
 	syncAccount func(ctx context.Context, brokerName string, id uuid.UUID) error
 }
 
@@ -809,6 +878,10 @@ func (m *multiBrokerSyncer) SyncAccountPortfolio(ctx context.Context, accountID 
 	case "dhan":
 		if m.dhanSyncer != nil {
 			syncErr = m.dhanSyncer.SyncAccountPortfolio(ctx, accountID)
+		}
+	case "kotak", "kotakneo":
+		if m.kotakSyncer != nil {
+			syncErr = m.kotakSyncer.SyncAccountPortfolio(ctx, accountID)
 		}
 	default:
 		if m.kiteSyncer != nil {

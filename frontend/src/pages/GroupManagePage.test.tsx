@@ -755,6 +755,152 @@ describe('GroupManagePage', () => {
     expect(await screen.findByText('Account saved successfully.')).toBeInTheDocument()
     expect(await screen.findByText('Follower Updated Name')).toBeInTheDocument()
   })
+
+  it('supports adding multiple rows, filters selected accounts from other rows, and submits batch', async () => {
+    const unattached2: api.Account = {
+      id: 'f3',
+      name: 'Second Unattached',
+      role: 'follower',
+      broker: 'dhan',
+      brokerAccountId: 'DH9999',
+      masterId: null,
+      cloneFactor: null,
+      maxQtyPerOrder: null,
+      enabled: false,
+      active: true,
+      status: 'ok',
+    }
+
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [],
+    })
+    vi.spyOn(api, 'getAccounts').mockImplementation((ids?: string[]) => {
+      return Promise.resolve(ids ? [master] : [master, unattached, unattached2])
+    })
+    vi.spyOn(api, 'getAccount').mockImplementation((id: string) => {
+      const base = id === 'f2' ? unattached : unattached2
+      return Promise.resolve({
+        ...base,
+        masterId: 'm1',
+        groupId: 'm1',
+        cloneFactor: id === 'f2' ? '1' : '2.5',
+        enabled: true,
+      })
+    })
+    const batchSpy = vi.spyOn(api, 'addAccountsToGroup').mockResolvedValue(undefined)
+
+    renderPage()
+    await screen.findByText('ZX1234')
+
+    // Initial state: 1 row
+    let rows = screen.getAllByTestId('group-add-row')
+    expect(rows).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Add to group' })).toBeInTheDocument()
+
+    // Click "+ Add another account"
+    const addMoreBtn = screen.getByRole('button', { name: '+ Add another account' })
+    await userEvent.click(addMoreBtn)
+
+    // Now 2 rows
+    rows = screen.getAllByTestId('group-add-row')
+    expect(rows).toHaveLength(2)
+
+    // Select f2 in row 1
+    const row1AccountSelect = within(rows[0]).getByLabelText('Account')
+    await userEvent.selectOptions(row1AccountSelect, 'f2')
+
+    // Row 2 account select options should exclude f2
+    const row2AccountSelect = within(rows[1]).getByLabelText('Account')
+    const row2Options = within(row2AccountSelect).getAllByRole('option')
+    const row2OptionValues = row2Options.map((o) => (o as HTMLOptionElement).value)
+    expect(row2OptionValues).toContain('f3')
+    expect(row2OptionValues).not.toContain('f2')
+
+    // Select f3 in row 2
+    await userEvent.selectOptions(row2AccountSelect, 'f3')
+
+    // Edit clone factor on row 2
+    const row2CloneFactor = within(rows[1]).getByLabelText('Clone Factor')
+    await userEvent.clear(row2CloneFactor)
+    await userEvent.type(row2CloneFactor, '2.5')
+
+    // Submit button text shows count: "Add 2 Accounts to Group"
+    const submitBtn = screen.getByRole('button', { name: 'Add 2 Accounts to Group' })
+    expect(submitBtn).toBeInTheDocument()
+    expect(submitBtn).not.toBeDisabled()
+
+    // Submit the batch
+    await userEvent.click(submitBtn)
+
+    expect(batchSpy).toHaveBeenCalledWith('m1', [
+      { accountId: 'f2', cloneFactor: '1', maxQtyPerOrder: undefined },
+      { accountId: 'f3', cloneFactor: '2.5', maxQtyPerOrder: undefined },
+    ])
+    expect(await screen.findByText('2 followers added to group successfully.')).toBeInTheDocument()
+
+    // Form resets to 1 clean row
+    expect(screen.getAllByTestId('group-add-row')).toHaveLength(1)
+  })
+
+  it('clicking trash button removes row and restores account to other rows', async () => {
+    const unattached2: api.Account = {
+      id: 'f3',
+      name: 'Second Unattached',
+      role: 'follower',
+      broker: 'dhan',
+      brokerAccountId: 'DH9999',
+      masterId: null,
+      cloneFactor: null,
+      maxQtyPerOrder: null,
+      enabled: false,
+      active: true,
+      status: 'ok',
+    }
+
+    vi.spyOn(api, 'getGroupDetail').mockResolvedValue({
+      id: 'm1',
+      name: 'Group 1',
+      masterId: 'm1',
+      masterAccountId: 'ZX1234',
+      masterActive: true,
+      followers: [],
+    })
+    vi.spyOn(api, 'getAccounts').mockImplementation((ids?: string[]) => {
+      return Promise.resolve(ids ? [master] : [master, unattached, unattached2])
+    })
+
+    renderPage()
+    await screen.findByText('ZX1234')
+
+    // Add a second row
+    await userEvent.click(screen.getByRole('button', { name: '+ Add another account' }))
+    let rows = screen.getAllByTestId('group-add-row')
+    expect(rows).toHaveLength(2)
+
+    // Select f2 in row 1
+    await userEvent.selectOptions(within(rows[0]).getByLabelText('Account'), 'f2')
+
+    // Row 2 excludes f2
+    expect(within(within(rows[1]).getByLabelText('Account')).queryByRole('option', { name: /Unattached Follower/i })).not.toBeInTheDocument()
+
+    // Click trash button on row 1
+    const removeRow1Btn = within(rows[0]).getByRole('button', { name: 'Remove row' })
+    await userEvent.click(removeRow1Btn)
+
+    // Only 1 row remains
+    rows = screen.getAllByTestId('group-add-row')
+    expect(rows).toHaveLength(1)
+
+    // Unattached Follower f2 is available again in the remaining row
+    expect(within(within(rows[0]).getByLabelText('Account')).getByRole('option', { name: /Unattached Follower/i })).toBeInTheDocument()
+    // Submit button reverts to single "Add to group"
+    expect(screen.getByRole('button', { name: 'Add to group' })).toBeInTheDocument()
+  })
 })
 
 

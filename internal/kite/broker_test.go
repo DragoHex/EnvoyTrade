@@ -119,6 +119,128 @@ func TestBroker_PlaceOrder_TranslatesAndDelegates(t *testing.T) {
 	}
 }
 
+type fakeResolver struct {
+	targetSymbol string
+	err          error
+}
+
+func (f *fakeResolver) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (string, string, int, string, error) {
+	if f.err != nil {
+		return "", "", 0, "", f.err
+	}
+	return exchange, "", 100, f.targetSymbol, nil
+}
+
+func TestBroker_PlaceOrder_ResolvesSymbolViaLookup(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-123"}
+	resolver := &fakeResolver{targetSymbol: "CRUDEOIL26NOV5000PE"}
+	b := kite.NewBroker(api, true, resolver)
+
+	params := broker.OrderParams{
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL17NOV265000PE",
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Quantity:        100,
+	}
+
+	resp, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if resp.OrderID != "kite-123" {
+		t.Errorf("OrderID = %q, want kite-123", resp.OrderID)
+	}
+	if api.placedVariety.Tradingsymbol != "CRUDEOIL26NOV5000PE" {
+		t.Errorf("Tradingsymbol = %q, want CRUDEOIL26NOV5000PE", api.placedVariety.Tradingsymbol)
+	}
+}
+
+func TestBroker_PlaceOrder_ResolverErrorFallsBackToOriginalSymbol(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-456"}
+	resolver := &fakeResolver{err: errors.New("not found")}
+	b := kite.NewBroker(api, true, resolver)
+
+	params := broker.OrderParams{
+		Exchange:        "MCX",
+		Tradingsymbol:   "CRUDEOIL17NOV265000PE",
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Quantity:        100,
+	}
+
+	resp, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if resp.OrderID != "kite-456" {
+		t.Errorf("OrderID = %q, want kite-456", resp.OrderID)
+	}
+	if api.placedVariety.Tradingsymbol != "CRUDEOIL17NOV265000PE" {
+		t.Errorf("Tradingsymbol = %q, want CRUDEOIL17NOV265000PE", api.placedVariety.Tradingsymbol)
+	}
+}
+
+func TestBroker_PlaceOrder_NormalizesExchangeAndCashEquities(t *testing.T) {
+	api := &fakeKiteAPI{orderID: "kite-789"}
+	b := kite.NewBroker(api, true)
+
+	// 1. MCX_FO segment mapped to MCX
+	params := broker.OrderParams{
+		Exchange:        "MCX_FO",
+		Tradingsymbol:   "CRUDEOIL26NOV5000PE",
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Quantity:        100,
+	}
+
+	_, err := b.PlaceOrder(context.Background(), "", params)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if api.placedVariety.Exchange != "MCX" {
+		t.Errorf("Exchange = %q, want MCX", api.placedVariety.Exchange)
+	}
+
+	// 2. NSE_FO segment mapped to NFO
+	params2 := broker.OrderParams{
+		Exchange:        "NSE_FO",
+		Tradingsymbol:   "NIFTY26N0328350CE",
+		TransactionType: "BUY",
+		Product:         "NRML",
+		OrderType:       "MARKET",
+		Quantity:        65,
+	}
+	_, err = b.PlaceOrder(context.Background(), "", params2)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if api.placedVariety.Exchange != "NFO" {
+		t.Errorf("Exchange = %q, want NFO", api.placedVariety.Exchange)
+	}
+
+	// 3. Cash Equity RELIANCE-EQ mapped to RELIANCE on NSE
+	params3 := broker.OrderParams{
+		Exchange:        "NSE",
+		Tradingsymbol:   "RELIANCE-EQ",
+		TransactionType: "BUY",
+		Product:         "CNC",
+		OrderType:       "MARKET",
+		Quantity:        10,
+	}
+	_, err = b.PlaceOrder(context.Background(), "", params3)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if api.placedVariety.Tradingsymbol != "RELIANCE" {
+		t.Errorf("Tradingsymbol = %q, want RELIANCE (stripped -EQ)", api.placedVariety.Tradingsymbol)
+	}
+}
+
+
 func TestBroker_PlaceOrder_LimitOrder_MapsPriceAndTriggerPrice(t *testing.T) {
 	api := &fakeKiteAPI{orderID: "kite-limit-1"}
 	b := kite.NewBroker(api, true)

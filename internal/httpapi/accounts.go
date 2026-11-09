@@ -13,6 +13,7 @@ import (
 	"envoytrade/internal/crypto"
 	"envoytrade/internal/dhan"
 	"envoytrade/internal/domain"
+	"envoytrade/internal/kotak"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -43,6 +44,7 @@ type AccountsStore interface {
 	DeleteFollowLink(ctx context.Context, followerID uuid.UUID) error
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
 	CheckAccountQuota(ctx context.Context, userID uuid.UUID, broker string) error
+	SwitchAccountRole(ctx context.Context, params domain.SwitchAccountRoleParams) (domain.SwitchAccountRoleResult, error)
 }
 
 type accountResponse struct {
@@ -175,9 +177,9 @@ type postAccountRequest struct {
 	TotpSecret      *string `json:"totpSecret"`
 	IP              *string `json:"ip"`
 	IPAddress       *string `json:"ipAddress"`
-	CloneFactor     *string `json:"cloneFactor"`
-	CapitalRatio    *string `json:"capitalRatio"`
-	MaxQtyPerOrder  *int    `json:"maxQtyPerOrder"`
+	CloneFactor     any     `json:"cloneFactor"`
+	CapitalRatio    any     `json:"capitalRatio"`
+	MaxQtyPerOrder  any     `json:"maxQtyPerOrder"`
 	GroupID         *string `json:"groupId"`
 	MasterID        *string `json:"masterId"`
 }
@@ -191,8 +193,11 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	broker := strings.ToLower(strings.TrimSpace(req.Broker))
-	if broker != "kite" && broker != "testbroker" && broker != "dhan" {
-		writeError(w, http.StatusBadRequest, `broker must be "kite", "dhan", or "testbroker"`)
+	if broker == "kotak" {
+		broker = "kotakneo"
+	}
+	if broker != "kite" && broker != "testbroker" && broker != "dhan" && broker != "kotakneo" {
+		writeError(w, http.StatusBadRequest, `broker must be "kite", "dhan", "kotakneo", or "testbroker"`)
 		return
 	}
 	req.Broker = broker
@@ -211,6 +216,15 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ApiKey = strings.TrimSpace(req.ApiKey)
 	req.ApiSecret = strings.TrimSpace(req.ApiSecret)
+
+	if broker == "kotakneo" {
+		normMobile, err := kotak.NormalizeMobileNumber(req.ApiKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid Kotak Neo mobile number: "+err.Error())
+			return
+		}
+		req.ApiKey = normMobile
+	}
 
 	if u, ok := domain.UserFromContext(r.Context()); ok && u != nil {
 		if err := h.store.CheckAccountQuota(r.Context(), u.ID, broker); err != nil {
@@ -251,23 +265,44 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cloneFactor decimal.Decimal = decimal.NewFromInt(1)
+	var parsedMaxQty *int
 	var masterID uuid.UUID
 	var groupID uuid.UUID
 	var groupName string
 	var attachGroup bool
 	if req.Role == "follower" {
-		rawCF := req.CloneFactor
-		if rawCF == nil {
-			rawCF = req.CapitalRatio
+		cf, hasCF, err := parseFlexibleDecimal(req.CloneFactor)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid cloneFactor: "+err.Error())
+			return
 		}
-		if rawCF != nil && strings.TrimSpace(*rawCF) != "" {
-			var err error
-			cloneFactor, err = decimal.NewFromString(strings.TrimSpace(*rawCF))
-			if err != nil || cloneFactor.Sign() <= 0 {
-				writeError(w, http.StatusBadRequest, "invalid cloneFactor")
+		if !hasCF {
+			var hasCR bool
+			cf, hasCR, err = parseFlexibleDecimal(req.CapitalRatio)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid capitalRatio: "+err.Error())
 				return
 			}
+			if !hasCR {
+				cf = decimal.NewFromInt(1)
+			}
 		}
+		if cf.Sign() <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid cloneFactor: must be greater than 0")
+			return
+		}
+		cloneFactor = cf
+
+		pQty, err := parseFlexibleInt(req.MaxQtyPerOrder)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid maxQtyPerOrder: "+err.Error())
+			return
+		}
+		if pQty != nil && *pQty < 0 {
+			writeError(w, http.StatusBadRequest, "invalid maxQtyPerOrder: cannot be negative")
+			return
+		}
+		parsedMaxQty = pQty
 		if req.GroupID != nil && strings.TrimSpace(*req.GroupID) != "" {
 			parsedGroup, err := uuid.Parse(strings.TrimSpace(*req.GroupID))
 			if err != nil {
@@ -416,8 +451,8 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 	if req.Role == "follower" {
 		if attachGroup {
 			maxQty := 0
-			if req.MaxQtyPerOrder != nil {
-				maxQty = *req.MaxQtyPerOrder
+			if parsedMaxQty != nil {
+				maxQty = *parsedMaxQty
 			}
 			link := domain.FollowLink{
 				FollowerID:     id,
@@ -444,7 +479,7 @@ func (h *handlers) postAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			cloneFactorStr := cloneFactor.String()
 			resp.CloneFactor = &cloneFactorStr
-			resp.MaxQtyPerOrder = req.MaxQtyPerOrder
+			resp.MaxQtyPerOrder = parsedMaxQty
 		}
 		if h.followerRegistrar != nil {
 			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
@@ -457,9 +492,9 @@ type patchAccountRequest struct {
 	Name           *string `json:"name"`
 	Enabled        *bool   `json:"enabled"`
 	Active         *bool   `json:"active"`
-	CloneFactor    *string `json:"cloneFactor"`
-	CapitalRatio   *string `json:"capitalRatio"`
-	MaxQtyPerOrder *int    `json:"maxQtyPerOrder"`
+	CloneFactor    any     `json:"cloneFactor"`
+	CapitalRatio   any     `json:"capitalRatio"`
+	MaxQtyPerOrder any     `json:"maxQtyPerOrder"`
 	Status         *string `json:"status"`
 	IP             *string `json:"ip"`
 	IPAddress      *string `json:"ipAddress"`
@@ -590,6 +625,9 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to detach from group")
 				return
 			}
+			if h.followerRegistrar != nil {
+				h.followerRegistrar.UnregisterFollower(id)
+			}
 			resp["groupId"] = nil
 			resp["masterId"] = nil
 			resp["groupName"] = nil
@@ -613,14 +651,14 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			// Delete existing link if present, then insert new link
 			_ = h.store.DeleteFollowLink(r.Context(), id)
 			cf := decimal.NewFromInt(1)
-			if req.CloneFactor != nil && strings.TrimSpace(*req.CloneFactor) != "" {
-				if parsedCF, err := decimal.NewFromString(strings.TrimSpace(*req.CloneFactor)); err == nil && parsedCF.Sign() > 0 {
-					cf = parsedCF
-				}
+			if parsedCF, hasCF, err := parseFlexibleDecimal(req.CloneFactor); err == nil && hasCF && parsedCF.Sign() > 0 {
+				cf = parsedCF
 			}
 			maxQty := 0
-			if req.MaxQtyPerOrder != nil {
-				maxQty = *req.MaxQtyPerOrder
+			var parsedMaxQty *int
+			if pQty, err := parseFlexibleInt(req.MaxQtyPerOrder); err == nil && pQty != nil && *pQty >= 0 {
+				maxQty = *pQty
+				parsedMaxQty = pQty
 			}
 			err = h.store.CreateFollowLink(r.Context(), domain.FollowLink{
 				FollowerID:     id,
@@ -634,11 +672,14 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to attach account to group")
 				return
 			}
+			if h.followerRegistrar != nil {
+				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+			}
 			resp["groupId"] = gDetail.GroupID.String()
 			resp["groupName"] = gDetail.GroupName
 			resp["masterId"] = gDetail.MasterID.String()
 			resp["cloneFactor"] = cf.String()
-			resp["maxQtyPerOrder"] = req.MaxQtyPerOrder
+			resp["maxQtyPerOrder"] = parsedMaxQty
 			updated = true
 		}
 	}
@@ -848,20 +889,29 @@ func (h *handlers) applyFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 		cfInput = req.CapitalRatio
 	}
 	if cfInput != nil {
-		parsed, err := decimal.NewFromString(*cfInput)
-		if err != nil || parsed.Sign() <= 0 {
+		parsed, hasVal, err := parseFlexibleDecimal(cfInput)
+		if err != nil || (hasVal && parsed.Sign() <= 0) {
 			writeError(w, http.StatusBadRequest, "invalid cloneFactor")
 			return nil, false
 		}
-		cloneFactor = &parsed
+		if hasVal {
+			cloneFactor = &parsed
+		}
 	}
 	if cloneFactor == nil {
 		writeError(w, http.StatusBadRequest, "account has no cloneFactor to update")
 		return nil, false
 	}
 	maxQtyPerOrder := current.MaxQtyPerOrder
+	var parsedMaxQty *int
 	if req.MaxQtyPerOrder != nil {
-		maxQtyPerOrder = req.MaxQtyPerOrder
+		pQty, err := parseFlexibleInt(req.MaxQtyPerOrder)
+		if err != nil || (pQty != nil && *pQty < 0) {
+			writeError(w, http.StatusBadRequest, "invalid maxQtyPerOrder")
+			return nil, false
+		}
+		maxQtyPerOrder = pQty
+		parsedMaxQty = pQty
 	}
 
 	if writePatchStoreError(w, h.store.UpdateFollowLinkTerms(r.Context(), id, *cloneFactor, maxQtyPerOrder)) {
@@ -869,11 +919,11 @@ func (h *handlers) applyFollowLinkTerms(w http.ResponseWriter, r *http.Request, 
 	}
 
 	resp := map[string]any{}
-	if cfInput != nil {
-		resp["cloneFactor"] = *cfInput
+	if cfInput != nil && cloneFactor != nil {
+		resp["cloneFactor"] = cloneFactor.String()
 	}
 	if req.MaxQtyPerOrder != nil {
-		resp["maxQtyPerOrder"] = *req.MaxQtyPerOrder
+		resp["maxQtyPerOrder"] = parsedMaxQty
 	}
 	return resp, true
 }
@@ -931,4 +981,122 @@ func (h *handlers) deleteAccountGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+type switchAccountRoleRequest struct {
+	TargetRole string  `json:"targetRole"`
+	Role       string  `json:"role"`
+	ReleaseIP  bool    `json:"releaseIp"`
+	IP         *string `json:"ip"`
+}
+
+func (h *handlers) switchAccountRole(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	var req switchAccountRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON body")
+		return
+	}
+
+	targetRole := strings.TrimSpace(req.TargetRole)
+	if targetRole == "" {
+		targetRole = strings.TrimSpace(req.Role)
+	}
+	if targetRole != "master" && targetRole != "follower" {
+		writeError(w, http.StatusBadRequest, "role must be 'master' or 'follower'")
+		return
+	}
+
+	accs, err := h.store.Accounts(r.Context(), []uuid.UUID{id})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check account")
+		return
+	}
+	if len(accs) == 0 {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	currentAcc := accs[0]
+
+	var ipToSet string
+	if targetRole == "follower" {
+		var candidateIP *string
+		if req.IP != nil && strings.TrimSpace(*req.IP) != "" {
+			candidateIP = req.IP
+		} else if currentAcc.IPAddress != "" {
+			candidateIP = &currentAcc.IPAddress
+		}
+
+		validIP, err := validateIP(candidateIP, "follower")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		proxyIP, err := h.store.ProxyIPByAddress(r.Context(), validIP)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeError(w, http.StatusBadRequest, "IP address is not registered in proxy pool")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to check proxy IP")
+			return
+		}
+		if !proxyIP.MatchesBroker(currentAcc.Broker) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("proxy IP %s is whitelisted for %s, not %s", validIP, proxyIP.WhitelistedBrokers, currentAcc.Broker))
+			return
+		}
+		ipToSet = validIP
+	}
+
+	result, err := h.store.SwitchAccountRole(r.Context(), domain.SwitchAccountRoleParams{
+		AccountID:  id,
+		TargetRole: targetRole,
+		ReleaseIP:  req.ReleaseIP,
+		IPAddress:  ipToSet,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "account not found")
+			return
+		}
+		if errors.Is(err, domain.ErrConflict) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to switch account role")
+		return
+	}
+
+	if targetRole == "master" {
+		if h.followerRegistrar != nil {
+			h.followerRegistrar.UnregisterFollower(id)
+		}
+		if result.Active && result.AuthStatus == "authenticated" && h.tickerMgr != nil {
+			_ = h.tickerMgr.StartMaster(r.Context(), id)
+		}
+		if req.ReleaseIP && h.brokerEvicter != nil {
+			h.brokerEvicter.Evict(id)
+		}
+	} else {
+		if h.tickerMgr != nil {
+			_ = h.tickerMgr.StopMaster(id)
+		}
+		if result.Active && h.followerRegistrar != nil {
+			_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
+		}
+		if result.HadIP != result.NewIP && h.brokerEvicter != nil {
+			h.brokerEvicter.Evict(id)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"role":   targetRole,
+	})
 }

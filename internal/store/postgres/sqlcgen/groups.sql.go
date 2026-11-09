@@ -60,12 +60,64 @@ func (q *Queries) DeleteGroup(ctx context.Context, id uuid.UUID) (int64, error) 
 	return result.RowsAffected(), nil
 }
 
+const deleteGroupAndContainedAccounts = `-- name: DeleteGroupAndContainedAccounts :execrows
+WITH del_links AS (
+    DELETE FROM follow_links WHERE group_id = $1
+),
+del_positions AS (
+    DELETE FROM account_positions WHERE account_id = ANY($2::uuid[])
+),
+del_holdings AS (
+    DELETE FROM account_holdings WHERE account_id = ANY($2::uuid[])
+),
+del_margins AS (
+    DELETE FROM account_margins WHERE account_id = ANY($2::uuid[])
+),
+del_group AS (
+    DELETE FROM groups WHERE id = $1
+)
+UPDATE accounts
+SET deleted_at = now(),
+    ip_address = '',
+    active = false,
+    updated_at = now()
+WHERE id = ANY($2::uuid[]) AND deleted_at IS NULL
+`
+
+type DeleteGroupAndContainedAccountsParams struct {
+	GroupID uuid.UUID
+	Column2 []uuid.UUID
+}
+
+func (q *Queries) DeleteGroupAndContainedAccounts(ctx context.Context, arg DeleteGroupAndContainedAccountsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupAndContainedAccounts, arg.GroupID, arg.Column2)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteGroupByMasterID = `-- name: DeleteGroupByMasterID :execrows
 DELETE FROM groups WHERE master_id = $1
 `
 
 func (q *Queries) DeleteGroupByMasterID(ctx context.Context, masterID uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteGroupByMasterID, masterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteGroupReleasingAccounts = `-- name: DeleteGroupReleasingAccounts :execrows
+WITH del_links AS (
+    DELETE FROM follow_links WHERE group_id = $1
+)
+DELETE FROM groups WHERE id = $1
+`
+
+func (q *Queries) DeleteGroupReleasingAccounts(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupReleasingAccounts, id)
 	if err != nil {
 		return 0, err
 	}
@@ -119,6 +171,27 @@ func (q *Queries) GroupByMasterID(ctx context.Context, masterID uuid.UUID) (Grou
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const groupContainedAccountIDs = `-- name: GroupContainedAccountIDs :one
+SELECT g.id, g.master_id, ARRAY_REMOVE(ARRAY_AGG(f.follower_id), NULL)::uuid[] AS follower_ids
+FROM groups g
+LEFT JOIN follow_links f ON f.group_id = g.id
+WHERE g.id = $1 OR g.master_id = $1
+GROUP BY g.id, g.master_id
+`
+
+type GroupContainedAccountIDsRow struct {
+	ID          uuid.UUID
+	MasterID    uuid.UUID
+	FollowerIds []uuid.UUID
+}
+
+func (q *Queries) GroupContainedAccountIDs(ctx context.Context, id uuid.UUID) (GroupContainedAccountIDsRow, error) {
+	row := q.db.QueryRow(ctx, groupContainedAccountIDs, id)
+	var i GroupContainedAccountIDsRow
+	err := row.Scan(&i.ID, &i.MasterID, &i.FollowerIds)
 	return i, err
 }
 

@@ -194,6 +194,25 @@ type AccountAuthInfo struct {
 	AuthError           string
 }
 
+// SwitchAccountRoleParams contains options for switching an account's role.
+type SwitchAccountRoleParams struct {
+	AccountID  uuid.UUID
+	TargetRole string // "master" | "follower"
+	ReleaseIP  bool   // if true and targetRole == "master", clears ip_address
+	IPAddress  string // candidate IP if targetRole == "follower"
+}
+
+// SwitchAccountRoleResult contains metadata after a role switch for lifecycle management.
+type SwitchAccountRoleResult struct {
+	PreviousRole string
+	NewRole      string
+	Broker       string
+	Active       bool
+	AuthStatus   string
+	HadIP        string
+	NewIP        string
+}
+
 // PositionSyncParam represents one position row to sync.
 type PositionSyncParam struct {
 	Product      string

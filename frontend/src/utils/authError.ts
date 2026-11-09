@@ -26,10 +26,30 @@ export function formatAuthError(error?: string | null): string {
     lower.includes('dhan sync failed') ||
     lower.includes('connect login') ||
     lower.includes('kite login error') ||
-    lower.includes('kite 2fa error')
+    lower.includes('kite 2fa error') ||
+    lower.includes('kotak-neo api error')
 
   if (!hasBackendAPITraces) {
     return trimmed
+  }
+
+  if (
+    lower.includes('user not found') ||
+    lower.includes('ucc') ||
+    lower.includes('10564')
+  ) {
+    return 'Invalid Kotak Neo Client ID (UCC) or Trade API not enabled for this user'
+  }
+
+  if (
+    lower.includes('mobilenumber') ||
+    lower.includes('mobile number')
+  ) {
+    return 'Invalid Kotak Neo registered mobile number'
+  }
+
+  if (lower.includes('mpin')) {
+    return 'Invalid Kotak Neo MPIN'
   }
 
   if (

@@ -397,7 +397,18 @@ func (q *Queries) SetAccountAPISecret(ctx context.Context, arg SetAccountAPISecr
 }
 
 const setAccountAccessToken = `-- name: SetAccountAccessToken :execrows
-UPDATE accounts SET access_token = $2, token_expires_at = $3, auth_status = $4, auth_error = $5, updated_at = now() WHERE id = $1
+UPDATE accounts
+SET access_token = $2,
+    token_expires_at = $3,
+    auth_status = $4,
+    auth_error = $5,
+    status = CASE
+        WHEN $4 = 'authenticated' THEN 'active'
+        WHEN $4 = 'error' THEN 'error'
+        ELSE status
+    END,
+    updated_at = now()
+WHERE id = $1
 `
 
 type SetAccountAccessTokenParams struct {
@@ -489,6 +500,34 @@ type SetAccountNameParams struct {
 
 func (q *Queries) SetAccountName(ctx context.Context, arg SetAccountNameParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setAccountName, arg.ID, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountRoleAndIP = `-- name: SetAccountRoleAndIP :execrows
+UPDATE accounts
+SET role = $2::account_role,
+    ip_address = CASE WHEN $3::boolean THEN $4::text ELSE ip_address END,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type SetAccountRoleAndIPParams struct {
+	ID        uuid.UUID
+	Column2   string
+	SetIp     bool
+	IpAddress string
+}
+
+func (q *Queries) SetAccountRoleAndIP(ctx context.Context, arg SetAccountRoleAndIPParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountRoleAndIP,
+		arg.ID,
+		arg.Column2,
+		arg.SetIp,
+		arg.IpAddress,
+	)
 	if err != nil {
 		return 0, err
 	}

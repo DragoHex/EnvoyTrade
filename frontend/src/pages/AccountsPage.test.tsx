@@ -242,10 +242,33 @@ describe('AccountsPage', () => {
     expect(screen.queryByText('group page')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Confirm' }))
-    expect(deleteSpy).toHaveBeenCalledWith('g1')
+    expect(deleteSpy).toHaveBeenCalledWith('g1', false)
     await waitFor(() => expect(screen.getByText('Group deleted successfully.')).toBeInTheDocument())
     expect(screen.queryByText('Alpha Group')).not.toBeInTheDocument()
     expect(screen.queryByText('group page')).not.toBeInTheDocument()
+  })
+
+  it('checking "Delete contained Accounts" checkbox passes deleteAccounts=true to deleteGroup', async () => {
+    const group = { id: 'g1', name: 'Alpha Group', masterId: 'm1', masterAccountId: 'ZX1234', broker: 'kite', followerCount: 2, status: 'ok' as const }
+    vi.spyOn(api, 'getGroups').mockResolvedValue([group])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master])
+    const deleteSpy = vi.spyOn(api, 'deleteGroup').mockResolvedValue(undefined)
+
+    renderPage()
+    expect(await screen.findByText('Alpha Group')).toBeInTheDocument()
+
+    const deleteBtn = screen.getByRole('button', { name: 'Delete' })
+    await userEvent.click(deleteBtn)
+    expect(screen.getByRole('dialog', { name: 'Confirm Delete group' })).toBeInTheDocument()
+
+    const checkbox = screen.getByLabelText('Delete contained Accounts')
+    expect(checkbox).not.toBeChecked()
+    await userEvent.click(checkbox)
+    expect(checkbox).toBeChecked()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    expect(deleteSpy).toHaveBeenCalledWith('g1', true)
+    await waitFor(() => expect(screen.getByText('Group deleted successfully.')).toBeInTheDocument())
   })
 
   it('CreateGroupModal filters out already assigned master accounts', async () => {
@@ -367,5 +390,31 @@ describe('AccountsPage', () => {
     expect(screen.getByText('2 / 3')).toBeInTheDocument()
     expect(screen.getByText('Dhan')).toBeInTheDocument()
     expect(screen.getByText('0 / 2')).toBeInTheDocument()
+  })
+
+  it('on accounts tab, clicking role icon opens popover and selecting target role opens AccountDetailDrawer with switched role', async () => {
+    vi.spyOn(api, 'getGroups').mockResolvedValue([])
+    vi.spyOn(api, 'getAccounts').mockResolvedValue([master, follower])
+    vi.spyOn(api, 'switchAccountRole').mockResolvedValue({ status: 'ok', role: 'master' })
+
+    renderPage('?tab=accounts')
+    expect(await screen.findByText('Master Accounts')).toBeInTheDocument()
+
+    // Find role trigger for follower account
+    const roleBtns = screen.getAllByRole('button', { name: /Switch role from follower/i })
+    expect(roleBtns.length).toBeGreaterThan(0)
+
+    // Click to open popover
+    await userEvent.click(roleBtns[0])
+    expect(await screen.findByRole('dialog', { name: 'Switch to Master' })).toBeInTheDocument()
+
+    // Click popover button to switch
+    const switchBtn = screen.getByRole('button', { name: 'Switch to Master' })
+    await userEvent.click(switchBtn)
+
+    // AccountDetailDrawer opens with role switched to master
+    const drawer = screen.getByRole('dialog', { name: 'Edit Account' })
+    expect(drawer).toBeInTheDocument()
+    expect(screen.getByLabelText('Role')).toHaveValue('master')
   })
 })

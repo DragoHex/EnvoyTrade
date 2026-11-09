@@ -486,6 +486,22 @@ tr[data-testid='master-row'] td {
   margin: 0;
   opacity: 0.85;
 }
+.confirm-modal-option {
+  margin: 0.75rem 0 0.25rem;
+}
+.confirm-modal-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text);
+}
+.confirm-modal-checkbox-label input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
 .confirm-modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -742,13 +758,14 @@ tr[data-testid='master-row'] td {
 .group-add-form input,
 .group-add-form select {
   padding: 0.45rem 0.75rem;
+  height: 38px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text);
   font-size: 0.9rem;
   outline: none;
-  min-width: 160px;
+  box-sizing: border-box;
   transition: border-color 0.15s;
 }
 .group-add-form input:focus,
@@ -756,10 +773,137 @@ tr[data-testid='master-row'] td {
   border-color: var(--color-accent);
 }
 .group-add-form .themed-select-container {
-  min-width: 220px;
+  width: 100%;
 }
 .group-add-form .themed-number-wrapper {
-  min-width: 160px;
+  width: 100%;
+}
+
+/* Multi-account group add styles */
+.group-add-form-multi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.group-add-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1rem;
+  padding: 0 0.25rem 0.25rem;
+}
+
+.group-add-col-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.03em;
+}
+
+.group-add-rows {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.group-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1rem;
+}
+
+.group-add-field {
+  display: flex;
+  align-items: center;
+}
+
+.group-add-form .col-account {
+  width: 260px;
+  flex: 0 0 260px;
+}
+
+.group-add-form .col-clone-factor {
+  width: 140px;
+  flex: 0 0 140px;
+}
+
+.group-add-form .col-max-qty {
+  width: 140px;
+  flex: 0 0 140px;
+}
+
+.group-add-form .col-actions {
+  width: 32px;
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.group-add-actions-placeholder {
+  width: 32px;
+  height: 32px;
+  display: inline-block;
+}
+
+.group-add-remove-btn {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.group-add-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border);
+  width: 100%;
+  max-width: 620px;
+}
+
+.btn-secondary.group-add-more-btn {
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px dashed var(--color-accent);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  height: 38px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary.group-add-more-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.btn-secondary.group-add-more-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.group-add-form .btn-primary {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 
@@ -1396,7 +1540,8 @@ tr[data-testid='master-row'] td {
   transform: scale(1.12);
 }
 
-.role-icon-svg {
+.role-icon-svg,
+.role-icon-img {
   display: block;
   overflow: visible;
 }
@@ -1419,13 +1564,134 @@ tr[data-testid='master-row'] td {
   color: var(--color-accent);
 }
 
-/* Hobbit (Follower): maintains light-mode theme; green tint on hover */
+/* Hobbit (Follower): HTML <img> preserving full illustration colors; hue tint + halo glow matching master on hover */
 .role-icon-hobbit {
+  object-fit: contain;
   transition: filter 0.15s ease;
 }
 
 .role-icon-wrap:hover .role-icon-hobbit {
-  filter: url(#hobbit-green-hover);
+  filter: url(#hobbit-green-hover) drop-shadow(0 0 4px var(--color-accent)) drop-shadow(0 0 8px var(--color-accent));
+}
+
+/* Role switch popover & trigger button */
+.role-icon-trigger-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
+}
+
+.role-icon-trigger-btn:hover,
+.role-icon-trigger-btn:focus,
+.role-icon-trigger-btn:active {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.role-icon-trigger-btn .role-icon-wrap {
+  cursor: pointer;
+}
+
+.role-switch-popover {
+  position: fixed;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.role-switch-popover::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: var(--arrow-left, 50%);
+  transform: translateX(-50%) rotate(45deg);
+  width: 7px;
+  height: 7px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  z-index: 1;
+}
+
+.role-switch-popover[data-placement='bottom']::after {
+  top: -4px;
+  bottom: auto;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
+}
+
+.role-switch-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-text);
+  transition: background-color 0.15s ease, transform 0.1s ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.role-switch-btn:hover {
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+.role-switch-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+
+.role-switch-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  line-height: 1 !important;
+}
+
+.role-switch-icon .role-icon-svg,
+.role-switch-icon .role-icon-img {
+  display: block;
+}
+
+.role-switch-arrow {
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.role-switch-btn:hover .role-switch-arrow {
+  color: var(--color-accent);
 }
 
 /* Auth Status Icon: subtle micro-scale on hover */
@@ -3034,16 +3300,39 @@ nav a.user-badge-link.active:hover,
   }
 
   .group-add-form input,
-  .group-add-form select,
-  .group-add-form .btn-primary {
+  .group-add-form select {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
   }
 
-  .group-add-form .btn-primary {
+  .group-add-actions-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    box-sizing: border-box;
+  }
+
+  .group-add-actions-bar .group-add-more-btn,
+  .group-add-actions-bar .btn-primary {
+    flex: 1 1 0;
+    width: 50%;
+    min-width: 0;
+    height: 40px;
+    padding: 0.4rem 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    padding: 0.55rem 1rem;
+    text-align: center;
+    border-radius: 6px;
+    box-sizing: border-box;
   }
 
   /* 6. Mobile Popups & Responsive Modals */

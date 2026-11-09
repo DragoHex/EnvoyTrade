@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -116,10 +117,39 @@ func (h *handlers) postAdminProxyIPsBulk(w http.ResponseWriter, r *http.Request)
 
 // postAdminProxyIP handles POST /api/v1/admin/proxy-ips.
 func (h *handlers) postAdminProxyIP(w http.ResponseWriter, r *http.Request) {
-	var input domain.ProxyIPInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: expected proxy IP object")
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
 		return
+	}
+
+	trimmedBody := strings.TrimSpace(string(bodyBytes))
+
+	var input domain.ProxyIPInput
+	if strings.HasPrefix(trimmedBody, "{") || strings.HasPrefix(trimmedBody, "[") {
+		if err := json.Unmarshal(bodyBytes, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body: expected proxy IP object")
+			return
+		}
+		rawConfig := input.RawConfig
+		if rawConfig == "" {
+			rawConfig = input.RawConfigCamel
+		}
+		if rawConfig != "" {
+			parsedInput, err := domain.ParseProxyConfigText(rawConfig)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "failed to parse proxy config text: "+err.Error())
+				return
+			}
+			input = parsedInput
+		}
+	} else {
+		parsedInput, err := domain.ParseProxyConfigText(trimmedBody)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "failed to parse proxy config text: "+err.Error())
+			return
+		}
+		input = parsedInput
 	}
 
 	p, err := domain.ParseAndValidateProxyIP(input, time.Now())

@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -20,9 +23,10 @@ type GroupsStore interface {
 	GroupDetail(ctx context.Context, id uuid.UUID) (domain.GroupDetail, error)
 	AccountRole(ctx context.Context, id uuid.UUID) (string, error)
 	CreateFollowLink(ctx context.Context, link domain.FollowLink) error
+	CreateFollowLinksBatch(ctx context.Context, groupID uuid.UUID, links []domain.FollowLink) error
 	CreateGroup(ctx context.Context, id uuid.UUID, name string, masterID uuid.UUID) error
 	UpdateGroup(ctx context.Context, id uuid.UUID, name *string, masterID *uuid.UUID) error
-	DeleteGroup(ctx context.Context, id uuid.UUID) error
+	DeleteGroup(ctx context.Context, id uuid.UUID, deleteContainedAccounts bool) ([]uuid.UUID, error)
 }
 
 type groupSummaryResponse struct {
@@ -138,6 +142,10 @@ func (h *handlers) postGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create group")
 		return
+	}
+
+	if h.tickerMgr != nil {
+		_ = h.tickerMgr.StartMaster(r.Context(), masterID)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{
@@ -266,6 +274,10 @@ func (h *handlers) patchGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if masterIDPtr != nil && h.tickerMgr != nil {
+		_ = h.tickerMgr.StartMaster(r.Context(), *masterIDPtr)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -280,7 +292,9 @@ func (h *handlers) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.DeleteGroup(r.Context(), id); err != nil {
+	deleteAccounts := r.URL.Query().Get("delete_accounts") == "true"
+	deletedAccountIDs, err := h.store.DeleteGroup(r.Context(), id, deleteAccounts)
+	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			writeError(w, http.StatusConflict, "group has follower accounts attached; detach them first")
 			return
@@ -293,17 +307,36 @@ func (h *handlers) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if deleteAccounts {
+		for _, accID := range deletedAccountIDs {
+			if h.brokerEvicter != nil {
+				h.brokerEvicter.Evict(accID)
+			}
+			if h.tickerMgr != nil {
+				_ = h.tickerMgr.StopMaster(accID)
+			}
+			if h.followerRegistrar != nil {
+				h.followerRegistrar.UnregisterFollower(accID)
+			}
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 type postGroupFollowerRequest struct {
 	AccountID      string `json:"accountId"`
-	CloneFactor    string `json:"cloneFactor"`
-	CapitalRatio   string `json:"capitalRatio"`
-	MaxQtyPerOrder *int   `json:"maxQtyPerOrder"`
+	CloneFactor    any    `json:"cloneFactor"`
+	CapitalRatio   any    `json:"capitalRatio"`
+	MaxQtyPerOrder any    `json:"maxQtyPerOrder"`
 }
 
-// postGroupFollower attaches an existing follower-role account to a group.
+type postGroupFollowersBatchRequest struct {
+	Followers []postGroupFollowerRequest `json:"followers"`
+}
+
+// postGroupFollower attaches one or more existing follower-role accounts to a group.
+// Supports both a single account payload and a batch payload (top-level array or {"followers": [...]}).
 func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
@@ -315,26 +348,50 @@ func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req postGroupFollowerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) == 0 {
+		writeError(w, http.StatusBadRequest, "empty request body")
+		return
+	}
+
+	var items []postGroupFollowerRequest
+
+	if trimmedBody[0] == '[' {
+		// 1. Top-level array: [ {...}, {...} ]
+		if err := json.Unmarshal(trimmedBody, &items); err != nil {
+			writeError(w, http.StatusBadRequest, "malformed JSON array")
+			return
+		}
+	} else if trimmedBody[0] == '{' {
+		// 2. Object: could be batch wrapper {"followers": [...]} or legacy single object {"accountId": ...}
+		var batchReq postGroupFollowersBatchRequest
+		if err := json.Unmarshal(trimmedBody, &batchReq); err == nil && len(batchReq.Followers) > 0 {
+			items = batchReq.Followers
+		} else {
+			var singleReq postGroupFollowerRequest
+			if err := json.Unmarshal(trimmedBody, &singleReq); err != nil {
+				writeError(w, http.StatusBadRequest, "malformed JSON body")
+				return
+			}
+			if strings.TrimSpace(singleReq.AccountID) == "" {
+				writeError(w, http.StatusBadRequest, "missing accountId or non-empty followers list")
+				return
+			}
+			items = []postGroupFollowerRequest{singleReq}
+		}
+	} else {
 		writeError(w, http.StatusBadRequest, "malformed JSON body")
 		return
 	}
-	accountID, err := uuid.Parse(req.AccountID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid accountId")
-		return
-	}
-	cfStr := strings.TrimSpace(req.CloneFactor)
-	if cfStr == "" {
-		cfStr = strings.TrimSpace(req.CapitalRatio)
-	}
-	if cfStr == "" {
-		cfStr = "1"
-	}
-	cloneFactor, err := decimal.NewFromString(cfStr)
-	if err != nil || cloneFactor.Sign() <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid cloneFactor")
+
+	if len(items) == 0 {
+		writeError(w, http.StatusBadRequest, "followers list cannot be empty")
 		return
 	}
 
@@ -350,20 +407,6 @@ func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if role, err := h.store.AccountRole(r.Context(), accountID); err != nil || role != "follower" {
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, "failed to validate accountId")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "invalid accountId")
-		return
-	}
-
-	maxQty := 0
-	if req.MaxQtyPerOrder != nil {
-		maxQty = *req.MaxQtyPerOrder
-	}
-
 	linkMasterID := detail.MasterID
 	if linkMasterID == uuid.Nil && targetRole == "master" {
 		linkMasterID = targetID
@@ -373,24 +416,90 @@ func (h *handlers) postGroupFollower(w http.ResponseWriter, r *http.Request) {
 		linkGroupID = targetID
 	}
 
-	err = h.store.CreateFollowLink(r.Context(), domain.FollowLink{
-		FollowerID:     accountID,
-		GroupID:        linkGroupID,
-		MasterID:       linkMasterID,
-		CloneFactor:    cloneFactor,
-		MaxQtyPerOrder: maxQty,
-		Enabled:        true,
-	})
+	seenInBatch := make(map[uuid.UUID]struct{}, len(items))
+	domainLinks := make([]domain.FollowLink, len(items))
+
+	for i, item := range items {
+		accountID, err := uuid.Parse(strings.TrimSpace(item.AccountID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid accountId at index %d", i))
+			return
+		}
+		if _, seen := seenInBatch[accountID]; seen {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("duplicate accountId %s in request", item.AccountID))
+			return
+		}
+		seenInBatch[accountID] = struct{}{}
+
+		cloneFactor, hasCF, err := parseFlexibleDecimal(item.CloneFactor)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid cloneFactor for account %s: %v", item.AccountID, err))
+			return
+		}
+		if !hasCF {
+			var hasCR bool
+			cloneFactor, hasCR, err = parseFlexibleDecimal(item.CapitalRatio)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid capitalRatio for account %s: %v", item.AccountID, err))
+				return
+			}
+			if !hasCR {
+				cloneFactor = decimal.NewFromInt(1)
+			}
+		}
+		if cloneFactor.Sign() <= 0 {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid cloneFactor for account %s: must be greater than 0", item.AccountID))
+			return
+		}
+
+		role, err := h.store.AccountRole(r.Context(), accountID)
+		if err != nil || role != "follower" {
+			if err != nil && !errors.Is(err, domain.ErrNotFound) {
+				writeError(w, http.StatusInternalServerError, "failed to validate accountId")
+				return
+			}
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid accountId %s: account must exist and have follower role", item.AccountID))
+			return
+		}
+
+		parsedMaxQty, err := parseFlexibleInt(item.MaxQtyPerOrder)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid maxQtyPerOrder for account %s: %v", item.AccountID, err))
+			return
+		}
+		maxQty := 0
+		if parsedMaxQty != nil {
+			if *parsedMaxQty < 0 {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid maxQtyPerOrder for account %s: cannot be negative", item.AccountID))
+				return
+			}
+			maxQty = *parsedMaxQty
+		}
+
+		domainLinks[i] = domain.FollowLink{
+			FollowerID:     accountID,
+			GroupID:        linkGroupID,
+			MasterID:       linkMasterID,
+			CloneFactor:    cloneFactor,
+			MaxQtyPerOrder: maxQty,
+			Enabled:        true,
+		}
+	}
+
+	err = h.store.CreateFollowLinksBatch(r.Context(), linkGroupID, domainLinks)
 	if errors.Is(err, domain.ErrDuplicate) {
-		writeError(w, http.StatusConflict, "account is already attached to a group")
+		writeError(w, http.StatusConflict, "one or more accounts are already attached to a group")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to attach account to group")
+		writeError(w, http.StatusInternalServerError, "failed to attach accounts to group")
 		return
 	}
+
 	if h.followerRegistrar != nil {
-		_ = h.followerRegistrar.RegisterFollower(r.Context(), accountID)
+		for _, l := range domainLinks {
+			_ = h.followerRegistrar.RegisterFollower(r.Context(), l.FollowerID)
+		}
 	}
 	w.WriteHeader(http.StatusCreated)
 }

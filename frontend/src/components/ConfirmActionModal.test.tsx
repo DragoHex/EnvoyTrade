@@ -22,4 +22,16 @@ describe('ConfirmActionModal', () => {
     await userEvent.click(screen.getByText('Cancel'))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('renders children content when provided', () => {
+    render(() => (
+      <ConfirmActionModal open={true} label="Delete Group" onConfirm={() => {}} onCancel={() => {}}>
+        <label>
+          <input type="checkbox" />
+          <span>Delete contained Accounts</span>
+        </label>
+      </ConfirmActionModal>
+    ))
+    expect(screen.getByLabelText('Delete contained Accounts')).toBeInTheDocument()
+  })
 })

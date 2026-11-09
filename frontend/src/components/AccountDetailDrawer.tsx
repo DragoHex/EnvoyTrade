@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from 'solid-js'
 import {
   fetchAvailableProxyIPs,
+  switchAccountRole,
   type Account,
   type AvailableProxyIPsResponse,
   type CreateAccountRequest,
@@ -9,17 +10,25 @@ import {
 } from '../api'
 import { BrokerLogo, SUPPORTED_BROKERS, getBrokerConfig } from './BrokerLogo'
 import { ThemedSelect } from './ThemedSelect'
+import { ConfirmActionModal } from './ConfirmActionModal'
 import { isValidIP } from '../utils/ip'
 import { formatAuthError } from '../utils/authError'
 
+function normalizeBroker(b: string): string {
+  const s = b.toLowerCase().trim()
+  if (s === 'kite') return 'zerodha'
+  if (s === 'kotakneo' || s === 'kotak neo' || s === 'kotak-neo' || s === 'kotak_neo') return 'kotak'
+  if (s === 'test_broker') return 'testbroker'
+  return s
+}
+
 export function isCompatibleIP(ipBrokers: string | undefined, brokerVal: string): boolean {
   if (!ipBrokers || !ipBrokers.trim()) return true
-  const b = brokerVal.toLowerCase()
+  const b = normalizeBroker(brokerVal)
   return ipBrokers
-    .toLowerCase()
     .split(',')
-    .map((s) => s.trim())
-    .some((c) => c === b || (b === 'kite' && c === 'zerodha') || (b === 'zerodha' && c === 'kite'))
+    .map((s) => normalizeBroker(s))
+    .some((c) => c === b)
 }
 
 export function getPrioritizedCompatibleIPs(ips: ProxyIP[], brokerVal: string): ProxyIP[] {
@@ -40,6 +49,7 @@ export function getPrioritizedCompatibleIPs(ips: ProxyIP[], brokerVal: string): 
 export function AccountDetailDrawer(props: {
   open: boolean
   account: Account | null
+  initialRoleOverride?: 'master' | 'follower' | null
   groups: GroupSummary[]
   existingAccounts?: Account[]
   maxAccounts?: number
@@ -47,9 +57,12 @@ export function AccountDetailDrawer(props: {
   onClose: () => void
   onCreate: (body: CreateAccountRequest) => Promise<void>
   onSave: (id: string, patch: Record<string, unknown>) => Promise<void>
+  onRoleSwitched?: () => void
 }) {
   const [name, setName] = createSignal('')
   const [role, setRole] = createSignal<'master' | 'follower'>('follower')
+  const [confirmRoleSwitchOpen, setConfirmRoleSwitchOpen] = createSignal(false)
+  const [pendingSaveAction, setPendingSaveAction] = createSignal<(() => Promise<void>) | null>(null)
   const [broker, setBroker] = createSignal('kite')
   const [brokerAccountId, setBrokerAccountId] = createSignal('')
   const [apiKey, setApiKey] = createSignal('')
@@ -90,18 +103,25 @@ export function AccountDetailDrawer(props: {
 
   createEffect(
     on(
-      () => [props.open, props.account?.id] as const,
-      ([isOpen]) => {
+      () => [props.open, props.account?.id, props.initialRoleOverride] as const,
+      ([isOpen, _id, initialRole]) => {
         setIsDropdownOpen(false)
+        setConfirmRoleSwitchOpen(false)
+        setPendingSaveAction(null)
         if (!isOpen) return
         const a = props.account
         setName(a?.name ?? '')
         const currentRole = a?.role ?? 'follower'
         const currentBroker = a?.broker ?? 'kite'
-        setRole(currentRole)
+        const targetRole = initialRole ?? currentRole
+        setRole(targetRole)
         setBroker(currentBroker)
         setBrokerAccountId(a?.brokerAccountId ?? '')
-        setApiKey(a?.apiKey ?? '')
+        let initialApiKey = a?.apiKey ?? ''
+        if ((currentBroker === 'kotakneo' || currentBroker === 'kotak') && initialApiKey.startsWith('+91')) {
+          initialApiKey = initialApiKey.slice(3)
+        }
+        setApiKey(initialApiKey)
         setApiSecret(a?.apiSecret ?? '')
         setPassword('')
         setTotpSecret('')
@@ -117,15 +137,15 @@ export function AccountDetailDrawer(props: {
           setIpType(a.ip.includes(':') ? 'ipv6' : 'ipv4')
         } else {
           setIp('')
-          setIpType(currentRole === 'master' ? 'na' : 'ipv4')
+          setIpType(targetRole === 'master' ? 'na' : 'ipv4')
         }
 
         // Load available proxy IPs
         fetchAvailableProxyIPs(a?.id)
           .then((ips) => {
             setAvailableIPs(ips)
-            // In create mode for follower, auto-assign first available IP if still empty
-            if (!a && untrack(role) === 'follower' && !untrack(ip)) {
+            // If follower and still empty, auto-assign first available IP
+            if (untrack(role) === 'follower' && !untrack(ip)) {
               const b = untrack(broker)
               const v4 = getPrioritizedCompatibleIPs(ips.ipv4 || [], b)
               const v6 = getPrioritizedCompatibleIPs(ips.ipv6 || [], b)
@@ -161,7 +181,12 @@ export function AccountDetailDrawer(props: {
 
   const brokerUsed = createMemo(() => {
     const list = props.existingAccounts ?? []
-    return list.filter((a) => (a.broker || 'kite').toLowerCase() === currentBroker()).length
+    const cur = currentBroker() === 'kotak' ? 'kotakneo' : currentBroker()
+    return list.filter((a) => {
+      let b = (a.broker || 'kite').toLowerCase()
+      if (b === 'kotak') b = 'kotakneo'
+      return b === cur
+    }).length
   })
 
   // Calculate excess accounts consuming generalist capacity across all brokers
@@ -171,7 +196,8 @@ export function AccountDetailDrawer(props: {
     const accounts = props.existingAccounts ?? []
     const counts: Record<string, number> = {}
     for (const a of accounts) {
-      const b = (a.broker || 'kite').toLowerCase()
+      let b = (a.broker || 'kite').toLowerCase()
+      if (b === 'kotak') b = 'kotakneo'
       counts[b] = (counts[b] || 0) + 1
     }
     let excessSum = 0
@@ -189,9 +215,14 @@ export function AccountDetailDrawer(props: {
     if (props.maxAccounts === -1) return false
     const limits = props.brokerLimits
     if (!limits || Object.keys(limits).length === 0) return false
-    const b = brokerName.toLowerCase()
-    const bLimit = limits[b] ?? 0
-    const bUsed = (props.existingAccounts ?? []).filter((a) => (a.broker || 'kite').toLowerCase() === b).length
+    let b = brokerName.toLowerCase()
+    if (b === 'kotak') b = 'kotakneo'
+    const bLimit = limits[b] ?? limits['kotak'] ?? 0
+    const bUsed = (props.existingAccounts ?? []).filter((a) => {
+      let ab = (a.broker || 'kite').toLowerCase()
+      if (ab === 'kotak') ab = 'kotakneo'
+      return ab === b
+    }).length
     if (bUsed < bLimit) return false
     const genRemaining = generalLimit() - generalUsed()
     return genRemaining <= 0
@@ -306,10 +337,23 @@ export function AccountDetailDrawer(props: {
 
       if (isEdit()) {
         const a = props.account!
+        const roleChanged = role() !== a.role
+        if (roleChanged && isFollower() && !trimmedIP) {
+          setError('IP Address is required for follower accounts.')
+          setSaving(false)
+          return
+        }
         const patch: Record<string, unknown> = {}
         if (name() !== (a.name ?? '')) patch.name = name()
         if (broker() !== 'dhan') {
-          const trimmedApiKey = apiKey().trim()
+          let trimmedApiKey = apiKey().trim()
+          if (broker() === 'kotakneo' || broker() === 'kotak') {
+            if (trimmedApiKey.length !== 10) {
+              setError(`Kotak Neo registered mobile number must be exactly 10 digits (currently ${trimmedApiKey.length} digits).`)
+              return
+            }
+            trimmedApiKey = `+91${trimmedApiKey}`
+          }
           if (trimmedApiKey !== (a.apiKey ?? '')) patch.apiKey = trimmedApiKey
           const trimmedApiSecret = apiSecret().trim()
           if (trimmedApiSecret !== (a.apiSecret ?? '')) patch.apiSecret = trimmedApiSecret
@@ -320,14 +364,15 @@ export function AccountDetailDrawer(props: {
         }
         const trimmedToken = accessToken().trim()
         if (trimmedToken) patch.accessToken = trimmedToken
-        if (trimmedIP !== (a.ip ?? '')) {
+        if (!roleChanged && trimmedIP !== (a.ip ?? '')) {
           if (isFollower() && !trimmedIP) {
             setError('IP Address is required for follower accounts.')
+            setSaving(false)
             return
           }
           patch.ip = trimmedIP
         }
-        if (isFollower()) {
+        if (isFollower() && !roleChanged) {
           const currentGroupId = a.groupId ?? ''
           if (groupId() !== currentGroupId) {
             patch.groupId = groupId() // empty string "" signals detachment on backend
@@ -338,7 +383,30 @@ export function AccountDetailDrawer(props: {
             if (maxQty !== a.maxQtyPerOrder) patch.maxQtyPerOrder = maxQty
           }
         }
-        if (Object.keys(patch).length > 0) await props.onSave(a.id, patch)
+
+        const executeSave = async () => {
+          if (roleChanged) {
+            await switchAccountRole(a.id, {
+              targetRole: role(),
+              releaseIp: role() === 'master' && !trimmedIP,
+              ip: trimmedIP || undefined,
+            })
+            props.onRoleSwitched?.()
+          }
+          if (Object.keys(patch).length > 0) {
+            await props.onSave(a.id, patch)
+          }
+          props.onClose()
+        }
+
+        if (roleChanged) {
+          setPendingSaveAction(() => executeSave)
+          setConfirmRoleSwitchOpen(true)
+          setSaving(false)
+          return
+        }
+
+        await executeSave()
       } else {
         const body: CreateAccountRequest = {
           name: name().trim() || brokerAccountId().trim(),
@@ -347,7 +415,14 @@ export function AccountDetailDrawer(props: {
           brokerAccountId: brokerAccountId().trim(),
         }
         if (broker() !== 'dhan') {
-          const trimmedApiKey = apiKey().trim()
+          let trimmedApiKey = apiKey().trim()
+          if (broker() === 'kotakneo' || broker() === 'kotak') {
+            if (trimmedApiKey.length !== 10) {
+              setError(`Kotak Neo registered mobile number must be exactly 10 digits (currently ${trimmedApiKey.length} digits).`)
+              return
+            }
+            trimmedApiKey = `+91${trimmedApiKey}`
+          }
           if (trimmedApiKey) body.apiKey = trimmedApiKey
           const trimmedApiSecret = apiSecret().trim()
           if (trimmedApiSecret) body.apiSecret = trimmedApiSecret
@@ -385,7 +460,8 @@ export function AccountDetailDrawer(props: {
   }
 
   return (
-    <Show when={props.open}>
+    <>
+      <Show when={props.open}>
       <div class="drawer-overlay" onClick={props.onClose}>
         <div
           role="dialog"
@@ -435,6 +511,8 @@ export function AccountDetailDrawer(props: {
                 <br />
                 {broker() === 'dhan'
                   ? 'Please enter your Dhan Access Token below to reconnect.'
+                  : broker() === 'kotakneo'
+                  ? 'Please re-enter your Kotak Neo MPIN and TOTP secret below to reconnect.'
                   : 'Please re-enter your Kite password and TOTP secret below to reconnect.'}
               </div>
             </Show>
@@ -480,7 +558,7 @@ export function AccountDetailDrawer(props: {
               <ThemedSelect
                 aria-label="Role"
                 value={role()}
-                disabled={isEdit()}
+                disabled={isEdit() && !props.initialRoleOverride}
                 onChange={(val) => handleRoleChange(val as 'master' | 'follower')}
                 options={[
                   { value: 'follower', label: 'Follower' },
@@ -497,12 +575,12 @@ export function AccountDetailDrawer(props: {
               />
             </label>
             <label>
-              {broker() === 'dhan' ? 'Dhan Client ID' : 'Broker User ID'}
+              {broker() === 'dhan' ? 'Dhan Client ID' : broker() === 'kotakneo' || broker() === 'kotak' ? 'Kotak Neo Client ID (UCC)' : 'Broker User ID'}
               <input
                 value={brokerAccountId()}
                 disabled={isEdit()}
                 onInput={(e) => setBrokerAccountId(e.currentTarget.value)}
-                placeholder={broker() === 'dhan' ? 'e.g. 1000000001' : ''}
+                placeholder={broker() === 'dhan' ? 'e.g. 1000000001' : broker() === 'kotakneo' || broker() === 'kotak' ? 'e.g. X12345' : ''}
                 required
               />
             </label>
@@ -518,7 +596,82 @@ export function AccountDetailDrawer(props: {
                 />
               </label>
             </Show>
-            <Show when={broker() !== 'dhan'}>
+            <Show when={broker() === 'kotakneo' || broker() === 'kotak'}>
+              <label>
+                Registered Mobile Number
+                <div style={{ display: 'flex', 'align-items': 'center', gap: '0.5rem', width: '100%' }}>
+                  <span
+                    class="country-prefix"
+                    style={{
+                      background: 'var(--color-bg-secondary, rgba(255, 255, 255, 0.05))',
+                      border: '1px solid var(--color-border)',
+                      'border-radius': '6px',
+                      padding: '0.45rem 0.75rem',
+                      'font-size': '0.9rem',
+                      'font-weight': 600,
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    +91
+                  </span>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={apiKey()}
+                    onInput={(e) => {
+                      const clean = e.currentTarget.value.replace(/\D/g, '').slice(0, 10)
+                      setApiKey(clean)
+                    }}
+                    placeholder="10-digit mobile number"
+                    style={{ flex: 1 }}
+                    required
+                  />
+                </div>
+              </label>
+              <Show when={apiKey().length > 0 && apiKey().length < 10}>
+                <span
+                  style={{
+                    'font-size': '0.75rem',
+                    color: '#e5484d',
+                    'margin-top': '-0.25rem',
+                    'margin-bottom': '0.5rem',
+                    display: 'block',
+                  }}
+                >
+                  {apiKey().length}/10 digits (must be exactly 10 digits)
+                </span>
+              </Show>
+              <label>
+                Consumer Key (Developer Portal)
+                <input
+                  value={apiSecret()}
+                  onInput={(e) => setApiSecret(e.currentTarget.value.trim())}
+                  placeholder="Bearer token from developer portal"
+                  required
+                />
+              </label>
+              <label>
+                MPIN (6-digit)
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={password()}
+                  onInput={(e) => setPassword(e.currentTarget.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder={isEdit() ? '•••••••• (leave blank to keep unchanged)' : '6-digit login MPIN'}
+                  autocomplete="new-password"
+                />
+              </label>
+              <label>
+                TOTP Secret Key
+                <input
+                  type="text"
+                  value={totpSecret()}
+                  onInput={(e) => setTotpSecret(e.currentTarget.value)}
+                  placeholder={isEdit() ? 'Leave blank to keep unchanged' : 'Base32 2FA secret (e.g. JBSWY3DPEHPK3PXP)'}
+                />
+              </label>
+            </Show>
+            <Show when={broker() !== 'dhan' && broker() !== 'kotakneo' && broker() !== 'kotak'}>
               <label>
                 API Key
                 <input value={apiKey()} onInput={(e) => setApiKey(e.currentTarget.value)} />
@@ -842,5 +995,49 @@ export function AccountDetailDrawer(props: {
       </div>
     </div>
   </Show>
+
+  <ConfirmActionModal
+    open={confirmRoleSwitchOpen()}
+    label={`Switch to ${role() === 'master' ? 'Master' : 'Follower'}`}
+    onConfirm={async () => {
+      const fn = pendingSaveAction()
+      setConfirmRoleSwitchOpen(false)
+      setSaving(true)
+      try {
+        if (fn) await fn()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Save failed.')
+      } finally {
+        setSaving(false)
+      }
+    }}
+    onCancel={() => {
+      setConfirmRoleSwitchOpen(false)
+      setPendingSaveAction(null)
+      setSaving(false)
+    }}
+  >
+    <div class="confirm-modal-option">
+      <Show when={role() === 'follower'}>
+        <p>• Empty group associated with this master will be removed (must have 0 attached followers).</p>
+        <p>• Account will stop streaming trade signals.</p>
+        <p>• Proxy IP will be set to: <code>{ip() || 'None'}</code>.</p>
+      </Show>
+      <Show when={role() === 'master'}>
+        <p>• Account will be detached from its current group.</p>
+        <p>• Account will stop copying trades.</p>
+        <p>
+          • Proxy IP will be{' '}
+          {ip() ? (
+            <>kept as <code>{ip()}</code></>
+          ) : (
+            <strong>released back to pool</strong>
+          )}
+          .
+        </p>
+      </Show>
+    </div>
+  </ConfirmActionModal>
+  </>
   )
 }

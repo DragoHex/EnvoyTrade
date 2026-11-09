@@ -1,10 +1,11 @@
-import { Show } from 'solid-js'
+import { Show, type JSX } from 'solid-js'
 
 export function ConfirmActionModal(props: {
   open: boolean
   label: string
   onConfirm: () => void
   onCancel: () => void
+  children?: JSX.Element
 }) {
   return (
     <Show when={props.open}>
@@ -12,6 +13,7 @@ export function ConfirmActionModal(props: {
         <div class="confirm-modal">
           <h3>{props.label}</h3>
           <p>Are you sure you want to {props.label.toLowerCase()}?</p>
+          {props.children}
           <div class="confirm-modal-actions">
             <button type="button" onClick={props.onCancel} class="confirm-modal-cancel">
               Cancel

@@ -3,6 +3,7 @@ package dhan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,8 +27,12 @@ type API interface {
 // ProxyConfig aliases godhan.ProxyConfig for native forward proxy routing.
 type ProxyConfig = godhan.ProxyConfig
 
-// InstrumentLookup maps (exchange, tradingsymbol) to Dhan's (ExchangeSegment, SecurityID, lotSize).
+// InstrumentLookup resolves broker-specific security ID and segment for DhanHQ (PLAN.md §1).
 type InstrumentLookup interface {
+	ResolveForBroker(targetBroker, exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, targetSymbol string, err error)
+}
+
+type legacyLookup interface {
 	ResolveToSecurityID(exchange, tradingsymbol string) (exchangeSegment string, securityID string, lotSize int, err error)
 }
 
@@ -64,7 +69,13 @@ func translateError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, godhan.ErrBrokerUnavailable) || errors.Is(err, domain.ErrBrokerUnreachable) {
+		return fmt.Errorf("%w: %v", domain.ErrBrokerUnreachable, err)
+	}
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "network error") || strings.Contains(msg, "proxy") || strings.Contains(msg, "tunnel") {
+		return fmt.Errorf("%w: %v", domain.ErrBrokerUnreachable, err)
+	}
 	switch {
 	case strings.Contains(msg, "401") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "token expired") || strings.Contains(msg, "invalid token"):
 		return fmt.Errorf("%w: %v", domain.ErrAuthExpired, err)
@@ -123,9 +134,23 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		return broker.OrderResponse{}, fmt.Errorf("dhan place order: %w: instrument resolver not configured", domain.ErrNotFound)
 	}
 
-	exSegment, secID, _, err := b.resolver.ResolveToSecurityID(params.Exchange, params.Tradingsymbol)
+	var exSegment, secID, targetSymbol string
+	var err error
+	if bsl, ok := b.resolver.(InstrumentLookup); ok {
+		exSegment, secID, _, targetSymbol, err = bsl.ResolveForBroker("dhan", params.Exchange, params.Tradingsymbol)
+	} else if legacy, ok := b.resolver.(legacyLookup); ok {
+		exSegment, secID, _, err = legacy.ResolveToSecurityID(params.Exchange, params.Tradingsymbol)
+	} else {
+		return broker.OrderResponse{}, fmt.Errorf("dhan place order: %w: invalid instrument resolver", domain.ErrNotFound)
+	}
 	if err != nil {
 		return broker.OrderResponse{}, fmt.Errorf("dhan place order: %w", err)
+	}
+	if secID == "" {
+		return broker.OrderResponse{}, fmt.Errorf("dhan place order: %w: security id not resolved for %s:%s", domain.ErrNotFound, params.Exchange, params.Tradingsymbol)
+	}
+	if targetSymbol == "" {
+		targetSymbol = params.Tradingsymbol
 	}
 
 	req := models.OrderRequest{
@@ -134,7 +159,7 @@ func (b *Broker) PlaceOrder(ctx context.Context, variety string, params broker.O
 		ProductType:     mapProduct(params.Product),
 		OrderType:       mapOrderType(params.OrderType),
 		Validity:        "DAY",
-		TradingSymbol:   params.Tradingsymbol,
+		TradingSymbol:   targetSymbol,
 		SecurityID:      secID,
 		Quantity:        int32(params.Quantity),
 		CorrelationID:   params.Tag,

@@ -418,6 +418,10 @@ func TestAuthLogin(t *testing.T) {
 	}
 	userID := uuid.New()
 	_ = store.CreateUser(context.Background(), userID, "bob@example.com", "bob", "Bob", hash, "user")
+	store.mu.Lock()
+	store.usersByEmail["bob@example.com"].MaxIPs = -1
+	store.usersByEmail["bob@example.com"].BrokerIPLimits = map[string]int{"kotakneo": 50}
+	store.mu.Unlock()
 
 	t.Run("valid email and password returns 200 and sets session cookie", func(t *testing.T) {
 		body := map[string]string{
@@ -445,6 +449,27 @@ func TestAuthLogin(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("expected envoytrade_session cookie to be returned")
+		}
+
+		var resp struct {
+			Token string `json:"token"`
+			User  struct {
+				Email          string         `json:"email"`
+				MaxIPs         int            `json:"maxIPs"`
+				BrokerIPLimits map[string]int `json:"brokerIPLimits"`
+			} `json:"user"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.User.Email != "bob@example.com" {
+			t.Errorf("expected user email bob@example.com, got %s", resp.User.Email)
+		}
+		if resp.User.MaxIPs != -1 {
+			t.Errorf("expected user maxIPs -1, got %d", resp.User.MaxIPs)
+		}
+		if resp.User.BrokerIPLimits["kotakneo"] != 50 {
+			t.Errorf("expected brokerIPLimits['kotakneo'] = 50, got %d", resp.User.BrokerIPLimits["kotakneo"])
 		}
 	})
 

@@ -275,4 +275,33 @@ describe('AccountsTable', () => {
     await userEvent.click(statusCell)
     expect(onEditSpy).toHaveBeenCalledWith(errorAccount)
   })
+
+  it('when enableRoleSwitch is true, clicking role button opens popover and selecting calls onSwitchRole', async () => {
+    const onSwitchRole = vi.fn()
+    render(() => (
+      <AccountsTable
+        accounts={[master]}
+        onEdit={vi.fn()}
+        enableRoleSwitch={true}
+        onSwitchRole={onSwitchRole}
+      />
+    ))
+
+    const roleBtn = screen.getByRole('button', { name: 'Switch role from master' })
+    expect(roleBtn).toBeInTheDocument()
+
+    // Popover closed initially
+    expect(screen.queryByRole('dialog', { name: 'Switch to Follower' })).not.toBeInTheDocument()
+
+    // Click to open popover
+    await userEvent.click(roleBtn)
+    expect(screen.getByRole('dialog', { name: 'Switch to Follower' })).toBeInTheDocument()
+
+    // Click popover button
+    const switchBtn = screen.getByRole('button', { name: 'Switch to Follower' })
+    await userEvent.click(switchBtn)
+
+    expect(onSwitchRole).toHaveBeenCalledWith(master, 'follower')
+    expect(screen.queryByRole('dialog', { name: 'Switch to Follower' })).not.toBeInTheDocument()
+  })
 })

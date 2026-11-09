@@ -8,6 +8,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 -- name: AccountByBrokerUserID :one
 SELECT id, role, api_secret FROM accounts WHERE broker_user_id = $1 AND deleted_at IS NULL;
 
+-- name: SetAccountRoleAndIP :execrows
+UPDATE accounts
+SET role = $2::account_role,
+    ip_address = CASE WHEN sqlc.arg('set_ip')::boolean THEN sqlc.arg('ip_address')::text ELSE ip_address END,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;
+
 -- name: SetAccountActive :execrows
 UPDATE accounts SET active = $2, updated_at = now() WHERE id = $1;
 
@@ -31,7 +38,18 @@ SET encrypted_password = CASE WHEN sqlc.arg('encrypted_password')::text != '' TH
 WHERE id = $1;
 
 -- name: SetAccountAccessToken :execrows
-UPDATE accounts SET access_token = $2, token_expires_at = $3, auth_status = $4, auth_error = $5, updated_at = now() WHERE id = $1;
+UPDATE accounts
+SET access_token = $2,
+    token_expires_at = $3,
+    auth_status = $4,
+    auth_error = $5,
+    status = CASE
+        WHEN $4 = 'authenticated' THEN 'active'
+        WHEN $4 = 'error' THEN 'error'
+        ELSE status
+    END,
+    updated_at = now()
+WHERE id = $1;
 
 -- name: AccountAuthInfo :one
 SELECT id, role, broker, broker_user_id, api_key, api_secret, ip_address, encrypted_password, encrypted_totp_secret, access_token, token_expires_at, auth_status, auth_error

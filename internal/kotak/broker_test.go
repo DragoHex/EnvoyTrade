@@ -1,0 +1,651 @@
+package kotak_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"envoytrade/internal/broker"
+	"envoytrade/internal/domain"
+	"envoytrade/internal/kotak"
+
+	"github.com/DragoHex/gokotakneo/models"
+	"github.com/shopspring/decimal"
+)
+
+type mockKotakAPI struct {
+	placeOrderFunc      func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error)
+	modifyOrderFunc     func(ctx context.Context, params models.OrderModifyParams) (*models.OrderResponse, error)
+	cancelOrderFunc     func(ctx context.Context, orderNo string, isAMO bool, tradingSymbol string) (*models.OrderResponse, error)
+	getOrdersFunc       func(ctx context.Context) ([]models.Order, error)
+	getOrderHistoryFunc func(ctx context.Context, orderNo string) ([]models.Order, error)
+	getPositionsFunc    func(ctx context.Context) ([]models.Position, error)
+	getHoldingsFunc     func(ctx context.Context) ([]models.Holding, error)
+	getLimitsFunc       func(ctx context.Context, seg, exch, prod string) (*models.Limits, error)
+}
+
+func (m *mockKotakAPI) PlaceOrder(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+	if m.placeOrderFunc != nil {
+		return m.placeOrderFunc(ctx, params)
+	}
+	return &models.OrderResponse{OrderNumber: "2602160001"}, nil
+}
+
+func (m *mockKotakAPI) ModifyOrder(ctx context.Context, params models.OrderModifyParams) (*models.OrderResponse, error) {
+	if m.modifyOrderFunc != nil {
+		return m.modifyOrderFunc(ctx, params)
+	}
+	return &models.OrderResponse{OrderNumber: params.OrderNo}, nil
+}
+
+func (m *mockKotakAPI) CancelOrder(ctx context.Context, orderNo string, isAMO bool, tradingSymbol string) (*models.OrderResponse, error) {
+	if m.cancelOrderFunc != nil {
+		return m.cancelOrderFunc(ctx, orderNo, isAMO, tradingSymbol)
+	}
+	return &models.OrderResponse{OrderNumber: orderNo}, nil
+}
+
+func (m *mockKotakAPI) GetOrders(ctx context.Context) ([]models.Order, error) {
+	if m.getOrdersFunc != nil {
+		return m.getOrdersFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockKotakAPI) GetOrderHistory(ctx context.Context, orderNo string) ([]models.Order, error) {
+	if m.getOrderHistoryFunc != nil {
+		return m.getOrderHistoryFunc(ctx, orderNo)
+	}
+	return nil, nil
+}
+
+func (m *mockKotakAPI) GetPositions(ctx context.Context) ([]models.Position, error) {
+	if m.getPositionsFunc != nil {
+		return m.getPositionsFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockKotakAPI) GetHoldings(ctx context.Context) ([]models.Holding, error) {
+	if m.getHoldingsFunc != nil {
+		return m.getHoldingsFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockKotakAPI) GetLimits(ctx context.Context, seg, exch, prod string) (*models.Limits, error) {
+	if m.getLimitsFunc != nil {
+		return m.getLimitsFunc(ctx, seg, exch, prod)
+	}
+	return &models.Limits{}, nil
+}
+
+type mockInstrumentLookup struct {
+	segment      string
+	securityID   string
+	lotSize      int
+	targetSymbol string
+	err          error
+}
+
+func (m *mockInstrumentLookup) ResolveToSecurityID(exchange, tradingsymbol string) (string, string, int, error) {
+	return m.segment, m.securityID, m.lotSize, m.err
+}
+
+func (m *mockInstrumentLookup) ResolveForBroker(targetBroker, exchange, tradingsymbol string) (string, string, int, string, error) {
+	if m.err != nil {
+		return "", "", 0, "", m.err
+	}
+	sym := m.targetSymbol
+	if sym == "" {
+		sym = tradingsymbol
+	}
+	return m.segment, m.securityID, m.lotSize, sym, nil
+}
+
+func TestBroker_Execution(t *testing.T) {
+	t.Run("Positive: PlaceOrder Limit Order", func(t *testing.T) {
+		var capturedParams models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				capturedParams = params
+				return &models.OrderResponse{OrderNumber: "260216000999"}, nil
+			},
+		}
+
+		resolver := &mockInstrumentLookup{segment: "nse_fo", securityID: "12345", lotSize: 50}
+		b := kotak.NewBroker(api, true, resolver)
+
+		resp, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NFO",
+			Tradingsymbol:   "NIFTY26FEB24000CE",
+			TransactionType: "BUY",
+			OrderType:       "LIMIT",
+			Product:         "NRML",
+			Quantity:        50,
+			Price:           125.50,
+		})
+
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000999" {
+			t.Errorf("OrderID = %s, want 260216000999", resp.OrderID)
+		}
+		if capturedParams.Es != "nse_fo" || capturedParams.Pc != "NRML" || capturedParams.Pt != "L" || capturedParams.Tt != "B" {
+			t.Errorf("unexpected params: %+v", capturedParams)
+		}
+		if capturedParams.Pr != "125.5" {
+			t.Errorf("Pr = %s, want 125.5", capturedParams.Pr)
+		}
+	})
+
+	t.Run("Positive: CrossBroker Dhan MCX Option to Kotak Neo", func(t *testing.T) {
+		var capturedParams models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				capturedParams = params
+				return &models.OrderResponse{OrderNumber: "260216000777"}, nil
+			},
+		}
+
+		resolver := &mockInstrumentLookup{
+			segment:      "mcx_fo",
+			lotSize:      100,
+			targetSymbol: "CRUDEOIL17NOV265000PE",
+		}
+		b := kotak.NewBroker(api, true, resolver)
+
+		resp, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "MCX",
+			Tradingsymbol:   "CRUDEOIL-17Nov2026-5000-PE",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Product:         "NRML",
+			Quantity:        100,
+		})
+
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000777" {
+			t.Errorf("OrderID = %s, want 260216000777", resp.OrderID)
+		}
+		if capturedParams.Ts != "CRUDEOIL17NOV265000PE" {
+			t.Errorf("Ts = %q, want CRUDEOIL17NOV265000PE", capturedParams.Ts)
+		}
+		if capturedParams.Es != "mcx_fo" {
+			t.Errorf("Es = %q, want mcx_fo", capturedParams.Es)
+		}
+	})
+
+	t.Run("Positive: CrossBroker Cash Equity RELIANCE to Kotak Neo", func(t *testing.T) {
+		var capturedParams models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				capturedParams = params
+				return &models.OrderResponse{OrderNumber: "260216000666"}, nil
+			},
+		}
+
+		resolver := &mockInstrumentLookup{
+			segment:      "nse_cm",
+			lotSize:      1,
+			targetSymbol: "RELIANCE-EQ",
+		}
+		b := kotak.NewBroker(api, true, resolver)
+
+		resp, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE",
+			TransactionType: "BUY",
+			OrderType:       "MARKET",
+			Product:         "CNC",
+			Quantity:        10,
+		})
+
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000666" {
+			t.Errorf("OrderID = %s, want 260216000666", resp.OrderID)
+		}
+		if capturedParams.Ts != "RELIANCE-EQ" {
+			t.Errorf("Ts = %q, want RELIANCE-EQ", capturedParams.Ts)
+		}
+		if capturedParams.Es != "nse_cm" {
+			t.Errorf("Es = %q, want nse_cm", capturedParams.Es)
+		}
+	})
+
+	t.Run("Positive: PlaceOrder Market Sell Order", func(t *testing.T) {
+		var capturedParams models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				capturedParams = params
+				return &models.OrderResponse{OrderNumber: "260216000888"}, nil
+			},
+		}
+
+		b := kotak.NewBroker(api, true, nil)
+		resp, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "INFY",
+			TransactionType: "SELL",
+			OrderType:       "MARKET",
+			Product:         "MIS",
+			Quantity:        10,
+		})
+
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000888" {
+			t.Errorf("OrderID = %s, want 260216000888", resp.OrderID)
+		}
+		if capturedParams.Pt != "MKT" || capturedParams.Pr != "0" || capturedParams.Tt != "S" {
+			t.Errorf("unexpected params: %+v", capturedParams)
+		}
+	})
+
+	t.Run("Negative: Unproxied Not Allowed", func(t *testing.T) {
+		api := &mockKotakAPI{}
+		b := kotak.NewBroker(api, false, nil)
+
+		_, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Tradingsymbol: "INFY",
+		})
+		if !errors.Is(err, domain.ErrUnproxiedNotAllowed) {
+			t.Fatalf("expected ErrUnproxiedNotAllowed, got %v", err)
+		}
+	})
+
+	t.Run("Negative: Session Expired 401", func(t *testing.T) {
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				return nil, errors.New("HTTP 401: unauthorized token expired")
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+
+		_, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{})
+		if !errors.Is(err, domain.ErrAuthExpired) {
+			t.Fatalf("expected ErrAuthExpired, got %v", err)
+		}
+	})
+
+	t.Run("Positive: GetPositions Normalization", func(t *testing.T) {
+		api := &mockKotakAPI{
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{
+					{
+						Product:         "MIS",
+						TradingSymbol:   "RELIANCE",
+						ExchangeSegment: "nse_cm",
+						Quantity:        15,
+						FilledBuyQty:    15,
+						BuyAmount:       decimal.NewFromFloat(37500.00),
+					},
+					{
+						Product:         "NRML",
+						TradingSymbol:   "CRUDEOIL17NOV267300PE",
+						ExchangeSegment: "mcx_fo",
+						CFSellQty:       100,
+						CFSellAmount:    decimal.NewFromFloat(2640.00),
+					},
+					{
+						Product:         "NRML",
+						TradingSymbol:   "NIFTY26N0924600PE",
+						ExchangeSegment: "nse_fo",
+						FilledSellQty:   325,
+						SellAmount:      decimal.NewFromFloat(4143.75),
+					},
+				}, nil
+			},
+		}
+
+		b := kotak.NewBroker(api, true, nil)
+		positions, err := b.GetPositions(context.Background())
+		if err != nil {
+			t.Fatalf("GetPositions failed: %v", err)
+		}
+		if len(positions) != 3 {
+			t.Fatalf("expected 3 positions, got %d", len(positions))
+		}
+		pos := positions[0]
+		if pos.Tradingsymbol != "RELIANCE" || pos.Exchange != "NSE" || pos.Quantity != 15 {
+			t.Errorf("unexpected position: %+v", pos)
+		}
+		if pos.AveragePrice != 2500.00 {
+			t.Errorf("AveragePrice = %v, want 2500.00", pos.AveragePrice)
+		}
+
+		// Overnight short MCX option
+		crude := positions[1]
+		if crude.Tradingsymbol != "CRUDEOIL17NOV267300PE" || crude.Exchange != "MCX" || crude.Quantity != -100 {
+			t.Errorf("unexpected crude position: %+v", crude)
+		}
+		if crude.AveragePrice != 26.40 {
+			t.Errorf("crude AveragePrice = %v, want 26.40", crude.AveragePrice)
+		}
+
+		// Day short NFO option
+		nifty := positions[2]
+		if nifty.Tradingsymbol != "NIFTY26N0924600PE" || nifty.Exchange != "NFO" || nifty.Quantity != -325 {
+			t.Errorf("unexpected nifty position: %+v", nifty)
+		}
+		if nifty.AveragePrice != 12.75 {
+			t.Errorf("nifty AveragePrice = %v, want 12.75", nifty.AveragePrice)
+		}
+	})
+
+	t.Run("Positive: CancelOrder", func(t *testing.T) {
+		api := &mockKotakAPI{
+			cancelOrderFunc: func(ctx context.Context, orderNo string, isAMO bool, tradingSymbol string) (*models.OrderResponse, error) {
+				return &models.OrderResponse{OrderNumber: orderNo}, nil
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+		resp, err := b.CancelOrder(context.Background(), "regular", "260216000123")
+		if err != nil {
+			t.Fatalf("CancelOrder failed: %v", err)
+		}
+		if resp.OrderID != "260216000123" {
+			t.Errorf("OrderID = %s, want 260216000123", resp.OrderID)
+		}
+	})
+
+	t.Run("Positive: GetOrders, GetPositions and GetOrderHistory handle empty results cleanly", func(t *testing.T) {
+		api := &mockKotakAPI{
+			getOrdersFunc: func(ctx context.Context) ([]models.Order, error) {
+				return []models.Order{}, nil
+			},
+			getPositionsFunc: func(ctx context.Context) ([]models.Position, error) {
+				return []models.Position{}, nil
+			},
+			getOrderHistoryFunc: func(ctx context.Context, orderNo string) ([]models.Order, error) {
+				return []models.Order{}, nil
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+
+		orders, err := b.GetOrders(context.Background())
+		if err != nil {
+			t.Fatalf("GetOrders failed: %v", err)
+		}
+		if len(orders) != 0 {
+			t.Errorf("expected 0 orders, got %d", len(orders))
+		}
+
+		positions, err := b.GetPositions(context.Background())
+		if err != nil {
+			t.Fatalf("GetPositions failed: %v", err)
+		}
+		if len(positions) != 0 {
+			t.Errorf("expected 0 positions, got %d", len(positions))
+		}
+
+		history, err := b.GetOrderHistory(context.Background(), "ord123")
+		if err != nil {
+			t.Fatalf("GetOrderHistory failed: %v", err)
+		}
+		if len(history) != 0 {
+			t.Errorf("expected 0 history items, got %d", len(history))
+		}
+	})
+
+	t.Run("Positive: GetOrders Normalizes Kotak Neo Order Fields", func(t *testing.T) {
+		api := &mockKotakAPI{
+			getOrdersFunc: func(ctx context.Context) ([]models.Order, error) {
+				return []models.Order{
+					{
+						OrderNumber:     "24110200001",
+						Symbol:          "CRUDEOIL17NOV265000PE",
+						TradingSymbol:   "", // Kotak returns Symbol in order book
+						ExchangeSegment: "mcx_fo",
+						TransactionType: "B",
+						PriceType:       "L",
+						ProductCode:     "NRML",
+						Status:          "TRAD",
+						Quantity:        10,
+						FilledQuantity:  10,
+						AveragePrice:    decimal.NewFromFloat(15.5),
+					},
+				}, nil
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+
+		orders, err := b.GetOrders(context.Background())
+		if err != nil {
+			t.Fatalf("GetOrders failed: %v", err)
+		}
+		if len(orders) != 1 {
+			t.Fatalf("expected 1 order, got %d", len(orders))
+		}
+
+		o := orders[0]
+		if o.OrderID != "24110200001" {
+			t.Errorf("OrderID = %s, want 24110200001", o.OrderID)
+		}
+		if o.Tradingsymbol != "CRUDEOIL17NOV265000PE" {
+			t.Errorf("Tradingsymbol = %s, want CRUDEOIL17NOV265000PE", o.Tradingsymbol)
+		}
+		if o.Exchange != "MCX" {
+			t.Errorf("Exchange = %s, want MCX", o.Exchange)
+		}
+		if o.TransactionType != "BUY" {
+			t.Errorf("TransactionType = %s, want BUY", o.TransactionType)
+		}
+		if o.OrderType != "LIMIT" {
+			t.Errorf("OrderType = %s, want LIMIT", o.OrderType)
+		}
+		if o.Product != "NRML" {
+			t.Errorf("Product = %s, want NRML", o.Product)
+		}
+		if o.Status != "TRAD" {
+			t.Errorf("Status = %s, want TRAD", o.Status)
+		}
+		if !o.AveragePrice.Equal(decimal.NewFromFloat(15.5)) {
+			t.Errorf("AveragePrice = %v, want 15.5", o.AveragePrice)
+		}
+	})
+
+	t.Run("Negative: 100008 IP Whitelist Rejection is NOT Auth Expired", func(t *testing.T) {
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				return nil, errors.New("kotak-neo api error [100008]: unauthorized")
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+		_, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE",
+			TransactionType: "BUY",
+			Product:         "CNC",
+			OrderType:       "LIMIT",
+			Quantity:        1,
+			Price:           2500,
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if errors.Is(err, domain.ErrAuthExpired) {
+			t.Errorf("100008 must NOT be mapped to ErrAuthExpired, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "ip not whitelisted") {
+			t.Errorf("expected 'ip not whitelisted' in error, got %v", err)
+		}
+	})
+
+	t.Run("Positive: PlaceOrder canonicalizes equity trading symbol with -EQ on nse_cm", func(t *testing.T) {
+		var captured models.OrderParams
+		api := &mockKotakAPI{
+			placeOrderFunc: func(ctx context.Context, params models.OrderParams) (*models.OrderResponse, error) {
+				captured = params
+				return &models.OrderResponse{OrderNumber: "2602160001"}, nil
+			},
+		}
+		b := kotak.NewBroker(api, true, nil)
+
+		// Case 1: Standard cash equity without suffix -> append -EQ
+		_, err := b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE",
+			TransactionType: "BUY",
+			Product:         "CNC",
+			OrderType:       "LIMIT",
+			Quantity:        1,
+			Price:           2500,
+		})
+		if err != nil {
+			t.Fatalf("PlaceOrder failed: %v", err)
+		}
+		if captured.Ts != "RELIANCE-EQ" {
+			t.Errorf("captured.Ts = %q, want 'RELIANCE-EQ'", captured.Ts)
+		}
+		if captured.Es != "nse_cm" {
+			t.Errorf("captured.Es = %q, want 'nse_cm'", captured.Es)
+		}
+
+		// Case 2: Cash equity already with -EQ -> keep RELIANCE-EQ
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "RELIANCE-EQ",
+			TransactionType: "BUY",
+			Product:         "CNC",
+			OrderType:       "LIMIT",
+			Quantity:        1,
+			Price:           2500,
+		})
+		if captured.Ts != "RELIANCE-EQ" {
+			t.Errorf("captured.Ts = %q, want 'RELIANCE-EQ'", captured.Ts)
+		}
+
+		// Case 3: Other series (e.g. -BE) -> keep as-is
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NSE",
+			Tradingsymbol:   "SUZLON-BE",
+			TransactionType: "BUY",
+			Product:         "CNC",
+			OrderType:       "LIMIT",
+			Quantity:        1,
+			Price:           50,
+		})
+		if captured.Ts != "SUZLON-BE" {
+			t.Errorf("captured.Ts = %q, want 'SUZLON-BE'", captured.Ts)
+		}
+
+		// Case 4: Derivative (NFO) -> untouched
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "NFO",
+			Tradingsymbol:   "NIFTY26OCTFUT",
+			TransactionType: "BUY",
+			Product:         "NRML",
+			OrderType:       "LIMIT",
+			Quantity:        75,
+			Price:           25000,
+		})
+		if captured.Ts != "NIFTY26OCTFUT" {
+			t.Errorf("captured.Ts = %q, want 'NIFTY26OCTFUT'", captured.Ts)
+		}
+		if captured.Es != "nse_fo" {
+			t.Errorf("captured.Es = %q, want 'nse_fo'", captured.Es)
+		}
+		if captured.Qt != "75" {
+			t.Errorf("captured.Qt = %q, want '75'", captured.Qt)
+		}
+
+		// Case 5: MCX Derivative (CRUDEOIL) 1 lot -> 100 barrels
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "MCX",
+			Tradingsymbol:   "CRUDEOIL17NOV265000PE",
+			TransactionType: "BUY",
+			Product:         "NRML",
+			OrderType:       "LIMIT",
+			Quantity:        1,
+			Price:           6.8,
+		})
+		if captured.Es != "mcx_fo" {
+			t.Errorf("captured.Es = %q, want 'mcx_fo'", captured.Es)
+		}
+		if captured.Qt != "100" {
+			t.Errorf("captured.Qt = %q, want '100' (1 lot = 100 barrels)", captured.Qt)
+		}
+
+		// Case 6: MCX Derivative (NATURALGAS) 2 lots -> 2500 mmBtu
+		_, _ = b.PlaceOrder(context.Background(), "regular", broker.OrderParams{
+			Exchange:        "MCX",
+			Tradingsymbol:   "NATURALGAS26NOVFUT",
+			TransactionType: "BUY",
+			Product:         "NRML",
+			OrderType:       "LIMIT",
+			Quantity:        2,
+			Price:           220,
+		})
+		if captured.Qt != "2500" {
+			t.Errorf("captured.Qt = %q, want '2500' (2 lots = 2500 mmBtu)", captured.Qt)
+		}
+	})
+
+	t.Run("Positive: GetOrders Normalizes MCX Quantities To Lots", func(t *testing.T) {
+		mockAPI := &mockKotakAPI{
+			getOrdersFunc: func(ctx context.Context) ([]models.Order, error) {
+				return []models.Order{
+					{
+						OrderNumber:     "261102000496969",
+						ExchangeSegment: "mcx_fo",
+						TradingSymbol:   "CRUDEOIL17NOV265000PE",
+						TransactionType: "B",
+						PriceType:       "L",
+						ProductCode:     "NRML",
+						Quantity:        200,
+						FilledQuantity:  100,
+						Price:           decimal.NewFromFloat(6.8),
+						AveragePrice:    decimal.NewFromFloat(6.8),
+						Status:          "TRADED",
+					},
+					{
+						OrderNumber:     "261102000496970",
+						ExchangeSegment: "nse_fo",
+						TradingSymbol:   "NIFTY26NOV24000CE",
+						TransactionType: "B",
+						PriceType:       "L",
+						ProductCode:     "NRML",
+						Quantity:        50,
+						FilledQuantity:  25,
+						Price:           decimal.NewFromFloat(150),
+						AveragePrice:    decimal.NewFromFloat(150),
+						Status:          "TRADED",
+					},
+				}, nil
+			},
+		}
+
+		b := kotak.NewBroker(mockAPI, true, nil)
+		orders, err := b.GetOrders(context.Background())
+		if err != nil {
+			t.Fatalf("GetOrders failed: %v", err)
+		}
+		if len(orders) != 2 {
+			t.Fatalf("len(orders) = %d, want 2", len(orders))
+		}
+
+		// MCX order: 200 units -> 2 lots, 100 filled units -> 1 filled lot
+		if orders[0].Quantity != 2 {
+			t.Errorf("MCX orders[0].Quantity = %d, want 2 (lots)", orders[0].Quantity)
+		}
+		if orders[0].FilledQuantity != 1 {
+			t.Errorf("MCX orders[0].FilledQuantity = %d, want 1 (lot)", orders[0].FilledQuantity)
+		}
+
+		// Non-MCX order: 50 shares -> 50, 25 filled shares -> 25
+		if orders[1].Quantity != 50 {
+			t.Errorf("NSE orders[1].Quantity = %d, want 50 (shares)", orders[1].Quantity)
+		}
+		if orders[1].FilledQuantity != 25 {
+			t.Errorf("NSE orders[1].FilledQuantity = %d, want 25 (shares)", orders[1].FilledQuantity)
+		}
+	})
+}
