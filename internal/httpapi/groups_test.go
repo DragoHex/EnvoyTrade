@@ -431,7 +431,8 @@ func TestPostGroupFollowers_BatchConflict_Returns409(t *testing.T) {
 func TestPostGroup_Succeeds(t *testing.T) {
 	master := uuid.New()
 	store := &stubStore{accountRoles: map[uuid.UUID]string{master: "master"}}
-	r := httpapi.NewRouter(store, &stubActionEngine{})
+	tickerMgr := &stubTickerManager{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithTickerManager(tickerMgr))
 
 	body, _ := json.Marshal(map[string]any{"name": "Alpha Group", "masterId": master.String()})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups", bytes.NewReader(body))
@@ -448,13 +449,17 @@ func TestPostGroup_Succeeds(t *testing.T) {
 	if got["name"] != "Alpha Group" || got["masterId"] != master.String() {
 		t.Errorf("got = %+v", got)
 	}
+	if len(tickerMgr.started) != 1 || tickerMgr.started[0] != master {
+		t.Errorf("expected tickerMgr.started with %v, got %v", master, tickerMgr.started)
+	}
 }
 
 func TestPatchGroup_SwapMaster_Succeeds(t *testing.T) {
 	newMaster := uuid.New()
 	groupID := uuid.New()
 	store := &stubStore{accountRoles: map[uuid.UUID]string{newMaster: "master"}}
-	r := httpapi.NewRouter(store, &stubActionEngine{})
+	tickerMgr := &stubTickerManager{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithTickerManager(tickerMgr))
 
 	body, _ := json.Marshal(map[string]any{"masterId": newMaster.String(), "name": "Renamed Group"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/groups/"+groupID.String(), bytes.NewReader(body))
@@ -463,6 +468,9 @@ func TestPatchGroup_SwapMaster_Succeeds(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(tickerMgr.started) != 1 || tickerMgr.started[0] != newMaster {
+		t.Errorf("expected tickerMgr.started with %v, got %v", newMaster, tickerMgr.started)
 	}
 }
 

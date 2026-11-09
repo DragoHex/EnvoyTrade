@@ -625,6 +625,9 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to detach from group")
 				return
 			}
+			if h.followerRegistrar != nil {
+				h.followerRegistrar.UnregisterFollower(id)
+			}
 			resp["groupId"] = nil
 			resp["masterId"] = nil
 			resp["groupName"] = nil
@@ -668,6 +671,9 @@ func (h *handlers) patchAccount(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to attach account to group")
 				return
+			}
+			if h.followerRegistrar != nil {
+				_ = h.followerRegistrar.RegisterFollower(r.Context(), id)
 			}
 			resp["groupId"] = gDetail.GroupID.String()
 			resp["groupName"] = gDetail.GroupName

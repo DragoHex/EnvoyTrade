@@ -291,7 +291,8 @@ func TestPatchAccount_AssignGroupID_Succeeds(t *testing.T) {
 			},
 		},
 	}
-	r := httpapi.NewRouter(store, &stubActionEngine{})
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
 
 	body, _ := json.Marshal(map[string]any{
 		"groupId":     groupID.String(),
@@ -311,6 +312,9 @@ func TestPatchAccount_AssignGroupID_Succeeds(t *testing.T) {
 	if link.FollowerID != follower || link.GroupID != groupID || link.MasterID != masterID || link.CloneFactor.String() != "2" {
 		t.Errorf("unexpected link: %+v", link)
 	}
+	if len(registrar.registered) != 1 || registrar.registered[0] != follower {
+		t.Errorf("expected registrar.registered called with %v, got %v", follower, registrar.registered)
+	}
 }
 
 func TestPatchAccount_DetachGroupID_Succeeds(t *testing.T) {
@@ -319,7 +323,8 @@ func TestPatchAccount_DetachGroupID_Succeeds(t *testing.T) {
 		accountRoles: map[uuid.UUID]string{follower: "follower"},
 		accounts:     []domain.Account{{ID: follower, Role: "follower"}},
 	}
-	r := httpapi.NewRouter(store, &stubActionEngine{})
+	registrar := &stubFollowerRegistrar{}
+	r := httpapi.NewRouter(store, &stubActionEngine{}, httpapi.WithFollowerRegistrar(registrar))
 
 	body, _ := json.Marshal(map[string]any{
 		"groupId": "",
@@ -335,6 +340,9 @@ func TestPatchAccount_DetachGroupID_Succeeds(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["groupId"] != nil {
 		t.Errorf("expected groupId null in response, got %v", resp["groupId"])
+	}
+	if len(registrar.unregistered) != 1 || registrar.unregistered[0] != follower {
+		t.Errorf("expected registrar.unregistered called with %v, got %v", follower, registrar.unregistered)
 	}
 }
 

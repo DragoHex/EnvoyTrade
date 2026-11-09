@@ -144,6 +144,10 @@ func (h *handlers) postGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.tickerMgr != nil {
+		_ = h.tickerMgr.StartMaster(r.Context(), masterID)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":       id.String(),
 		"name":     req.Name,
@@ -268,6 +272,10 @@ func (h *handlers) patchGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update group")
 		return
+	}
+
+	if masterIDPtr != nil && h.tickerMgr != nil {
+		_ = h.tickerMgr.StartMaster(r.Context(), *masterIDPtr)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
