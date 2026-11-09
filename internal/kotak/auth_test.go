@@ -158,6 +158,11 @@ func (m *mockRenewerStore) SetAccountAccessToken(ctx context.Context, id uuid.UU
 	m.tokensUpdated[id] = token
 	m.authStatusRecord[id] = authStatus
 	m.authErrorRecord[id] = authError
+	if authStatus == "authenticated" {
+		m.accountStatus[id] = domain.AccountStatusActive
+	} else if authStatus == "error" {
+		m.accountStatus[id] = domain.AccountStatusError
+	}
 	return nil
 }
 

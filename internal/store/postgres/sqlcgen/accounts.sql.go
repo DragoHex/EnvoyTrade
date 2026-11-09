@@ -397,7 +397,18 @@ func (q *Queries) SetAccountAPISecret(ctx context.Context, arg SetAccountAPISecr
 }
 
 const setAccountAccessToken = `-- name: SetAccountAccessToken :execrows
-UPDATE accounts SET access_token = $2, token_expires_at = $3, auth_status = $4, auth_error = $5, updated_at = now() WHERE id = $1
+UPDATE accounts
+SET access_token = $2,
+    token_expires_at = $3,
+    auth_status = $4,
+    auth_error = $5,
+    status = CASE
+        WHEN $4 = 'authenticated' THEN 'active'
+        WHEN $4 = 'error' THEN 'error'
+        ELSE status
+    END,
+    updated_at = now()
+WHERE id = $1
 `
 
 type SetAccountAccessTokenParams struct {

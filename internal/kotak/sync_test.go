@@ -54,6 +54,11 @@ func (m *mockPortfolioStore) SetAccountAccessToken(ctx context.Context, id uuid.
 	m.tokensUpdated[id] = token
 	m.authStatus[id] = authStatus
 	m.authError[id] = authError
+	if authStatus == "authenticated" {
+		m.accountStatus[id] = domain.AccountStatusActive
+	} else if authStatus == "error" {
+		m.accountStatus[id] = domain.AccountStatusError
+	}
 	if info, ok := m.authInfo[id]; ok {
 		info.AccessToken = token
 		info.TokenExpiresAt = expiresAt

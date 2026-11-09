@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -410,6 +411,100 @@ func TestTickerFactory_CreateTicker(t *testing.T) {
 		}
 		if ticker == nil {
 			t.Fatal("expected non-nil MasterTicker, got nil")
+		}
+	})
+
+	t.Run("Positive: Reconnection triggers catch-up hook only after successful reconnect", func(t *testing.T) {
+		var mu sync.Mutex
+		var activeSockets []*websocket.Conn
+		var connCount int
+		dropFirstConn := make(chan struct{})
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			connCount++
+			currentCount := connCount
+			activeSockets = append(activeSockets, conn)
+			mu.Unlock()
+
+			// Read handshake
+			_, _, _ = conn.ReadMessage()
+
+			// Send ACK
+			_ = conn.WriteJSON(map[string]string{
+				"ak":   "ok",
+				"type": "cn",
+				"msg":  "connected",
+			})
+
+			if currentCount == 1 {
+				<-dropFirstConn
+				conn.Close()
+				return
+			}
+
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					break
+				}
+			}
+		}))
+		defer server.Close()
+		defer func() {
+			mu.Lock()
+			for _, s := range activeSockets {
+				_ = s.Close()
+			}
+			mu.Unlock()
+		}()
+
+		var catchUpCalls int32
+		hookDone := make(chan struct{}, 1)
+
+		q := &mockFillQueue{}
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		ticker := ws.NewMasterTicker(masterID, "token", "sid", wsURL, q, nil, nil)
+
+		ticker.SetCatchUpHook(func(ctx context.Context) error {
+			atomic.AddInt32(&catchUpCalls, 1)
+			select {
+			case hookDone <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		ticker.Start(ctx)
+		defer ticker.Stop()
+
+		// Wait briefly after initial connect
+		time.Sleep(100 * time.Millisecond)
+
+		// On initial connect, catch-up hook must NOT be invoked
+		if calls := atomic.LoadInt32(&catchUpCalls); calls != 0 {
+			t.Fatalf("expected catchUpCalls == 0 on initial connect, got %d", calls)
+		}
+
+		// Trigger disconnect of the first connection
+		close(dropFirstConn)
+
+		// Wait for reconnection and catch-up hook invocation
+		select {
+		case <-hookDone:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for catch-up hook invocation upon reconnection")
+		}
+
+		if calls := atomic.LoadInt32(&catchUpCalls); calls != 1 {
+			t.Errorf("expected catchUpCalls == 1, got %d", calls)
 		}
 	})
 }

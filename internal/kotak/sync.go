@@ -34,10 +34,6 @@ type PortfolioStore interface {
 	ProxyIPByAddress(ctx context.Context, ipAddress string) (domain.ProxyIP, error)
 }
 
-type accountStatusSetter interface {
-	SetAccountStatus(ctx context.Context, id uuid.UUID, status domain.AccountStatus) error
-}
-
 // PortfolioSyncer orchestrates Kotak Neo account positions, holdings, and limits sync.
 type PortfolioSyncer struct {
 	Store            PortfolioStore
@@ -93,13 +89,12 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 
 	if sess == nil || sess.Token == "" {
 		authErrMsg := "Missing or expired Kotak Neo session"
+		authStatus := "unauthenticated"
 		if renewErr != nil {
 			authErrMsg = domain.SanitizeAuthError(renewErr.Error())
+			authStatus = "error"
 		}
-		_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, "unauthenticated", authErrMsg)
-		if setter, ok := s.Store.(accountStatusSetter); ok {
-			_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
-		}
+		_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, authStatus, authErrMsg)
 		if renewErr != nil {
 			return fmt.Errorf("%w: %s", domain.ErrAuthExpired, renewErr.Error())
 		}
@@ -255,9 +250,6 @@ func (s *PortfolioSyncer) SyncAccountPortfolio(ctx context.Context, accountID uu
 
 	// Mark account active and authenticated on success
 	_ = s.Store.SetAccountAccessToken(ctx, accountID, authInfo.AccessToken, authInfo.TokenExpiresAt, "authenticated", "")
-	if setter, ok := s.Store.(accountStatusSetter); ok {
-		_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusActive)
-	}
 
 	return nil
 }
@@ -281,10 +273,6 @@ func (s *PortfolioSyncer) handleSyncFailure(ctx context.Context, accountID uuid.
 		// Do not wipe access token or set account status to 'error' on transient 5xx/network/bridge errors
 		return
 	}
-	authStatus := "unauthenticated"
 	cleanMsg := domain.SanitizeAuthError(err.Error())
-	_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, authStatus, cleanMsg)
-	if setter, ok := s.Store.(accountStatusSetter); ok {
-		_ = setter.SetAccountStatus(ctx, accountID, domain.AccountStatusError)
-	}
+	_ = s.Store.SetAccountAccessToken(ctx, accountID, "", nil, "error", cleanMsg)
 }

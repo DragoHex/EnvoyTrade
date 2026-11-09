@@ -252,3 +252,55 @@ func TestStore_AccountOrders_SummaryStatusDerivedFromAccounts(t *testing.T) {
 	}
 }
 
+func TestStore_SetAccountAccessToken_SynchronizesAccountStatus(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	accID := uuid.New()
+	err := store.CreateAccount(ctx, accID, "Sync Account", "follower", "kotakneo", "KOTAK_SYNC_01", "key", "secret", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+
+	// 1. Put account into error status explicitly
+	if err := store.SetAccountStatus(ctx, accID, domain.AccountStatusError); err != nil {
+		t.Fatalf("SetAccountStatus(error): %v", err)
+	}
+
+	// Verify it is currently in error
+	accs, err := store.Accounts(ctx, []uuid.UUID{accID})
+	if err != nil || len(accs) == 0 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if accs[0].Status != "error" {
+		t.Fatalf("expected initial status error, got %s", accs[0].Status)
+	}
+
+	// 2. Calling SetAccountAccessToken with 'authenticated' MUST automatically restore accounts.status = 'active'
+	future := time.Now().Add(24 * time.Hour)
+	if err := store.SetAccountAccessToken(ctx, accID, "valid_token", &future, "authenticated", ""); err != nil {
+		t.Fatalf("SetAccountAccessToken(authenticated): %v", err)
+	}
+
+	accs, err = store.Accounts(ctx, []uuid.UUID{accID})
+	if err != nil || len(accs) == 0 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if accs[0].Status != "ok" {
+		t.Errorf("domain Account.Status = %q, want 'ok' upon SetAccountAccessToken(authenticated)", accs[0].Status)
+	}
+
+	// 3. Calling SetAccountAccessToken with 'error' MUST automatically update accounts.status = 'error'
+	if err := store.SetAccountAccessToken(ctx, accID, "", nil, "error", "auth failed"); err != nil {
+		t.Fatalf("SetAccountAccessToken(error): %v", err)
+	}
+
+	accs, err = store.Accounts(ctx, []uuid.UUID{accID})
+	if err != nil || len(accs) == 0 {
+		t.Fatalf("Accounts: %v", err)
+	}
+	if accs[0].Status != "error" {
+		t.Errorf("domain Account.Status = %q, want 'error' upon SetAccountAccessToken(error)", accs[0].Status)
+	}
+}
+
