@@ -1526,16 +1526,17 @@ func (s *Store) SwitchAccountRole(ctx context.Context, params domain.SwitchAccou
 		}
 	} else {
 		// Master -> Follower:
-		// Delete the group belonging to this master, releasing contained followers (contained accounts are NOT deleted)
-		g, err := qtx.GroupByMasterID(ctx, params.AccountID)
-		if err == nil {
-			_, err = qtx.DeleteGroupReleasingAccounts(ctx, g.ID)
-			if err != nil {
-				return SwitchAccountRoleResult{}, fmt.Errorf("delete master group releasing followers: %w", err)
-			}
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return SwitchAccountRoleResult{}, fmt.Errorf("check master group: %w", err)
+		// Check if master group has followers attached.
+		followerCount, err := qtx.CountFollowersByMasterID(ctx, params.AccountID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return SwitchAccountRoleResult{}, fmt.Errorf("check master followers: %w", err)
 		}
+		if followerCount > 0 {
+			return SwitchAccountRoleResult{}, fmt.Errorf("%w: cannot switch master to follower: group has %d followers attached; reassign group master or detach followers first", domain.ErrConflict, followerCount)
+		}
+
+		// Delete empty group belonging to this master (if any)
+		_, _ = qtx.DeleteGroupByMasterID(ctx, params.AccountID)
 
 		res.NewIP = params.IPAddress
 		rows, err := qtx.SetAccountRoleAndIP(ctx, sqlcgen.SetAccountRoleAndIPParams{

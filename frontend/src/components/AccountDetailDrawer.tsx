@@ -1019,8 +1019,7 @@ export function AccountDetailDrawer(props: {
   >
     <div class="confirm-modal-option">
       <Show when={role() === 'follower'}>
-        <p>• Group associated with this master will be <strong>deleted</strong>.</p>
-        <p>• All attached followers will be <strong>released</strong> (not deleted).</p>
+        <p>• Empty group associated with this master will be removed (must have 0 attached followers).</p>
         <p>• Account will stop streaming trade signals.</p>
         <p>• Proxy IP will be set to: <code>{ip() || 'None'}</code>.</p>
       </Show>

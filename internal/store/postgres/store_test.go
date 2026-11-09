@@ -2227,13 +2227,33 @@ func TestSwitchAccountRole_MasterToFollower_ReleasesGroupAndFollowers(t *testing
 	}
 
 	newFollowerIP := "192.168.99.10"
+
+	// 1. Attempting to switch master to follower while followers are attached must fail with ErrConflict
+	_, err := s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
+		AccountID:  master,
+		TargetRole: "follower",
+		IPAddress:  newFollowerIP,
+	})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("SwitchAccountRole with attached followers err = %v, want ErrConflict", err)
+	}
+
+	// 2. Detach followers
+	if err := s.DeleteFollowLink(ctx, f1); err != nil {
+		t.Fatalf("DeleteFollowLink f1: %v", err)
+	}
+	if err := s.DeleteFollowLink(ctx, f2); err != nil {
+		t.Fatalf("DeleteFollowLink f2: %v", err)
+	}
+
+	// 3. Now switching master to follower succeeds and removes the empty group
 	res, err := s.SwitchAccountRole(ctx, postgres.SwitchAccountRoleParams{
 		AccountID:  master,
 		TargetRole: "follower",
 		IPAddress:  newFollowerIP,
 	})
 	if err != nil {
-		t.Fatalf("SwitchAccountRole master to follower failed: %v", err)
+		t.Fatalf("SwitchAccountRole master to follower failed after detaching followers: %v", err)
 	}
 	if res.NewRole != "follower" || res.NewIP != newFollowerIP {
 		t.Errorf("res = %+v, want follower with IP %s", res, newFollowerIP)

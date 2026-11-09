@@ -2023,6 +2023,22 @@ func TestSwitchAccountRole_ValidationErrors(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Errorf("account not found: status = %d, want 404", w.Code)
 	}
+
+	// 8. Conflict (e.g. master has followers attached)
+	store.accounts = []domain.Account{
+		{ID: accID, Role: "master", Broker: "kite", IPAddress: "192.168.1.100"},
+	}
+	store.proxyIPs = []domain.ProxyIP{
+		{IPAddress: "192.168.1.100", WhitelistedBrokers: "kite"},
+	}
+	store.switchRoleErr = domain.ErrConflict
+	body, _ = json.Marshal(map[string]any{"targetRole": "follower"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+accID.String()+"/switch-role", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("conflict error: status = %d, want 409", w.Code)
+	}
 }
 
 
